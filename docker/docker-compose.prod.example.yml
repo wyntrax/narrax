@@ -1,0 +1,75 @@
+# An EXAMPLE for a single host. Copy it, read every line, and adapt it. It was not run when it was written.
+# Put TLS and a reverse proxy in front of the API. Never expose Postgres or Redis to the internet.
+#
+#   1. cp .env.example .env     (fill it in; PRIVY_*, HELIUS_*, AI_*, JUPITER_API_KEY, CORS_ORIGINS, HSTS=true, TRUST_PROXY=true)
+#   2. set POSTGRES_PASSWORD in the shell or in a .env next to this file
+#   3. docker compose -f docker/docker-compose.prod.example.yml up -d --build
+# The migrate service runs first and must finish before the api, worker and executor start.
+
+name: narra
+
+x-app: &app
+  build: { context: .., dockerfile: docker/Dockerfile }
+  env_file: ../.env            # secrets live here, on the host, and are not part of the image
+  environment:
+    DATABASE_URL: postgresql://narra:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/narra
+    REDIS_URL: redis://redis:6379
+    NODE_ENV: production
+  restart: unless-stopped
+  read_only: true              # the app writes nothing to disk
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+
+services:
+  postgres:
+    image: postgres:16
+    environment: { POSTGRES_USER: narra, POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}", POSTGRES_DB: narra }
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U narra -d narra"], interval: 5s, timeout: 3s, retries: 20 }
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    # BullMQ needs noeviction: an evicted job key is a lost job. Append-only keeps queues across a restart.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes: [redisdata:/data]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 20 }
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["npx", "prisma", "migrate", "deploy", "--schema", "packages/database/prisma/schema.prisma"]
+    depends_on: { postgres: { condition: service_healthy } }
+
+  api:
+    <<: *app
+    command: ["npx", "tsx", "apps/api/src/server.ts"]
+    ports: ["127.0.0.1:4000:4000"]   # the reverse proxy on this host forwards to it
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.API_PORT||4000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker:
+    <<: *app
+    command: ["npx", "tsx", "workers/pipeline/src/main.ts"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  # Consumes the execution queue: paper fills, shadow logs, confirmations, and (B5a) dry runs. The pipeline worker does NOT.
+  # Without this service those orders wait in the queue. It cannot sign or send, and refuses to start if a signing variable is set.
+  executor:
+    <<: *app
+    command: ["npx", "tsx", "workers/executor/src/main.ts"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+volumes: { pgdata: {}, redisdata: {} }

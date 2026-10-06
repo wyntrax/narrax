@@ -1,0 +1,1006 @@
+// NARRA data model. Money and prices use Decimal. Scores and ratios use Float.
+// Private keys are never stored. Wallets hold public addresses and delegated-signing references only.
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TradingMode {
+  PAPER
+  SHADOW
+  SEMI_AUTO
+  AUTO
+}
+
+enum DecisionAction {
+  BUY
+  WATCH
+  HOLD
+  REDUCE
+  SELL
+  IGNORE
+}
+
+enum NarrativeStage {
+  SEED
+  EMERGING
+  ACCELERATING
+  MAINSTREAM
+  SATURATED
+  DECAYING
+  DEAD
+}
+
+enum WalletStyle {
+  EARLY_MOMENTUM
+  MEME_EARLY
+  SWING
+  SCALPER
+  ROTATION
+  LONG_HOLD
+  NARRATIVE_LEADER
+  FOLLOWER
+  UNKNOWN
+}
+
+enum TokenRelation {
+  OG
+  PRIMARY
+  DERIVATIVE
+  MEME_EXPRESSION
+  UNRELATED
+  SUSPICIOUS
+}
+
+enum CreatorRole {
+  ORIGINATOR
+  EARLY_AMPLIFIER
+  FOLLOWER
+}
+
+enum Confidence {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum AlertPriority {
+  INFO
+  WATCH
+  IMPORTANT
+  CRITICAL
+}
+
+enum PositionStatus {
+  OPEN
+  CLOSED
+}
+
+enum TradeSide {
+  BUY
+  SELL
+}
+
+enum TradeMode {
+  MANUAL
+  AI_SEMI_AUTO
+  AI_AUTO
+  AI_PAPER
+  TP
+  SL
+  TRAILING
+}
+
+enum OrderStatus {
+  PENDING
+  QUEUED
+  SUBMITTED
+  CONFIRMED
+  FAILED
+  CANCELLED
+}
+
+enum RiskRoute {
+  REJECT
+  NO_TRADE
+  LOG_ONLY
+  SIMULATE
+  AWAIT_CONFIRMATION
+  EXECUTE
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+enum ProposalKind {
+  PAUSE_AGENT
+  TIGHTEN_LIMIT
+}
+enum ProposalStatus {
+  PENDING
+  APPLIED
+  REJECTED
+  EXPIRED
+}
+enum ConfirmationKind {
+  ENTRY
+  EXIT
+}
+
+enum ConfirmationStatus {
+  PENDING
+  CLAIMED
+  REJECTED
+  EXPIRED
+}
+
+enum OutcomeLabel {
+  WIN
+  LOSS
+  FLAT
+  UNKNOWN
+}
+
+// ---------- Users and wallets ----------
+
+model User {
+  id             String                @id @default(cuid())
+  privyUserId    String                @unique
+  email          String?
+  mode           TradingMode           @default(SHADOW)
+  interests      String[]
+  isAdmin        Boolean               @default(false)
+  createdAt      DateTime              @default(now())
+  wallets        Wallet[]
+  riskProfile    RiskProfile?
+  permission     TradingPermission?
+  trackedWallets TrackedWallet[]
+  positions      Position[]
+  trades         Trade[]
+  orders         Order[]
+  alerts         Alert[]
+  notifications  Notification[]
+  agentDecisions AgentDecision[]
+  auditLogs      AuditLog[]
+  snapshots      PortfolioSnapshot[]
+  confirmations  PendingConfirmation[]
+  chats         ChatConversation[]
+  proposals     ChatProposal[]
+  settings       UserSettings?
+  dryRuns        DryRun[]
+}
+
+/// Per-user preferences. A user without a row gets the defaults named in packages/shared (alerts.ts).
+model UserSettings {
+  id               String        @id @default(cuid())
+  userId           String        @unique
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName      String?
+  /// IANA time zone name, validated at the API.
+  timezone         String?
+  /// DARK, LIGHT or SYSTEM
+  theme            String        @default("DARK")
+  /// COMFORTABLE or COMPACT
+  density          String        @default("COMFORTABLE")
+  reducedMotion    Boolean       @default(false)
+  /// Global alerts below this priority do not become notifications. Alerts that belong to the user are always delivered.
+  minAlertPriority AlertPriority @default(WATCH)
+  mutedAlertKinds  String[]
+  updatedAt        DateTime      @updatedAt
+}
+
+model Wallet {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  address       String   @unique
+  kind          String // MAIN | TRADING
+  privyWalletId String? // reference to an embedded wallet held by Privy, never a key
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+}
+
+model TradingPermission {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiTradingEnabled Boolean   @default(false)
+  agentPaused      Boolean   @default(false)
+  delegatedUntil   DateTime?
+  revokedAt        DateTime?
+  updatedAt        DateTime  @updatedAt
+}
+
+model RiskProfile {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preset                String   @default("BALANCED") // CONSERVATIVE | BALANCED | AGGRESSIVE | CUSTOM
+  maxPerTradeSol        Decimal  @default(0.25)
+  maxDailyAllocationSol Decimal  @default(1)
+  maxTokenExposurePct   Float    @default(15)
+  maxOpenPositions      Int      @default(5)
+  maxDailyLossPct       Float    @default(8)
+  minConfidence         Float    @default(0.75)
+  updatedAt             DateTime @updatedAt
+}
+
+// ---------- Smart money ----------
+
+model TrackedWallet {
+  id        String               @id @default(cuid())
+  userId    String?
+  user      User?                @relation(fields: [userId], references: [id])
+  address   String               @unique
+  label     String?
+  /// MANUAL, IMPORT or DISCOVERED. Where the wallet came from.
+  source    String               @default("MANUAL")
+  /// Inactive wallets are removed from webhook tracking and ignored by scoring. History is kept.
+  active    Boolean              @default(true)
+  createdAt DateTime             @default(now())
+  funding   WalletFunding?
+  profile   WalletProfile?
+  metrics   WalletMetric[]
+  trades    WalletTrade[]
+  clusterId String?
+  cluster   WalletCluster?       @relation(fields: [clusterId], references: [id])
+  outgoing  WalletRelationship[] @relation("from")
+  incoming  WalletRelationship[] @relation("to")
+  signals   SmartMoneySignal[]
+}
+
+/// First meaningful SOL funding of a tracked wallet. status is FOUND, NOT_FOUND (no qualifying inbound transfer) or INCOMPLETE (history too long to reach the start).
+model WalletFunding {
+  id        String        @id @default(cuid())
+  walletId  String        @unique
+  wallet    TrackedWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  funder    String?
+  lamports  BigInt?
+  signature String?
+  fundedAt  DateTime?
+  status    String
+  checkedAt DateTime      @default(now())
+}
+
+/// A wallet suggested by discovery. Nothing is tracked until an admin approves it.
+model WalletCandidate {
+  id           String    @id @default(cuid())
+  address      String    @unique
+  score        Float
+  winnerTokens Int
+  evidence     Json?
+  /// PENDING, APPROVED or REJECTED.
+  status       String    @default("PENDING")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  reviewedAt   DateTime?
+  reviewedBy   String?
+
+  @@index([status, score])
+}
+
+/// The first buyers of a young token, captured while its history is still short enough to reach.
+model TokenEarlyBuyers {
+  id        String   @id @default(cuid())
+  tokenId   String   @unique
+  token     Token    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  /// false when the history was too long to reach the start; such rows are never used for discovery.
+  complete  Boolean
+  buyers    Json
+  scannedAt DateTime @default(now())
+}
+
+model WalletProfile {
+  id                 String        @id @default(cuid())
+  walletId           String        @unique
+  wallet             TrackedWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  score              Float
+  leaderScore        Float
+  style              WalletStyle   @default(UNKNOWN)
+  typicalEntryMcMin  Decimal?
+  typicalEntryMcMax  Decimal?
+  medianHoldSeconds  Int?
+  strongestNarrative String?
+  bestPattern        String?
+  weakPattern        String?
+  updatedAt          DateTime      @updatedAt
+}
+
+model WalletMetric {
+  id           String        @id @default(cuid())
+  walletId     String
+  wallet       TrackedWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  window       String // e.g. 30D
+  winRate      Float
+  pnlSol       Decimal       @default(0)
+  pnlUsd       Decimal?
+  closedTrades Int           @default(0)
+  avgRoi       Float
+  medianRoi    Float
+  maxDrawdown  Float
+  computedAt   DateTime      @default(now())
+
+  @@index([walletId, window, computedAt])
+}
+
+model WalletTrade {
+  id           String        @id @default(cuid())
+  walletId     String
+  wallet       TrackedWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  tokenId      String
+  token        Token         @relation(fields: [tokenId], references: [id])
+  side         TradeSide
+  amountSol    Decimal
+  tokenAmount  Decimal? // token units traded, needed for cost-basis accounting
+  amountUsd    Decimal?
+  marketCapUsd Decimal?
+  signature    String        @unique
+  at           DateTime
+
+  @@index([tokenId, at])
+  @@index([walletId, at])
+}
+
+model WalletCluster {
+  id         String          @id @default(cuid())
+  label      String?
+  confidence Confidence
+  createdAt  DateTime        @default(now())
+  wallets    TrackedWallet[]
+}
+
+model WalletRelationship {
+  id         String        @id @default(cuid())
+  fromId     String
+  from       TrackedWallet @relation("from", fields: [fromId], references: [id], onDelete: Cascade)
+  toId       String
+  to         TrackedWallet @relation("to", fields: [toId], references: [id], onDelete: Cascade)
+  kind       String // FUNDING | TIMING | TRANSFER
+  confidence Confidence
+  evidence   Json?
+
+  @@unique([fromId, toId, kind])
+}
+
+// ---------- Creators and narratives ----------
+
+model Creator {
+  id         String             @id @default(cuid())
+  platform   String
+  handle     String
+  createdAt  DateTime           @default(now())
+  metrics    CreatorMetric[]
+  narratives NarrativeCreator[]
+
+  @@unique([platform, handle])
+}
+
+model CreatorMetric {
+  id                 String   @id @default(cuid())
+  creatorId          String
+  creator            Creator  @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  creatorScore       Float
+  leadScore          Float
+  amplificationScore Float
+  hitRate            Float
+  medianLeadSeconds  Int?
+  computedAt         DateTime @default(now())
+}
+
+model Narrative {
+  id              String                   @id @default(cuid())
+  name            String
+  slug            String                   @unique
+  summary         String?
+  stage           NarrativeStage           @default(SEED)
+  score           Float                    @default(0)
+  velocity        Float                    @default(0)
+  acceleration    Float                    @default(0)
+  organicScore    Float                    @default(0)
+  saturationRisk  Float                    @default(0)
+  firstDetectedAt DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  metrics         NarrativeMetric[]
+  sources         NarrativeSource[]
+  mentions        NarrativeMention[]
+  creators        NarrativeCreator[]
+  tokens          NarrativeTokenRelation[]
+  opportunities   Opportunity[]
+}
+
+model NarrativeMetric {
+  id                    String    @id @default(cuid())
+  narrativeId           String
+  narrative             Narrative @relation(fields: [narrativeId], references: [id], onDelete: Cascade)
+  score                 Float
+  velocity              Float
+  acceleration          Float
+  organicScore          Float
+  manipulationRisk      Float
+  mentionVelocity       Float
+  creatorVelocity       Float
+  engagementVelocity    Float
+  smartMoneyCorrelation Float?
+  at                    DateTime  @default(now())
+
+  @@index([narrativeId, at])
+  @@index([at])
+}
+
+model NarrativeSource {
+  id          String    @id @default(cuid())
+  narrativeId String
+  narrative   Narrative @relation(fields: [narrativeId], references: [id], onDelete: Cascade)
+  provider    String
+  externalRef String?
+
+  @@unique([narrativeId, provider])
+  @@index([narrativeId])
+}
+
+model NarrativeMention {
+  id             String    @id @default(cuid())
+  narrativeId    String
+  narrative      Narrative @relation(fields: [narrativeId], references: [id], onDelete: Cascade)
+  platform       String
+  creatorId      String?
+  externalId     String // the provider's id, so re-ingesting never duplicates a mention
+  textHash       String // a hash only. Raw text is never stored.
+  simhash        String // 64-bit similarity hash (hex), used to spot copy-pasted posts
+  creatorAgeDays Int?
+  engagement     Int       @default(0)
+  at             DateTime
+
+  @@unique([narrativeId, platform, externalId])
+  @@index([narrativeId, at])
+}
+
+model NarrativeCreator {
+  id          String      @id @default(cuid())
+  narrativeId String
+  narrative   Narrative   @relation(fields: [narrativeId], references: [id], onDelete: Cascade)
+  creatorId   String
+  creator     Creator     @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  role        CreatorRole
+
+  @@unique([narrativeId, creatorId])
+}
+
+model NarrativeTokenRelation {
+  id          String        @id @default(cuid())
+  narrativeId String
+  narrative   Narrative     @relation(fields: [narrativeId], references: [id], onDelete: Cascade)
+  tokenId     String
+  token       Token         @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  relation    TokenRelation
+  ogScore     Float
+  matchScore  Float
+  confidence  Float
+
+  @@unique([narrativeId, tokenId])
+}
+
+// ---------- Tokens ----------
+
+model Token {
+  id               String                   @id @default(cuid())
+  mint             String                   @unique
+  symbol           String
+  name             String
+  createdOnChainAt DateTime?
+  deployer         String?
+  blacklisted      Boolean                  @default(false)
+  /// Why an admin blacklisted it, when, and who. Cleared when it is un-blacklisted (the change itself stays in the audit log).
+  blacklistReason  String?
+  blacklistedAt    DateTime?
+  blacklistedBy    String?
+  metrics          TokenMetric[]
+  holders          TokenHolderMetric[]
+  risk             TokenRiskMetric[]
+  narratives       NarrativeTokenRelation[]
+  walletTrades     WalletTrade[]
+  smartSignals     SmartMoneySignal[]
+  consensus        ConsensusSignal[]
+  opportunities    Opportunity[]
+  positions        Position[]
+  orders           Order[]
+  earlyBuyers      TokenEarlyBuyers?
+
+  @@index([symbol])
+}
+
+model TokenMetric {
+  id           String   @id @default(cuid())
+  tokenId      String
+  token        Token    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  priceUsd     Decimal
+  marketCapUsd Decimal
+  liquidityUsd Decimal
+  volume24hUsd Decimal
+  at           DateTime @default(now())
+
+  @@index([tokenId, at])
+}
+
+model TokenHolderMetric {
+  id                 String   @id @default(cuid())
+  tokenId            String
+  token              Token    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  holders            Int
+  top10Pct           Float
+  devHoldingPct      Float?
+  smartWalletHolders Int      @default(0)
+  at                 DateTime @default(now())
+
+  @@index([tokenId, at])
+}
+
+model TokenRiskMetric {
+  id        String   @id @default(cuid())
+  tokenId   String
+  token     Token    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  riskScore Float
+  flags     String[]
+  at        DateTime @default(now())
+
+  @@index([tokenId, at])
+}
+
+model SmartMoneySignal {
+  id        String        @id @default(cuid())
+  tokenId   String
+  token     Token         @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  walletId  String
+  wallet    TrackedWallet @relation(fields: [walletId], references: [id])
+  side      TradeSide
+  amountUsd Decimal
+  at        DateTime
+
+  @@index([tokenId, at])
+}
+
+model ConsensusSignal {
+  id                  String   @id @default(cuid())
+  tokenId             String
+  token               Token    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  score               Float
+  walletCount         Int
+  independentEntities Int
+  leaderCount         Int
+  netFlowSol          Decimal  @default(0)
+  netFlowUsd          Decimal?
+  timingConcentration Float    @default(0)
+  at                  DateTime @default(now())
+
+  @@index([tokenId, at])
+  @@index([at])
+}
+
+// ---------- Opportunities, AI, risk, execution ----------
+
+model Opportunity {
+  id              String          @id @default(cuid())
+  tokenId         String
+  token           Token           @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  narrativeId     String?
+  narrative       Narrative?      @relation(fields: [narrativeId], references: [id])
+  score           Float
+  narrativeScore  Float
+  smartMoneyScore Float
+  liquidityScore  Float
+  momentumScore   Float
+  ogScore         Float
+  riskScore       Float
+  attentionGrowth Float?
+  priceGrowth     Float?
+  createdAt       DateTime        @default(now())
+  analyses        AgentAnalysis[]
+
+  @@index([tokenId, createdAt])
+  @@index([createdAt])
+}
+
+model AgentAnalysis {
+  id                 String          @id @default(cuid())
+  opportunityId      String
+  opportunity        Opportunity     @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  fastClassification String?
+  fastScore          Float?
+  bullCase           Json?
+  bearCase           Json?
+  riskCase           Json?
+  model              String
+  inputTokens        Int?
+  outputTokens       Int?
+  createdAt          DateTime        @default(now())
+  decisions          AgentDecision[]
+}
+
+model AgentDecision {
+  id            String           @id @default(cuid())
+  analysisId    String
+  analysis      AgentAnalysis    @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  userId        String?
+  user          User?            @relation(fields: [userId], references: [id])
+  action        DecisionAction
+  confidence    Float
+  payload       Json // the validated AgentDecision
+  createdAt     DateTime         @default(now())
+  riskDecisions RiskDecision[]
+  outcome       DecisionOutcome?
+  orders        Order[]
+
+  @@index([userId, createdAt])
+}
+
+model RiskDecision {
+  id             String         @id @default(cuid())
+  /// Null for exits, which come from a position evaluation and have no AgentDecision.
+  decisionId     String?
+  decision       AgentDecision? @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  /// One row per user and order, so many users can act on one decision. Null on rows written before B4.
+  userId         String?
+  idempotencyKey String?        @unique
+  approved       Boolean
+  route          RiskRoute
+  sizeSol        Decimal
+  violations     Json
+  adjustments    Json
+  createdAt      DateTime       @default(now())
+
+  @@index([decisionId])
+  @@index([userId, createdAt])
+}
+
+model Position {
+  id              String               @id @default(cuid())
+  userId          String
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenId         String
+  token           Token                @relation(fields: [tokenId], references: [id])
+  status          PositionStatus       @default(OPEN)
+  mode            TradingMode
+  entryPriceUsd   Decimal
+  sizeSol         Decimal
+  entryContext    Json // narrative score, smart money score and price at entry
+  /// True for paper positions. They never touch a wallet.
+  simulated       Boolean              @default(false)
+  /// Remaining token base units. Null on rows that predate B4: exits skip those (fail closed).
+  baseUnits       Decimal?             @db.Decimal(40, 0)
+  /// SOL spent at entry, excluding fees. sizeSol is the remaining cost basis after partial exits.
+  entrySizeSol    Decimal?
+  /// Signal codes that already caused a REDUCE, so the same condition does not reduce again.
+  reducedForCodes String[]
+  reduceCount     Int                  @default(0)
+  /// userId:tokenId while OPEN, null once closed. The unique index allows one open position per token per user.
+  openKey         String?              @unique
+  openedAt        DateTime             @default(now())
+  closedAt        DateTime?
+  trades          Trade[]
+  evaluations     PositionEvaluation[]
+  exits           PositionExit[]
+
+  @@index([userId, status])
+}
+
+/// One reading of an open position by the monitor. Written when the result changes and at least hourly.
+/// It is a recommendation only: nothing here places an order.
+model PositionEvaluation {
+  id          String         @id @default(cuid())
+  positionId  String
+  position    Position       @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  action      DecisionAction
+  /// Share of the position to sell: 0 for HOLD, 50 for REDUCE, 100 for SELL.
+  fractionPct Int
+  signals     Json
+  /// Checks that could not run, so a quiet reading is never mistaken for a clean one.
+  unavailable Json
+  /// True when there was no fresh price and price rules did not run.
+  blind       Boolean
+  pnlPct      Float?
+  priceUsd    Decimal?
+  /// AI review input and outcome, when one ran.
+  review      Json?
+  /// Tokens the review used, counted against the daily AI budget.
+  aiTokens    Int            @default(0)
+  createdAt   DateTime       @default(now())
+
+  @@index([positionId, createdAt])
+  @@index([createdAt])
+}
+
+model Order {
+  id             String             @id @default(cuid())
+  userId         String
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  decisionId     String?
+  decision       AgentDecision?     @relation(fields: [decisionId], references: [id])
+  idempotencyKey String             @unique
+  tokenId        String
+  token          Token              @relation(fields: [tokenId], references: [id])
+  side           TradeSide
+  mode           TradeMode
+  status         OrderStatus        @default(PENDING)
+  sizeSol        Decimal
+  simulated      Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+  attempts       ExecutionAttempt[]
+  trade          Trade?
+
+  @@index([userId, tokenId, createdAt])
+}
+
+model ExecutionAttempt {
+  id             String   @id @default(cuid())
+  orderId        String
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  quote          Json
+  priceImpactPct Float?
+  slippageBps    Float?
+  signature      String?
+  error          String?
+  createdAt      DateTime @default(now())
+}
+
+model Trade {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderId          String    @unique
+  order            Order     @relation(fields: [orderId], references: [id])
+  positionId       String?
+  position         Position? @relation(fields: [positionId], references: [id])
+  side             TradeSide
+  mode             TradeMode
+  reason           String
+  expectedPriceUsd Decimal
+  actualPriceUsd   Decimal
+  slippageBps      Float
+  realizedPnlSol   Decimal?
+  simulated        Boolean   @default(false)
+  /// SOL moved by the swap: spent on a buy, received on a sell. Excludes fees.
+  amountSol        Decimal?
+  feeSol           Decimal?
+  baseUnits        Decimal?  @db.Decimal(40, 0)
+  signature        String    @unique
+  executedAt       DateTime  @default(now())
+
+  @@index([userId, executedAt])
+  @@index([executedAt])
+}
+
+model DecisionOutcome {
+  id              String        @id @default(cuid())
+  decisionId      String        @unique
+  decision        AgentDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  /// Decided on the 24h price return, before costs. UNKNOWN until measurable, and when no price exists near the 24h mark.
+  label           OutcomeLabel  @default(UNKNOWN)
+  returnPct1h     Float?
+  returnPct24h    Float?
+  /// Seconds from the decision to the highest price in the 24h window, set only when a gain followed.
+  leadTimeSeconds Int?
+  /// Price used as the entry: the latest stored price at or before the decision, no older than 15 minutes.
+  entryPriceUsd   Float?
+  maxGainPct      Float?
+  maxDrawdownPct  Float?
+  /// False while the 24h window is still open. The outcome job keeps re-measuring until this is true.
+  isFinal         Boolean       @default(false)
+  /// NO_ENTRY_PRICE, NO_HORIZON_PRICE or NOT_YET when the label is UNKNOWN.
+  unknownReason   String?
+  measuredAt      DateTime      @default(now())
+  @@index([isFinal, measuredAt])
+}
+
+// ---------- Alerts, settings, audit ----------
+
+model Alert {
+  id            String         @id @default(cuid())
+  userId        String?
+  user          User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind          String
+  priority      AlertPriority
+  title         String
+  body          String
+  refType       String?
+  refId         String?
+  createdAt     DateTime       @default(now())
+  /// Set once the dispatcher has turned the alert into notifications and published it. Null means not yet handled.
+  dispatchedAt  DateTime?
+  notifications Notification[]
+
+  @@index([userId, createdAt])
+  @@index([dispatchedAt, createdAt])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  alertId   String
+  alert     Alert     @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, alertId])
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@index([alertId])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model PortfolioSnapshot {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  totalValueSol Decimal
+  /// Paper and real snapshots are kept apart, so paper drawdown never counts against a real wallet.
+  simulated     Boolean  @default(false)
+  at            DateTime @default(now())
+
+  @@index([userId, at])
+}
+
+model PendingConfirmation {
+  id             String             @id @default(cuid())
+  userId         String
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The key of the job that asked for confirmation.
+  idempotencyKey String             @unique
+  kind           ConfirmationKind
+  status         ConfirmationStatus @default(PENDING)
+  mint           String
+  decisionId     String?
+  positionId     String?
+  evaluationId   String?
+  /// The validated ExecutionJob. Never shown to the user as raw JSON.
+  job            Json
+  sizeSol        Decimal
+  exitFraction   Float              @default(0)
+  /// Price impact, slippage and amounts from the quote that was current when the confirmation was asked for.
+  quote          Json
+  /// What happened after the user confirmed, for example execution_disabled or rejected.
+  result         String?
+  createdAt      DateTime           @default(now())
+  expiresAt      DateTime
+  claimedAt      DateTime?
+  resolvedAt     DateTime?
+
+  @@index([userId, status, expiresAt])
+  @@index([status, expiresAt])
+  @@index([createdAt])
+}
+
+model PositionExit {
+  id            String         @id @default(cuid())
+  positionId    String
+  position      Position       @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  /// The PositionEvaluation this exit acts on. One row per evaluation.
+  evaluationId  String         @unique
+  action        DecisionAction
+  fractionPct   Int
+  signalCodes   String[]
+  attempts      Int            @default(1)
+  /// queued, filled, logged, awaiting_confirmation, rejected, quote_failed, quote_stale, expired, error
+  outcome       String         @default("queued")
+  lastAttemptAt DateTime       @default(now())
+  createdAt     DateTime       @default(now())
+
+  @@index([positionId, createdAt])
+}
+
+/// A saved backtest. The report is the full structured result: see packages/analytics.
+model BacktestRun {
+  id        String   @id @default(cuid())
+  kind      String
+  params    Json
+  report    Json
+  createdAt DateTime @default(now())
+  @@index([kind, createdAt])
+}
+
+/// A chat with the agent. The agent can read data and propose caution. It cannot trade.
+model ChatConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  messages  ChatMessage[]
+  proposals ChatProposal[]
+  @@index([userId, updatedAt])
+}
+
+/// Only what the user typed and what the agent finally said, both sanitized text. Tool results are never stored,
+/// so text from the internet cannot be carried into a later turn through history.
+model ChatMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  role           ChatRole
+  content        String
+  /// Tokens the model used to produce an ASSISTANT message. Counted against the chat budgets, not the pipeline's.
+  inputTokens    Int      @default(0)
+  outputTokens   Int      @default(0)
+  /// The model that produced an ASSISTANT message, for cost reporting.
+  model          String?
+  /// Which tools ran and why the turn stopped. Names and counts only.
+  meta           Json?
+  createdAt      DateTime @default(now())
+  @@index([conversationId, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// Something the agent suggested that only the user can apply, by an explicit request of their own.
+/// It can only add caution: pause the agent, or make a limit stricter. Applying re-checks everything.
+model ChatProposal {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId String?
+  conversation   ChatConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  kind           ProposalKind
+  field          String?
+  fromValue      Float?
+  value          Float?
+  /// Written by the model, so sanitized and shown as plain text only.
+  reason         String
+  status         ProposalStatus @default(PENDING)
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+  resolvedAt     DateTime?
+  @@index([userId, status, expiresAt])
+}
+
+/// B5a. What the executor WOULD have sent for an AUTO or confirmed order. Nothing was signed or broadcast.
+/// One row per idempotency key, so a redelivered job is recorded once. Holds a hash and a decoded summary, never transaction bytes.
+model DryRun {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  idempotencyKey String   @unique
+  confirmationId String?
+  side           TradeSide
+  mint           String
+  /// SOL to spend for an entry. For an exit, the SOL the quote expects to return.
+  sizeSol        Decimal?
+  /// ACCEPTED, REJECTED or ERROR (a network or builder failure, so no verdict)
+  outcome        String
+  /// [{ code, message }] for every check that failed, empty when ACCEPTED
+  reasons        Json
+  /// Decoded transaction: version, fee payer, signers, each instruction by program and kind, compute and fee numbers
+  summary        Json
+  /// What the simulation said the wallet and token accounts would do
+  simulation     Json?
+  /// sha256 of the transaction message, so a reviewer can tell two builds apart
+  messageHash    String?
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([outcome, createdAt])
+}

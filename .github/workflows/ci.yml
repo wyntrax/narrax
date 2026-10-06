@@ -1,0 +1,67 @@
+# Runs on every push and pull request. It needs a real Postgres and Redis, because the integration tests are the ones that matter,
+# and it fails if ANY test is skipped. Written without being able to run GitHub Actions: the first run may need small fixes.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: narra
+          POSTGRES_PASSWORD: narra
+          POSTGRES_DB: narra
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U narra -d narra" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://narra:narra@localhost:5432/narra
+      REDIS_URL: redis://localhost:6379
+      PGPASSWORD: narra
+      PRISMA_SCHEMA: packages/database/prisma/schema.prisma
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema "$PRISMA_SCHEMA"
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Apply every migration to the test database
+        run: npx prisma migrate deploy --schema "$PRISMA_SCHEMA"
+      - name: Migrations match the schema (no drift)
+        run: |
+          psql -h localhost -U narra -d postgres -c 'CREATE DATABASE shadow'
+          npx prisma migrate diff \
+            --from-migrations packages/database/prisma/migrations \
+            --to-schema-datamodel "$PRISMA_SCHEMA" \
+            --shadow-database-url postgresql://narra:narra@localhost:5432/shadow \
+            --exit-code
+      - name: Tests
+        run: npx vitest run --reporter=json --outputFile=vitest-results.json
+      - name: No failures and no skips
+        if: always()
+        run: node scripts/check-test-results.mjs vitest-results.json
+      - name: Dependency audit (information only)
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high

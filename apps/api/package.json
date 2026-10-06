@@ -1,0 +1,31 @@
+{
+  "name": "@narra/api",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/app.ts",
+  "dependencies": {
+    "@fastify/cors": "^10.1.0",
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/rate-limit": "^10.0.0",
+    "@fastify/websocket": "^11.3.2",
+    "@narra/agent": "*",
+    "@narra/ai": "*",
+    "@narra/analytics": "*",
+    "@narra/database": "*",
+    "@narra/narrative": "*",
+    "@narra/queue": "*",
+    "@narra/realtime": "*",
+    "@narra/risk": "*",
+    "@narra/shared": "*",
+    "@narra/solana": "*",
+    "@narra/trading": "*",
+    "@narra/worker-pipeline": "*",
+    "fastify": "^5.0.0",
+    "ioredis": "^5.11.1",
+    "jose": "^5.9.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  }
+}

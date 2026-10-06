@@ -1,0 +1,48 @@
+# Local environment and credentials (only the public template is tracked).
+.env
+.env.*
+!.env.example
+*.pem
+.b5a-test-key.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+*service-account*.json
+secrets/
+.secrets/
+
+# Dependencies and generated outputs.
+node_modules/
+dist/
+build/
+out/
+.next/
+.turbo/
+coverage/
+*.tsbuildinfo
+*.log
+vitest-results*.json
+
+# Local databases, backups, dumps, and exports. Schema migrations are source.
+backups/
+dumps/
+exports/
+*.dump
+*.backup
+*.bak
+*.db
+*.sqlite
+*.sqlite3
+*.sql
+!packages/database/prisma/migrations/**/migration.sql
+*.sql.gz
+*.sql.zip
+*.dump.gz
+*.csv
+
+# Editor and OS metadata.
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

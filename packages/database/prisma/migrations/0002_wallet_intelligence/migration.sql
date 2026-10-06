@@ -1,0 +1,14 @@
+
+-- AlterTable
+ALTER TABLE "WalletMetric" ADD COLUMN     "closedTrades" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "pnlSol" DECIMAL(65,30) NOT NULL DEFAULT 0,
+ALTER COLUMN "pnlUsd" DROP NOT NULL;
+
+-- AlterTable
+ALTER TABLE "WalletTrade" ADD COLUMN     "tokenAmount" DECIMAL(65,30);
+
+-- AlterTable
+ALTER TABLE "ConsensusSignal" ADD COLUMN     "netFlowSol" DECIMAL(65,30) NOT NULL DEFAULT 0,
+ADD COLUMN     "timingConcentration" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ALTER COLUMN "netFlowUsd" DROP NOT NULL;
+

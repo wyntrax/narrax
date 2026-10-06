@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NARRA Overview</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#08090B;--s1:#0D0F12;--s2:#12151A;--s3:#171A20;--bd:rgba(255,255,255,.08);--tx:#F5F7FA;--tx2:#A4A9B3;--tx3:#6E747F;--pos:#6BE675;--neg:#FF6B6B;--warn:#F6C85F;--ac:#B8FF4F;--ac2:#78E8FF;--acink:#0B1200;
+--r:6px;--display:'Rajdhani','Barlow Condensed',system-ui,sans-serif;--body:'Barlow','Inter',system-ui,sans-serif;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#F6F7F9;--s1:#FFFFFF;--s2:#EEF0F3;--s3:#E6E9ED;--bd:rgba(10,14,20,.1);--tx:#0E1116;--tx2:#4A505B;--tx3:#7B818C;--pos:#178A2B;--neg:#C93B3B;--warn:#9A6B00;--ac:#3F6B00;--ac2:#0B7A94;--acink:#fff}}
+:root[data-theme="light"]{--bg:#F6F7F9;--s1:#FFFFFF;--s2:#EEF0F3;--s3:#E6E9ED;--bd:rgba(10,14,20,.1);--tx:#0E1116;--tx2:#4A505B;--tx3:#7B818C;--pos:#178A2B;--neg:#C93B3B;--warn:#9A6B00;--ac:#3F6B00;--ac2:#0B7A94;--acink:#fff}
+*{box-sizing:border-box;margin:0}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%}
+body{background:var(--bg);color:var(--tx);font:14px/1.45 var(--body);font-variant-numeric:tabular-nums;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--ac2);outline-offset:2px}
+.app{display:grid;grid-template-columns:200px 1fr 300px;grid-template-rows:auto 1fr;height:100%}
+.app.sb-c{grid-template-columns:56px 1fr 300px}.app.ag-c{grid-template-columns:200px 1fr 0}.app.sb-c.ag-c{grid-template-columns:56px 1fr 0}
+.bar{grid-column:1/-1;display:flex;align-items:center;gap:22px;padding:0 16px;height:40px;border-bottom:1px solid var(--bd);background:var(--s1);overflow-x:auto;white-space:nowrap}
+.bar .k{color:var(--tx3);margin-right:6px}.bar .up{color:var(--pos)}.bar .sp{flex:1}
+.live{display:inline-flex;align-items:center;gap:6px;color:var(--tx2)}.live i{width:6px;height:6px;border-radius:50%;background:var(--pos)}
+nav.side{border-right:1px solid var(--bd);background:var(--s1);padding:12px 8px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.brand{font:700 22px var(--display);text-transform:uppercase;padding:4px 10px 14px;letter-spacing:.02em}
+nav.side a{display:flex;gap:10px;align-items:center;padding:7px 10px;border-radius:var(--r);color:var(--tx2);text-decoration:none;white-space:nowrap}
+nav.side a:hover{background:var(--s3);color:var(--tx)}
+nav.side a[aria-current]{background:var(--s3);color:var(--tx);box-shadow:inset 2px 0 var(--ac)}
+nav.side svg{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6}
+.sb-c nav.side span{display:none}.sb-c .brand{font-size:0;padding-left:14px}.sb-c .brand::before{content:"N";font-size:15px}
+.grow{flex:1}
+main{overflow-y:auto;padding:28px 32px 48px;min-width:0}
+.wrap{max-width:1040px}
+aside.agent{border-left:1px solid var(--bd);background:var(--s1);padding:18px;overflow-y:auto;overflow-x:hidden}
+.ag-c aside.agent{display:none}
+h1{font:500 46px/.98 var(--display);letter-spacing:0;text-transform:uppercase;max-width:19ch}
+.lede{color:var(--tx2);font-size:16px;max-width:60ch;margin-top:10px}
+.status{display:flex;gap:28px;margin-top:18px;color:var(--tx2)}
+.status b{color:var(--tx);font-weight:500;margin-left:6px}
+.status .on{color:var(--ac)}
+.strip{display:grid;grid-template-columns:repeat(7,1fr);margin:28px 0;border-block:1px solid var(--bd)}
+.strip div{padding:14px 12px 14px 0}.strip div+div{padding-left:14px;border-left:1px solid var(--bd)}
+.strip small{display:block;color:var(--tx3);font-size:11.5px}
+.strip strong{font:600 28px var(--display);display:block;margin-top:3px}
+.pos{color:var(--pos)}.neg{color:var(--neg)}.warn{color:var(--warn)}
+h2{font:600 20px var(--display);text-transform:uppercase;letter-spacing:.02em;margin-bottom:12px;display:flex;justify-content:space-between;align-items:baseline}
+h2 a{font:400 12px var(--body);color:var(--ac2);text-decoration:none}
+section{margin-bottom:34px}
+.brief{border-left:2px solid var(--ac);padding:2px 0 2px 16px;max-width:68ch;color:var(--tx2);font-size:14px;line-height:1.6}
+.brief p+p{margin-top:8px}.brief b{color:var(--tx);font-weight:500}
+.brief button{margin-top:10px;color:var(--ac2);font-size:12.5px}
+.nar{display:grid;grid-template-columns:130px 150px 60px 90px 100px 80px 1fr;align-items:center;gap:12px;padding:11px 0;border-top:1px solid var(--bd)}
+.nar:first-of-type{border-top:0}
+.nar .n{font:600 19px;text-transform:uppercase var(--display)}
+.rail{display:flex;gap:3px;align-items:center}
+.rail i{height:4px;flex:1;border-radius:2px;background:var(--s3)}.rail i.f{background:var(--tx3)}.rail i.c{background:var(--ac)}
+.stage{color:var(--tx2);font-size:12px;margin-top:4px}
+.sc{font:600 26px var(--display)}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11.5px;background:var(--s3);color:var(--tx2)}
+.tag.buy{background:color-mix(in srgb,var(--ac) 18%,transparent);color:var(--ac)}
+.tag.watch{color:var(--warn)}
+table{width:100%;border-collapse:collapse}
+th{font-weight:400;color:var(--tx3);text-align:left;padding:6px 10px 6px 0;font-size:11.5px;border-bottom:1px solid var(--bd);white-space:nowrap}
+td{padding:10px 10px 10px 0;border-bottom:1px solid var(--bd);white-space:nowrap}
+tbody tr:hover{background:var(--s2)}
+tr.sel td:first-child{box-shadow:inset 2px 0 var(--ac);padding-left:10px}
+.r{text-align:right}th.r,td.r{padding-right:14px}
+.tbl{overflow-x:auto}
+.ev{display:grid;grid-template-columns:68px 1fr auto;gap:12px;padding:10px 0;border-top:1px solid var(--bd)}
+.ev:first-of-type{border-top:0}.ev time{color:var(--tx3)}.ev small{display:block;color:var(--tx3)}
+.ev.new{animation:fl 1.6s ease-out 1}
+@keyframes fl{from{background:color-mix(in srgb,var(--ac2) 16%,transparent)}}
+@media (prefers-reduced-motion:reduce){.ev.new{animation:none}}
+.two{display:grid;grid-template-columns:1fr;gap:0}
+aside.agent h3{font:500 14px var(--display);margin-bottom:10px}
+.kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bd)}.kv span{color:var(--tx3)}
+.q{display:block;width:100%;text-align:left;padding:8px 10px;margin-top:6px;border:1px solid var(--bd);border-radius:var(--r);color:var(--tx2)}
+.q:hover{background:var(--s3);color:var(--tx)}
+.ask{display:flex;margin-top:14px;border:1px solid var(--bd);border-radius:var(--r);overflow:hidden}
+.ask input{flex:1;background:var(--s2);border:0;color:var(--tx);padding:9px 10px;font:inherit;min-width:0}
+.ask button{background:var(--ac);color:var(--acink);padding:0 12px;font-weight:500}
+.tools{position:absolute;right:16px;top:8px}
+.tb{padding:3px 8px;border:1px solid var(--bd);border-radius:var(--r);color:var(--tx2);font-size:12px}
+.rgrid{display:grid;grid-template-columns:1fr 260px;gap:24px}
+.plot svg{width:100%;height:auto;display:block}
+.plot text{fill:var(--tx3);font:12px var(--body)}
+.plot .g{stroke:var(--bd)}
+.bub{cursor:pointer;fill-opacity:.28;stroke-width:1.5}.bub:hover,.bub.on{fill-opacity:.5}
+.bl{fill:var(--tx)!important;font:600 13px var(--display)!important;text-transform:uppercase;pointer-events:none}
+.legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--tx3);font-size:12px;margin-top:6px}.legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.det{border-left:1px solid var(--bd);padding-left:20px}.det h3{font:600 24px var(--display);text-transform:uppercase}
+.det p{color:var(--tx2);margin-top:8px}
+@media (max-width:900px){.rgrid{grid-template-columns:1fr}.det{border-left:0;padding:0;border-top:1px solid var(--bd);padding-top:14px}}
+.wg{display:grid;grid-template-columns:1fr 340px;gap:28px}
+.cg svg{width:100%;height:auto}.cg text{fill:var(--tx2);font:12px var(--body)}
+.cg .e1{stroke:var(--ac2);stroke-width:2}.cg .e2{stroke:var(--tx3);stroke-width:1.5;stroke-dasharray:6 4}.cg .e3{stroke:var(--tx3);stroke-width:1;stroke-dasharray:2 4}
+.cg .nd{fill:var(--s2);stroke:var(--tx3)}.cg .nd.m{stroke:var(--ac);stroke-width:2}
+tbody tr.wr{cursor:pointer}
+.note{color:var(--tx3);font-size:12px;margin-top:8px}
+@media (max-width:900px){.wg{grid-template-columns:1fr}}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--bd);margin-bottom:18px;overflow-x:auto}
+.tabs button{padding:8px 14px;color:var(--tx2);white-space:nowrap;border-bottom:2px solid transparent;font:600 16px var(--display);text-transform:uppercase}
+.tabs button[aria-selected="true"]{color:var(--tx);border-color:var(--ac)}
+.div3{display:grid;grid-template-columns:repeat(3,1fr);border-block:1px solid var(--bd);margin:14px 0}
+.div3 div{padding:12px 0}.div3 small{color:var(--tx3);display:block}.div3 b{font:600 28px var(--display)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:32px}.cols li{margin:0 0 8px 16px;color:var(--tx2)}.cols h3{font:600 16px var(--display);text-transform:uppercase;margin-bottom:8px}
+@media (max-width:900px){.cols{grid-template-columns:1fr;gap:16px}.strip[style]{grid-template-columns:repeat(2,1fr)!important}}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;margin:12px 0}
+.steps div{padding:14px 16px;border-left:1px solid var(--bd);color:var(--tx3)}.steps div:first-child{border-left:0}
+.steps div.now{background:var(--s2);color:var(--tx);box-shadow:inset 0 -2px var(--ac)}
+.steps b{display:block;font:600 24px var(--display);text-transform:uppercase}.steps small{display:block;margin-top:2px}
+.ex{display:grid;grid-template-columns:repeat(3,1fr);gap:0 28px}
+@media (max-width:900px){.steps,.ex{grid-template-columns:1fr}.steps div{border-left:0;border-top:1px solid var(--bd)}}
+.seg{display:flex;border:1px solid var(--bd);border-radius:var(--r);overflow:hidden}.seg button{padding:5px 12px;color:var(--tx2)}.seg button[aria-pressed="true"]{background:var(--s3);color:var(--tx);box-shadow:inset 0 -2px var(--ac)}
+.sw{width:42px;height:22px;border-radius:99px;background:var(--s3);border:1px solid var(--bd);position:relative}.sw i{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--tx3);transition:transform .15s}
+.sw[aria-checked="true"]{background:color-mix(in srgb,var(--ac) 30%,transparent)}.sw[aria-checked="true"] i{transform:translateX(20px);background:var(--ac)}
+.lim{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 24px;margin-top:16px}.lim label{display:block;color:var(--tx3);font-size:12px}
+.lim input{width:100%;margin-top:4px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--r);color:var(--tx);padding:8px 10px;font:600 18px var(--display)}
+.lim.off{opacity:.45}
+.emg{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.emg button{padding:12px;border:1px solid var(--bd);border-radius:var(--r);font:600 17px var(--display);text-transform:uppercase;background:var(--s2)}
+.emg button:hover{background:var(--s3)}.emg button.arm{border-color:var(--neg);color:var(--neg)}
+@media (max-width:900px){.lim{grid-template-columns:1fr 1fr}.emg{grid-template-columns:1fr 1fr}.kv{flex-wrap:wrap;gap:6px}}
+.op{display:grid;grid-template-columns:150px 1fr;gap:16px;width:100%;text-align:left;padding:14px 0 14px 12px;border-top:1px solid var(--bd)}
+.op.sel{box-shadow:inset 2px 0 var(--ac);background:var(--s2)}.op:hover{background:var(--s2)}
+.op .t{font:600 26px var(--display);text-transform:uppercase;line-height:1}.op .m{color:var(--tx3);font-size:12px;margin-top:4px}
+.bars{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}
+.bars small{color:var(--tx3);display:flex;justify-content:space-between}.bars b{color:var(--tx);font-weight:500}
+.bar1{height:3px;background:var(--s3);border-radius:2px;margin-top:5px}.bar1 i{display:block;height:100%;background:var(--tx2);border-radius:2px}.bar1 i.hi{background:var(--ac)}.bar1 i.rk{background:var(--warn)}
+@media (max-width:900px){.op{grid-template-columns:1fr}.bars{grid-template-columns:repeat(3,1fr)}}
+#qs{display:flex;flex-wrap:wrap;gap:8px}#qs button{padding:7px 12px;border:1px solid var(--bd);border-radius:99px;color:var(--tx2)}#qs button:hover{background:var(--s3);color:var(--tx)}
+.msg{padding:14px 0;border-top:1px solid var(--bd);max-width:72ch}.msg.u{color:var(--tx);font:600 20px var(--display);text-transform:uppercase}
+.msg p{color:var(--tx2);line-height:1.6}.msg .tools{margin-top:10px;color:var(--tx3);font-size:12px}
+.msg .tools span{display:inline-block;padding:1px 8px;border:1px solid var(--bd);border-radius:99px;margin:0 6px 4px 0}
+#pal{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.55);display:flex;justify-content:center;align-items:flex-start;padding-top:12vh}#pal[hidden]{display:none}
+.pbox{width:min(560px,92vw);background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,.4)}
+#pin{width:100%;background:transparent;border:0;border-bottom:1px solid var(--bd);color:var(--tx);padding:14px 16px;font:500 18px var(--body);outline:0}
+#plist{max-height:50vh;overflow-y:auto;padding:6px}
+#plist button{display:flex;justify-content:space-between;width:100%;text-align:left;padding:9px 10px;border-radius:var(--r);color:var(--tx2)}
+#plist button[aria-selected="true"]{background:var(--s3);color:var(--tx);box-shadow:inset 2px 0 var(--ac)}#plist small{color:var(--tx3)}
+.al{display:grid;grid-template-columns:4px 64px 1fr auto;gap:12px;padding:12px 0;border-top:1px solid var(--bd)}.al i{border-radius:2px;background:var(--tx3)}
+.al.Critical i{background:var(--neg)}.al.Important i{background:var(--warn)}.al.Watch i{background:var(--ac2)}
+.al time{color:var(--tx3)}.al small{display:block;color:var(--tx3)}
+#onb{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px;overflow-y:auto}#onb[hidden]{display:none}
+.ob{width:min(560px,100%)}.ch{display:block;width:100%;text-align:left;padding:14px 16px;border:1px solid var(--bd);border-radius:var(--r);margin-bottom:8px;background:var(--s1)}
+.ch b{display:block;font:600 20px var(--display);text-transform:uppercase}.ch span{color:var(--tx3)}.ch[aria-pressed="true"]{border-color:var(--ac);box-shadow:inset 3px 0 var(--ac)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chips button{padding:8px 14px;border:1px solid var(--bd);border-radius:99px;color:var(--tx2)}.chips button[aria-pressed="true"]{border-color:var(--ac);color:var(--tx);background:var(--s3)}
+@media (max-width:900px){
+ table,tbody{display:block}thead{display:none}
+ tbody tr{display:grid;grid-template-columns:1fr 1fr;gap:2px 16px;padding:12px 12px;margin-bottom:10px;border:1px solid var(--bd);border-radius:var(--r);background:var(--s1)}
+ tbody tr.sel{border-color:var(--ac)}tr.sel td:first-child{box-shadow:none;padding-left:0}
+ td,td.r{display:block;padding:4px 0;border:0;text-align:left;white-space:normal}
+ td::before{content:attr(data-label);display:block;color:var(--tx3);font-size:11px}
+ td:first-child{grid-column:1/-1;font:600 22px var(--display);text-transform:uppercase}td:first-child::before{display:none}
+ .tbl{overflow:visible}
+}
+.mnav{display:none}
+@media (max-width:900px){
+ .app,.app.sb-c,.app.ag-c,.app.sb-c.ag-c{grid-template-columns:1fr}
+ nav.side{display:none}
+ main{padding:20px 16px 90px}
+ .strip{grid-template-columns:repeat(2,1fr)}.strip div,.strip div+div{padding:12px 8px 12px 0;border-left:0;border-bottom:1px solid var(--bd)}
+ .nar{grid-template-columns:1fr auto;gap:6px 12px}.nar>:nth-child(n+3){display:none}
+ .hide-m{display:none}
+ .status{flex-wrap:wrap;gap:8px 20px}
+ aside.agent{position:fixed;inset:0;z-index:20;display:none;border:0}
+ .app.ag-o aside.agent{display:block}
+ .mnav{display:flex;position:fixed;left:0;right:0;bottom:0;background:var(--s1);border-top:1px solid var(--bd);padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px));justify-content:space-around;z-index:10}
+ .mnav a{color:var(--tx2);text-decoration:none;font-size:11.5px;padding:4px 8px}.mnav a[aria-current]{color:var(--ac)}
+ h1{font-size:32px}
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+ <header class="bar" role="banner">
+  <span>SOL <b>$184.22</b> <span class="up">+2.8%</span></span>
+  <span><span class="k">Narrative heat</span>Rising</span>
+  <span><span class="k">Smart money, 1h</span><span class="up">+$4.2M</span></span>
+  <span><span class="k">Opportunities</span>12</span>
+  <span><span class="k">High confidence</span>3</span>
+  <span class="sp"></span>
+  <span class="live"><i></i>Live</span>
+  <button class="tb" id="albtn" data-v="alerts" aria-label="Alerts">Alerts <b style="color:var(--neg)">1</b></button>
+  <button class="tb" id="kbtn" aria-label="Open command palette">Search <span style="color:var(--tx3)">Ctrl K</span></button>
+  <button class="tb" id="theme" aria-label="Toggle theme">Theme</button>
+  <button class="tb" id="agtoggle" aria-label="Toggle agent panel">Agent panel</button>
+ </header>
+
+ <nav class="side" aria-label="Primary">
+  <div class="brand" id="brand"></div>
+  <a href="#" data-v="overview" aria-current="page"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg><span>Overview</span></a>
+  <a href="#" data-v="radar"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l6-6"/></svg><span>Radar</span></a>
+  <a href="#" data-v="narr"><svg viewBox="0 0 24 24"><path d="M4 18l5-6 4 3 7-9"/></svg><span>Narratives</span></a>
+  <a href="#" data-v="opp"><svg viewBox="0 0 24 24"><path d="M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/></svg><span>Opportunities</span></a>
+  <a href="#" data-v="smart"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="17" cy="15" r="3"/><path d="M10 11l5 3"/></svg><span>Smart money</span></a>
+  <a href="#" data-v="token"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 12h6"/></svg><span>Tokens</span></a>
+  <a href="#" data-v="pos"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V4h8v3"/></svg><span>Positions</span></a>
+  <a href="#" data-v="trd"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Trades</span></a>
+  <a href="#" data-v="ana"><svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg><span>Analytics</span></a>
+  <a href="#" data-v="agent"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Agent</span></a>
+  <a href="#" data-v="wallet"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><circle cx="16" cy="12.5" r="1.5"/></svg><span>Wallet</span></a>
+  <span class="grow"></span>
+  <a href="#" data-v="sys"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6"/><rect x="4" y="14" width="16" height="6"/></svg><span>System</span></a>
+  <a href="#" data-v="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg><span>Settings</span></a>
+  <a href="#" id="sbtoggle"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg><span>Collapse</span></a>
+ </nav>
+
+ <main id="main">
+  <div class="wrap" id="v-overview">
+   <p class="lede" style="margin:0 0 10px;font-size:13px;color:var(--tx3)">Wednesday, 30 September</p>
+   <h1>Good morning. Capital is rotating from AI agents into robotics.</h1>
+   <p class="lede">Attention to robotics grew faster than price over the last three hours. The agent is watching, and no trades are open to it.</p>
+   <div class="status"><span>Agent<b class="on">Active</b></span><span>Trading mode<b>Observe</b></span><span>Risk<b>Balanced</b></span><button class="tb" id="onbtn">Set up agent</button></div>
+
+   <div class="strip" role="list">
+    <div role="listitem"><small>Portfolio</small><strong>$12,480</strong></div>
+    <div role="listitem"><small>Daily PnL</small><strong class="pos">+$214</strong></div>
+    <div role="listitem"><small>Agent PnL</small><strong class="pos">+$96</strong></div>
+    <div role="listitem"><small>Open positions</small><strong>3</strong></div>
+    <div role="listitem"><small>Smart money net flow</small><strong class="pos">+$4.2M</strong></div>
+    <div role="listitem"><small>Accelerating</small><strong>5</strong></div>
+    <div role="listitem"><small>High confidence</small><strong>3</strong></div>
+   </div>
+
+   <section class="brief" aria-labelledby="bh">
+    <h2 id="bh" style="margin-bottom:8px">Market brief</h2>
+    <p>AI agent narratives remain strong but <b>momentum is slowing</b>. Robotics attention rose 214% in three hours while price response is still limited.</p>
+    <p>Four independent, high-score wallets accumulated tokens linked to robotics.</p>
+    <button>View analysis</button>
+   </section>
+
+   <section aria-labelledby="nh">
+    <h2 id="nh">Emerging narratives <a href="#" data-v="radar">Open radar</a></h2>
+    <div id="narr"></div>
+   </section>
+
+   <section aria-labelledby="oh">
+    <h2 id="oh">Top opportunities <a href="#" data-v="opp">All opportunities</a></h2>
+    <div class="tbl"><table>
+     <thead><tr><th>Token</th><th>Narrative</th><th class="r">Score</th><th>Decision</th><th class="r">Confidence</th><th>Smart money</th><th class="r">Liquidity</th><th class="r">1h</th><th>Risk</th></tr></thead>
+     <tbody id="opps"></tbody>
+    </table></div>
+   </section>
+
+   <section aria-labelledby="sh">
+    <h2 id="sh">Smart money pulse <span class="live"><i></i>Live</span></h2>
+    <div id="pulse"></div>
+   </section>
+  </div>
+  <div class="wrap" id="v-radar" hidden>
+   <h1>Narrative radar</h1>
+   <p class="lede">Find narratives while they are still early, before they saturate.</p>
+   <section style="margin-top:26px">
+    <div class="rgrid">
+     <div class="plot"><svg id="rsvg" viewBox="0 0 720 360" role="img" aria-label="Narrative maturity versus score"></svg>
+      <div class="legend"><span><i style="background:var(--ac)"></i>Accelerating</span><span><i style="background:var(--ac2)"></i>Steady</span><span><i style="background:var(--neg)"></i>Slowing</span><span>Bubble size: social volume</span></div></div>
+     <div class="det"><div id="rdet"></div><button class="tb" data-v="narr" style="margin-top:14px">Open narrative detail</button></div>
+    </div>
+   </section>
+   <section><h2>Live feed <span class="live"><i></i>Live</span></h2><div id="rfeed"></div></section>
+   <section><h2>Ranking</h2><div class="tbl"><table><thead><tr><th>Narrative</th><th>Stage</th><th class="r">Score</th><th class="r">Velocity</th><th class="r">Organic</th><th class="r">Smart money</th><th class="r">Saturation risk</th></tr></thead><tbody id="rrank"></tbody></table></div></section>
+  </div>
+  <div class="wrap" id="v-smart" hidden>
+   <h1>Smart money</h1>
+   <p class="lede">Wallets ranked by track record and independence. Follow the reason they move, not just the move.</p>
+   <section style="margin-top:26px"><div class="tbl"><table><thead><tr><th>Wallet</th><th class="r">Score</th><th class="r">Leader</th><th class="r">Win rate</th><th class="r">30D PnL</th><th class="r">Avg ROI</th><th class="r">Avg entry MC</th><th>Style</th><th>Flow</th><th>Cluster</th></tr></thead><tbody id="wt"></tbody></table></div></section>
+   <section id="wd"></section>
+  </div>
+  <div class="wrap" id="v-token" hidden>
+   <p class="lede" id="tcrumb" style="margin:0 0 6px;font-size:13px;color:var(--tx3)"></p>
+   <h1 id="tname" style="max-width:none"></h1>
+   <p class="note" id="tnote"></p>
+   <div class="strip" id="tstrip" style="grid-template-columns:repeat(6,1fr)"></div>
+   <section><h2>Price and events</h2><div class="plot"><svg id="tsvg" viewBox="0 0 720 300" role="img" aria-label="Price chart with events"></svg>
+    <div class="legend"><span><i style="background:var(--ac)"></i>Smart wallet buy / Agent buy</span><span><i style="background:var(--ac2)"></i>Narrative spike</span><span><i style="background:var(--warn)"></i>Dev transfer</span><span><i style="background:var(--neg)"></i>Smart wallet sell</span></div></div></section>
+   <div class="tabs" role="tablist" id="ttabs"></div>
+   <section id="tpane"></section>
+  </div>
+  <div class="wrap" id="v-pos" hidden>
+   <h1>Positions</h1>
+   <p class="lede">The agent keeps checking why you entered. When the reason weakens, it says so.</p>
+   <section style="margin-top:26px"><div class="tbl"><table><thead><tr><th>Token</th><th>Narrative</th><th class="r">Entry</th><th class="r">Current</th><th class="r">PnL</th><th class="r">Size</th><th>Agent view</th><th>Stage</th><th>Smart money</th><th>Risk</th></tr></thead><tbody id="pt"></tbody></table></div></section>
+   <section id="pd"></section>
+  </div>
+  <div class="wrap" id="v-wallet" hidden>
+   <h1>Wallet</h1>
+   <p class="lede">You decide what the agent may do. Risk limits are checked by fixed rules, not by the AI.</p>
+   <div class="strip" style="grid-template-columns:repeat(3,1fr)"><div><small>Main wallet</small><strong>4.20 SOL</strong></div><div><small>Trading wallet</small><strong>1.85 SOL</strong></div><div><small>Agent balance (about $340)</small><strong>1.85 SOL</strong></div></div>
+   <section><h2>Emergency controls</h2><div class="emg" id="emg"></div><p class="note" id="emsg" role="status" aria-live="polite">Controls stay available even when the agent has errors.</p></section>
+   <section><h2>AI trading</h2>
+    <div class="kv"><span>Mode</span><div class="seg" id="mode"></div></div>
+    <div class="kv"><span>AI trading access</span><button class="sw" id="sw" role="switch" aria-checked="false" aria-label="AI trading access"><i></i></button></div>
+    <div class="kv"><span>Risk profile</span><div class="seg" id="prof"></div></div>
+    <div class="lim" id="lim"></div>
+    <p class="note">System-wide limits always apply, even if you set higher values.</p>
+   </section>
+  </div>
+  <div class="wrap" id="v-opp" hidden>
+   <h1>Opportunities</h1>
+   <p class="lede">Ranked by what the evidence supports. Each one shows why it looks good and why it could fail.</p>
+   <section style="margin-top:26px" id="ol"></section>
+   <section id="od"></section>
+  </div>
+  <div class="wrap" id="v-agent" hidden>
+   <h1>Agent</h1>
+   <p class="lede">A research desk you can question. It reads data through fixed tools and cannot send transactions.</p>
+   <section style="margin-top:22px"><div id="qs"></div></section>
+   <section id="th"></section>
+   <div class="ask"><input id="ain" aria-label="Ask the agent" placeholder="Ask about a token, wallet or narrative"><button id="abtn">Ask</button></div>
+  </div>
+  <div class="wrap" id="v-narr" hidden>
+   <p class="lede" id="ncrumb" style="margin:0 0 6px;font-size:13px;color:var(--tx3)"></p>
+   <h1 id="nname" style="max-width:none"></h1>
+   <div class="strip" id="nstrip" style="grid-template-columns:repeat(4,1fr)"></div>
+<div id="nph" hidden><p class="lede">Timeline, sources and related tokens for this narrative load here once the data provider is connected. This prototype shows them for Robotics only.</p></div>
+<div id="nbody">
+   <div class="cols">
+    <section><h2>Timeline</h2>
+     <div class="kv"><span>2h 14m ago</span><b>Seed: first relevant discussion</b></div>
+     <div class="kv"><span>1h 40m ago</span><b>Emerging: creator activity increased</b></div>
+     <div class="kv"><span>1h 05m ago</span><b>Accelerating: social velocity +200%</b></div>
+     <div class="kv"><span>48m ago</span><b>Smart money: first tracked wallet entry</b></div>
+     <div class="kv"><span>31m ago</span><b>Token breakout: first market reaction</b></div></section>
+    <section><h2>Social intelligence</h2>
+     <div class="kv"><span>Mention velocity</span><b class="pos">+284%</b></div>
+     <div class="kv"><span>Unique creators</span><b class="pos">+72%</b></div>
+     <div class="kv"><span>Engagement velocity</span><b class="pos">+141%</b></div>
+     <div class="kv"><span>Platforms</span><b>X, Reddit, YouTube</b></div>
+     <div class="kv"><span>Organic score</span><b>88</b></div>
+     <div class="kv"><span>Bot or shill risk</span><b>Low (14)</b></div></section>
+   </div>
+   <section><h2>Where it started</h2>
+    <div class="kv"><span>Creator A</span><span><span class="tag buy">Originator</span> lead score 92</span></div>
+    <div class="kv"><span>Creator B</span><span><span class="tag">Early amplifier</span> lead score 81</span></div>
+    <div class="kv"><span>Creator C</span><span><span class="tag">Follower</span> amplifier only</span></div></section>
+   <section><h2>Relevant tokens</h2><div class="tbl"><table><thead><tr><th>Token</th><th>Relationship</th><th class="r">OG score</th><th class="r">Opportunity</th><th>Smart money</th><th class="r">Market cap</th><th class="r">Liquidity</th><th class="r">Age</th></tr></thead><tbody>
+    <tr><td><b>ROBOT</b></td><td><span class="tag buy">Likely OG</span></td><td class="r">87</td><td class="r">91</td><td>Strong</td><td class="r">$2.8M</td><td class="r">$681K</td><td class="r">3h</td></tr>
+    <tr><td><b>ROBO2</b></td><td><span class="tag">Derivative</span></td><td class="r">41</td><td class="r">63</td><td>Weak</td><td class="r">$410K</td><td class="r">$88K</td><td class="r">1h</td></tr>
+    <tr><td><b>BOTZ</b></td><td><span class="tag">Meme expression</span></td><td class="r">28</td><td class="r">52</td><td>Moderate</td><td class="r">$190K</td><td class="r">$41K</td><td class="r">40m</td></tr>
+    <tr><td><b>R0BOT</b></td><td><span class="tag watch">Suspicious</span></td><td class="r">9</td><td class="r">12</td><td>None</td><td class="r">$60K</td><td class="r">$9K</td><td class="r">12m</td></tr></tbody></table></div>
+    <p class="note">OG scores are estimates from token age, timing and creator links. They are not proof.</p></section>
+   </div>
+  </div>
+  <div class="wrap" id="v-ana" hidden>
+   <h1>Analytics</h1>
+   <p class="lede">Does the agent add value? Compare it with copying wallets blindly and with a simple baseline.</p>
+   <div class="strip" style="grid-template-columns:repeat(6,1fr)"><div><small>Agent PnL</small><strong class="pos">+$1,240</strong></div><div><small>Blind copy PnL</small><strong class="pos">+$610</strong></div><div><small>Baseline PnL</small><strong>+$180</strong></div><div><small>Win rate</small><strong>64%</strong></div><div><small>Profit factor</small><strong>1.9</strong></div><div><small>Max drawdown</small><strong class="neg">-8.4%</strong></div></div>
+   <section><h2>Cumulative PnL</h2><div class="plot"><svg id="asvg" viewBox="0 0 720 260" role="img" aria-label="Cumulative PnL by strategy"></svg><div class="legend"><span><i style="background:var(--ac)"></i>Agent</span><span><i style="background:var(--ac2)"></i>Blind copy</span><span><i style="background:var(--tx3)"></i>Baseline</span></div></div></section>
+   <div class="cols">
+    <section><h2>By confidence</h2><div id="acf"></div></section>
+    <section><h2>By signal</h2><div id="asg"></div></section>
+   </div>
+   <p class="note">This is mock data. Real results need backtests and paper trading before anyone relies on them.</p>
+  </div>
+  <div class="wrap" id="v-trd" hidden>
+   <h1>Trades</h1>
+   <p class="lede">Every decision and order, with the reason and the risk result.</p>
+   <section style="margin-top:22px"><div class="tbl"><table><thead><tr><th>Time</th><th>Token</th><th>Action</th><th>Mode</th><th>Reason</th><th class="r">Amount</th><th class="r">Expected</th><th class="r">Actual</th><th class="r">Slippage</th><th class="r">Confidence</th><th>Risk result</th></tr></thead><tbody id="trb"></tbody></table></div></section>
+  </div>
+  <div class="wrap" id="v-alerts" hidden>
+   <h1>Alerts</h1>
+   <p class="lede">What changed and why it matters, sorted by how urgent it is.</p>
+   <section style="margin-top:22px"><h2>Narrative rotation</h2>
+    <div class="kv"><span style="color:var(--tx)">AI agents</span><span>91 to 74 <b class="neg">falling</b></span></div>
+    <div class="kv"><span style="color:var(--tx)">Robotics</span><span>44 to 88 <b class="pos">rising</b></span></div>
+    <p class="brief" style="margin-top:14px"><b>Rotation detected.</b> Attention and smart money are moving from AI agents to robotics.</p></section>
+   <section><h2>Feed <div class="seg" id="af"></div></h2><div id="al"></div></section>
+  </div>
+  <div class="wrap" id="v-sys" hidden>
+   <h1>System</h1>
+   <p class="lede">Health of the data providers, workers and models. Admin only.</p>
+   <div class="cols" style="margin-top:22px">
+    <section><h2>Status</h2><div id="ss"></div></section>
+    <section><h2>Cost today</h2>
+     <div class="kv"><span>Daily cost</span><b>$84</b></div><div class="kv"><span>Cost per user</span><b>$0.42</b></div><div class="kv"><span>Cost per decision</span><b>$0.018</b></div><div class="kv"><span>Cost per executed trade</span><b>$0.31</b></div><div class="kv"><span>AI requests</span><b>4,820</b></div><div class="kv"><span>Tokens in / out</span><b>6.1M / 0.9M</b></div></section>
+   </div>
+   <section><h2>AI models</h2><div class="tbl"><table><thead><tr><th>Role</th><th>Model</th><th class="r">Temperature</th><th>Reasoning</th><th class="r">Token budget</th></tr></thead><tbody>
+    <tr><td><b>Fast screening</b></td><td>GPT-6 Luna</td><td class="r">0.2</td><td>Low</td><td class="r">2K</td></tr>
+    <tr><td><b>Deep reasoning</b></td><td>GPT-6 Sol</td><td class="r">0.3</td><td>High</td><td class="r">12K</td></tr>
+    <tr><td><b>Judge</b></td><td>GPT-6 Astra</td><td class="r">0.1</td><td>Medium</td><td class="r">6K</td></tr></tbody></table></div>
+    <p class="note">API keys stay on the server and are never sent to the browser.</p></section>
+  </div>
+  <div class="wrap" id="v-set" hidden>
+   <h1>Settings</h1>
+   <p class="lede">Notifications and appearance. Trading limits live on the Wallet page.</p>
+   <section style="margin-top:22px"><h2>Appearance</h2><div class="kv"><span>Theme</span><div class="seg" id="thm"></div></div></section>
+   <section><h2>Notifications</h2><div id="nt"></div></section>
+  </div>
+ </main>
+
+ <aside class="agent" aria-label="Agent panel">
+  <h3>Robot &middot; Robotics</h3>
+  <div class="kv"><span>Opportunity</span><b>91</b></div>
+  <div class="kv"><span>Agent view</span><b class="pos">Buy</b></div>
+  <div class="kv"><span>Confidence</span><b>88%</b></div>
+  <div class="kv"><span>Position</span><b>0.18 SOL</b></div>
+  <div class="kv"><span>PnL</span><b class="pos">+21%</b></div>
+  <h3 style="margin-top:22px">Ask about this token</h3>
+  <button class="q">Why is ROBOT ranked highly?</button>
+  <button class="q">What changed in the last 15 minutes?</button>
+  <button class="q">Are smart wallets still accumulating?</button>
+  <button class="q">Is the narrative becoming saturated?</button>
+  <div class="ask"><input aria-label="Ask the agent" placeholder="Ask the agent"><button>Ask</button></div>
+  <button class="tb" id="agclose" style="margin-top:14px">Close</button>
+ </aside>
+</div>
+
+<div id="pal" hidden role="dialog" aria-modal="true" aria-label="Command palette"><div class="pbox"><input id="pin" aria-label="Search or run a command" placeholder="Search tokens, wallets, narratives, or run a command" autocomplete="off"><div id="plist" role="listbox"></div></div></div>
+<div id="onb" hidden role="dialog" aria-modal="true" aria-label="Set up your agent"><div class="ob"><div class="stage" id="ostep"></div><h1 id="oh1" style="max-width:none;font-size:36px"></h1><p class="lede" id="op"></p><div id="oc" style="margin:22px 0"></div><div style="display:flex;gap:10px"><button class="tb" id="oback">Back</button><button class="tb" id="onext" style="background:var(--ac);color:var(--acink);border-color:var(--ac);font-weight:600">Continue</button><span class="grow"></span><button class="tb" id="oskip">Close</button></div></div></div>
+<nav class="mnav" aria-label="Mobile">
+ <a href="#" data-v="overview" aria-current="page">Overview</a><a href="#" data-v="radar">Radar</a><a href="#" data-v="opp">Opportunities</a><a href="#" data-v="pos">Positions</a><a href="#" id="mag">Agent</a>
+</nav>
+
+<script>
+const rsvg=document.getElementById('rsvg'),tsvg=document.getElementById('tsvg'),asvg=document.getElementById('asvg');
+let curN=0,curT=0;
+const BRAND={name:"NARRA"};
+document.getElementById('brand').textContent=BRAND.name;document.title=BRAND.name+" Overview";
+const st=["Seed","Emerging","Accelerating","Mainstream","Saturated"];
+const N=[["Robotics",2,91,"+284%","+$438K","High"],["Quantum computing",1,78,"+142%","+$120K","Medium"],["Prediction markets",2,74,"+96%","+$210K","Medium"],["AI agents",3,74,"-8%","-$90K","Fading"],["DePIN",1,61,"+58%","+$34K","Low"]];
+narr.innerHTML=N.map(n=>`<div class="nar"><div><div class="n">${n[0]}</div><div class="stage">${st[n[1]]}</div></div><div class="rail" title="${st[n[1]]}">${st.map((s,i)=>`<i class="${i==n[1]?'c':i<n[1]?'f':''}"></i>`).join('')}</div><div class="sc">${n[2]}</div><div class="${n[3][0]=='-'?'neg':'pos'}">${n[3]}</div><div class="${n[4][0]=='-'?'neg':'pos'}">${n[4]}</div><div class="stage" style="margin:0">Potential ${n[5].toLowerCase()}</div><div></div></div>`).join('');
+const O=[["ROBOT","Robotics",91,"Buy","88%","Strong","$682K","+14%","Medium"],["QCAT","Quantum computing",83,"Watch","71%","Building","$240K","+6%","Medium"],["PMKT","Prediction markets",79,"Watch","66%","Moderate","$1.1M","+3%","Low"],["NODE","DePIN",68,"Ignore","54%","Weak","$95K","+31%","High"]];
+opps.innerHTML=O.map((o,i)=>`<tr class="${i==0?'sel':''}"><td><b>${o[0]}</b></td><td>${o[1]}</td><td class="r">${o[2]}</td><td><span class="tag ${o[3]=='Buy'?'buy':o[3]=='Watch'?'watch':''}">${o[3]}</span></td><td class="r">${o[4]}</td><td>${o[5]}</td><td class="r">${o[6]}</td><td class="r ${o[7][0]=='+'?'pos':'neg'}">${o[7]}</td><td class="${o[8]=='High'?'warn':''}">${o[8]}</td></tr>`).join('');
+const E=[["10:42:18","Leader wallet 8Xi...A2 bought ROBOT","Early momentum profile","$24,820"],["10:39:02","Wallet 3fQ...9K bought QCAT","Independent of 8Xi...A2","$9,300"],["10:31:47","Wallet Hb2...p7 reduced ROBOT","High score, partial exit","-$6,100"]];
+pulse.innerHTML=E.map((e,i)=>`<div class="ev ${i==0?'new':''}"><time>${e[0]}</time><div>${e[1]}<small>${e[2]}</small></div><b class="${e[3][0]=='-'?'neg':'pos'}">${e[3]}</b></div>`).join('');
+const app=document.getElementById('app'),R=document.documentElement;
+sbtoggle.onclick=e=>{e.preventDefault();app.classList.toggle('sb-c')};
+agtoggle.onclick=()=>{app.classList.toggle('ag-c');app.classList.toggle('ag-o')};
+agclose.onclick=()=>{app.classList.remove('ag-o');app.classList.add('ag-c')};
+mag.onclick=e=>{e.preventDefault();app.classList.add('ag-o');app.classList.remove('ag-c')};
+theme.onclick=()=>{const cur=R.dataset.theme||(matchMedia('(prefers-color-scheme:light)').matches?'light':'dark');R.dataset.theme=cur=='dark'?'light':'dark'};
+
+const RN=[["Robotics",2.2,91,1200,"+284%",88,"+$438K","Low"],["Quantum computing",1.3,78,620,"+142%",74,"+$120K","Low"],["Prediction markets",2.0,74,800,"+96%",81,"+$210K","Medium"],["AI agents",3.2,74,2100,"-8%",69,"-$90K","High"],["DePIN",1.1,61,380,"+58%",77,"+$34K","Low"],["Gaming",3.7,52,900,"-22%",58,"-$40K","High"],["Celebrity meme",4.1,40,1500,"-35%",31,"-$120K","High"]];
+const sel=[];function vc(v){return v[0]=='-'?'var(--neg)':parseInt(v)>100?'var(--ac)':'var(--ac2)'}
+function drawRadar(){let h='';st.forEach((n,i)=>{const x=60+i*150;h+=`<line class="g" x1="${x}" x2="${x}" y1="20" y2="320"/><text x="${x}" y="345" text-anchor="middle">${n}</text>`});
+[0,50,100].forEach(v=>{const y=320-v*3;h+=`<line class="g" x1="60" x2="660" y1="${y}" y2="${y}"/><text x="30" y="${y+4}">${v}</text>`});
+RN.forEach((n,i)=>{const x=60+n[1]*150,y=320-n[2]*3,r=8+Math.sqrt(n[3])*.9,c=vc(n[4]);h+=`<g><circle class="bub" data-i="${i}" cx="${x}" cy="${y}" r="${r}" fill="${c}" stroke="${c}" tabindex="0" role="button" aria-label="${n[0]}"/><text class="bl" x="${x}" y="${y+4}" text-anchor="middle">${n[0].split(' ')[0]}</text></g>`});rsvg.innerHTML=h;
+rsvg.querySelectorAll('.bub').forEach(b=>{const go=()=>pick(+b.dataset.i);b.onclick=go;b.onkeydown=e=>{if(e.key=='Enter'||e.key==' '){e.preventDefault();go()}}})}
+function pick(i){curN=i;const n=RN[i];rsvg.querySelectorAll('.bub').forEach(b=>b.classList.toggle('on',+b.dataset.i==i));
+rdet.innerHTML=`<h3>${n[0]}</h3><div class="stage">${st[Math.round(n[1])]}</div><div class="kv"><span>Score</span><b>${n[2]}</b></div><div class="kv"><span>Velocity</span><b style="color:${vc(n[4])}">${n[4]}</b></div><div class="kv"><span>Organic</span><b>${n[5]}</b></div><div class="kv"><span>Smart money</span><b>${n[6]}</b></div><div class="kv"><span>Saturation risk</span><b>${n[7]}</b></div><p>${n[2]>85?'Attention is growing faster than price. Worth a closer look, not a guarantee.':n[4][0]=='-'?'Attention is fading and smart money is leaving.':'Building, but not yet confirmed by wallets.'}</p>`}
+rrank.innerHTML=RN.slice().sort((a,b)=>b[2]-a[2]).map(n=>`<tr><td><b style="text-transform:uppercase;font-family:var(--display);font-size:16px">${n[0]}</b></td><td>${st[Math.round(n[1])]}</td><td class="r">${n[2]}</td><td class="r" style="color:${vc(n[4])}">${n[4]}</td><td class="r">${n[5]}</td><td class="r ${n[6][0]=='-'?'neg':'pos'}">${n[6]}</td><td class="r ${n[7]=='High'?'warn':''}">${n[7]}</td></tr>`).join('');
+rfeed.innerHTML=[["10:31","Robotics moved from emerging to accelerating","Mentions +183%, unique creators +72%, across X, Reddit and YouTube. Smart money increasing.","Investigate"],["10:12","Quantum computing picked up creator activity","Two early amplifiers posted within 20 minutes. Not yet cross-platform.","Watch"],["09:48","AI agents lost momentum","Score 91 to 74 in 3 hours. Wallet exits started.","Reduce exposure"]].map((e,i)=>`<div class="ev ${i==0?'new':''}"><time>${e[0]}</time><div>${e[1]}<small>${e[2]}</small></div><span class="tag ${i==0?'buy':'watch'}">${e[3]}</span></div>`).join('');
+drawRadar();pick(0);
+
+const W=[["8Xi...A2",94,91,"78%","+$482K","42%","$840K","Early momentum","Buying","Independent","$300K-$1.5M","32 min","AI, meme","Early liquidity expansion","Late entries after +150%"],["3fQ...9K",88,72,"71%","+$310K","35%","$1.2M","Narrative leader","Buying","Independent","$500K-$2M","1h 10m","Robotics, DePIN","Entering before creator spikes","Oversized positions in thin liquidity"],["Hb2...p7",83,64,"66%","+$196K","27%","$2.4M","Swing","Reducing","Cluster A","$1M-$4M","6h","Gaming, AI","Scaling out in strength","Holding through narrative decay"],["Kp9...x1",79,40,"74%","+$150K","22%","$3.1M","Follower","Buying","Cluster A","$2M-$6M","3h","Meme","Copying leaders within minutes","Entries after +100%"],["Zq4...m8",72,55,"61%","+$88K","19%","$1.6M","Scalper","Flat","Independent","$400K-$1M","9 min","Meme","Fast exits at +15%","Overtrading on low volume"]];
+wt.innerHTML=W.map((w,i)=>`<tr class="wr ${i==0?'sel':''}" data-i="${i}" tabindex="0"><td><b>${w[0]}</b></td><td class="r">${w[1]}</td><td class="r">${w[2]}</td><td class="r">${w[3]}</td><td class="r pos">${w[4]}</td><td class="r">${w[5]}</td><td class="r">${w[6]}</td><td>${w[7]}</td><td><span class="tag ${w[8]=='Buying'?'buy':w[8]=='Reducing'?'watch':''}">${w[8]}</span></td><td>${w[9]}</td></tr>`).join('');
+function wpick(i){const w=W[i];wt.querySelectorAll('tr').forEach((r,j)=>r.classList.toggle('sel',j==i));
+wd.innerHTML=`<h2>${w[0]} <span class="stage" style="margin:0">${w[7]}</span></h2><div class="wg"><div><div class="kv"><span>Typical entry market cap</span><b>${w[10]}</b></div><div class="kv"><span>Median hold</span><b>${w[11]}</b></div><div class="kv"><span>Strongest narratives</span><b>${w[12]}</b></div><div class="kv"><span>Best pattern</span><b>${w[13]}</b></div><div class="kv"><span>Weak pattern</span><b>${w[14]}</b></div><p class="note">Calculated from the wallet's trade history, not written by the AI.</p></div>
+<div class="cg"><svg viewBox="0 0 340 220" role="img" aria-label="Wallet cluster graph"><line class="e1" x1="170" y1="44" x2="60" y2="150"/><line class="e2" x1="170" y1="44" x2="170" y2="150"/><line class="e3" x1="170" y1="44" x2="280" y2="150"/><circle class="nd" cx="170" cy="36" r="16"/><text x="170" y="16" text-anchor="middle">Funding wallet</text><circle class="nd m" cx="60" cy="158" r="16"/><text x="60" y="196" text-anchor="middle">${w[0]}</text><circle class="nd" cx="170" cy="158" r="16"/><text x="170" y="196" text-anchor="middle">Wallet B</text><circle class="nd" cx="280" cy="158" r="16"/><text x="280" y="196" text-anchor="middle">Wallet C</text></svg><div class="legend"><span>Solid: high</span><span>Dashed: medium</span><span>Dotted: low</span></div><p class="note">Links are inferred from funding and timing. They are not confirmed identity.</p></div></div>`}
+wt.querySelectorAll('.wr').forEach(r=>{r.onclick=()=>wpick(+r.dataset.i);r.onkeydown=e=>{if(e.key=='Enter')wpick(+r.dataset.i)}});wpick(0);
+
+let P=[];
+const EV=[[8,'var(--ac2)','Narrative spike'],[22,'var(--ac)','Smart wallet buy'],[26,'var(--ac)','Smart wallet buy'],[33,'var(--warn)','Dev transfer'],[38,'var(--ac)','Agent buy'],[47,'var(--neg)','Smart wallet sell']];
+function drawT(k){P=[];let v=100;for(let i=0;i<60;i++){v*=1+Math.sin(i*(1.7+k*.4))*.012+(i>36?.02-k*.006:.004)+(i==41?.05:0);P.push(v)}
+const mn=Math.min(...P),mx=Math.max(...P),X=i=>40+i*(660/59),Y=x=>270-(x-mn)/(mx-mn)*230;
+let h=[0,1,2,3].map(q=>`<line class="g" x1="40" x2="700" y1="${40+q*77}" y2="${40+q*77}"/>`).join('');
+h+=`<polyline fill="none" stroke="var(--tx)" stroke-width="1.6" points="${P.map((x,i)=>X(i)+','+Y(x)).join(' ')}"/>`;
+EV.forEach(e=>{h+=`<line class="g" x1="${X(e[0])}" x2="${X(e[0])}" y1="40" y2="270"/><circle cx="${X(e[0])}" cy="${Y(P[e[0]])}" r="6" fill="${e[1]}"><title>${e[2]}</title></circle>`});
+tsvg.innerHTML=h}
+
+const TT={Overview:`<div class="div3"><div><small>Attention</small><b class="pos">+284%</b></div><div><small>Price</small><b>+14%</b></div><div><small>Divergence</small><b style="color:var(--ac)">Strong</b></div></div><p class="note" style="margin:0 0 20px">Attention is growing much faster than price. This does not guarantee price gains.</p><div class="cols"><div><h3>Why it is interesting</h3><ul><li>3 independent high-score wallets entered within 11 minutes.</li><li>Narrative attention rose 284%.</li><li>Liquidity grew 22%.</li></ul></div><div><h3>Why it may fail</h3><ul><li>The narrative is early and unproven.</li><li>The developer wallet still holds 7.2%.</li><li>One high-score wallet reduced its position.</li></ul></div></div>`};
+
+const K=(a,b)=>`<div class="kv"><span>${a}</span><b>${b}</b></div>`;
+TT["Smart money"]=K("Consensus score","84")+K("Independent entities","3")+K("Leader wallets","1")+K("8Xi...A2, 10:42","Bought $24,820")+K("3fQ...9K, 10:39","Bought $9,300")+K("Hb2...p7, 10:31","Reduced $6,100")+`<p class="note">Two of the three buyers are unrelated by funding. A second reduction would lower the score.</p>`;
+TT.Narrative=K("Narrative","Robotics")+K("Stage","Accelerating")+K("Score","91")+K("Velocity","+284%")+K("Relationship","Likely OG, 87")+`<button class="tb" data-v="narr" style="margin-top:14px">Open narrative detail</button>`;
+TT.Holders=K("Holders","2,140")+K("Holder growth, 1h","+18%")+K("Top 10 holders","31% of supply")+K("Smart wallet holders","7")+`<p class="note">Top-holder share includes the liquidity pool and the developer wallet.</p>`;
+TT.Developer=K("Developer holds","7.2%")+K("Earlier tokens by deployer","2, no rugs flagged")+K("Recent developer activity","None in 24h")+`<p class="note">Deployer history is a signal, not proof of intent.</p>`;
+TT.Trades=K("Buys, 1h","$312K")+K("Sells, 1h","$198K")+K("Net flow, 1h","+$114K")+K("Largest buy","$24,820")+K("Largest sell","$6,100");
+TT.Agent=K("Decision","Buy, 88% confidence")+K("Suggested size","3% of portfolio")+K("Max slippage","1.0%")+K("Stop loss / take profit","-25% / +50%")+`<h3 style="margin:16px 0 8px;font:600 16px var(--display);text-transform:uppercase">Invalidated if</h3><ul class="cols" style="display:block"><li>Narrative score falls below 70.</li><li>Two more high-score wallets reduce.</li><li>Liquidity drops more than 25%.</li></ul>`;
+
+const TX=[["7xKq...Rb42","$1.9M","7","+$438K","Robotics"],["4mNp...Zt19","$640K","3","+$52K","Quantum computing"],["9dLc...Qe77","$3.2M","5","+$210K","Prediction markets"],["2vHs...Yc03","$210K","1","-$8K","DePIN"]];
+function TO(){const o=OP[curT];return `<div class="div3"><div><small>Attention</small><b class="pos">${['+284%','+120%','+64%','+40%'][curT]}</b></div><div><small>Price</small><b>${o[9]}</b></div><div><small>Divergence</small><b style="color:var(--ac)">${['Strong','Building','Mild','None'][curT]}</b></div></div><p class="note" style="margin:0 0 20px">Compares how fast attention grows with how fast price moves. It is not a prediction.</p><div class="cols"><div><h3>Why it is interesting</h3><ul>${o[10].map(x=>`<li>${x}</li>`).join('')}</ul></div><div><h3>Why it may fail</h3><ul>${o[11].map(x=>`<li>${x}</li>`).join('')}</ul></div></div>`}
+function tok(i){curT=i;const o=OP[i],x=TX[i];cur="Overview";
+tcrumb.textContent="Tokens / "+o[0];tname.innerHTML=o[0]+` <span class="tag ${o[3]=='Buy'?'buy':o[3]=='Watch'?'watch':''}" style="font:600 16px var(--display);vertical-align:middle">Agent: ${o[3]} ${o[4]}</span>`;
+tnote.textContent="Mint "+x[0]+" \u00b7 Narrative: "+o[1]+" \u00b7 Opportunity score "+o[2];
+tstrip.innerHTML=[["Price",o[6]],["Market cap",o[7]],["Liquidity",o[8]],["Volume 24h",x[1]],["Smart wallet holders",x[2]],["Smart money net flow",`<span class="${x[3][0]=='-'?'neg':'pos'}">${x[3]}</span>`]].map(r=>`<div><small>${r[0]}</small><strong>${r[1]}</strong></div>`).join('');
+drawT(i);tt()}
+const TN=["Overview","Smart money","Narrative","Holders","Developer","Trades","Agent"];let cur="Overview";
+function tt(){ttabs.innerHTML=TN.map(n=>`<button role="tab" aria-selected="${n==cur}">${n}</button>`).join('');
+tpane.innerHTML=(curT==0?TT[cur]:(cur=='Overview'?TO():null))||`<p class="lede" style="margin:0">${cur} details for this token load here once the data provider is connected. This prototype shows Overview only.</p>`;
+ttabs.querySelectorAll('button').forEach((b,i)=>b.onclick=()=>{cur=TN[i];tt()});tpane.querySelectorAll('[data-v]').forEach(a=>a.onclick=()=>{nrender(0);show(a.dataset.v)})}
+opps.querySelectorAll('tr').forEach((r,i)=>{r.style.cursor='pointer';r.onclick=()=>{tok(i);show('token')}});
+
+const PS=[["ROBOT","Robotics","$0.0061","$0.0074","+21.3%","$420","Hold","Accelerating","Positive","Low",["87 to 91","82 to 88","$0.0061 to $0.0074"],null,["TP1 at +50%: not reached","TP2 at +120%: not reached","Trailing stop: 15% below the high","Narrative decay: none","Smart money exit: none","Liquidity: stable","Developer activity: no sells"],"Hold. Attention is still rising and wallets are still buying."],
+["AGNT","AI agents","$0.0120","$0.0131","+9.2%","$260","Reduce","Mainstream","Turning","Medium",["91 to 67","+$200K to -$90K","$0.0120 to $0.0131"],[["91","+240%","+$200K","Hold"],["82","+40%","+$50K","Reduce"],["67","-20%","-$90K","Sell"]],["TP1 at +50%: not reached","Trailing stop: 15% below the high","Narrative decay: score down 24 points in 3 hours","Smart money exit: 2 high-score wallets reduced","Liquidity: stable","Developer activity: no sells"],"Reduce. The price holds, but the narrative behind the entry is fading."],
+["GAMR","Gaming","$0.0450","$0.0310","-31.1%","$180","Sell","Decaying","Exiting","High",["52 to 40","-$40K to -$120K","$0.0450 to $0.0310"],null,["Stop loss at -25%: hit","Narrative decay: stage Decaying","Smart money exit: 4 wallets sold","Liquidity: down 38%","Developer activity: transfer to exchange"],"Sell. Stop loss was hit and liquidity is thinning."]];
+pt.innerHTML=PS.map((r,i)=>`<tr class="wr ${i==0?'sel':''}" data-i="${i}" tabindex="0"><td><b>${r[0]}</b></td><td>${r[1]}</td><td class="r">${r[2]}</td><td class="r">${r[3]}</td><td class="r ${r[4][0]=='-'?'neg':'pos'}">${r[4]}</td><td class="r">${r[5]}</td><td><span class="tag ${r[6]=='Hold'?'buy':r[6]=='Reduce'?'watch':''}">${r[6]}</span></td><td>${r[7]}</td><td>${r[8]}</td><td class="${r[9]=='High'?'warn':''}">${r[9]}</td></tr>`).join('');
+function ppick(i){const r=PS[i];pt.querySelectorAll('tr').forEach((x,j)=>x.classList.toggle('sel',j==i));
+const dec=r[11]?`<h2 style="margin-top:22px">Narrative decay</h2><div class="steps">${r[11].map((d,k)=>`<div class="${k==1?'now':''}"><b>${d[3]}</b><small>Score ${d[0]}, velocity ${d[1]}, smart money ${d[2]}</small></div>`).join('')}</div>`:'';
+pd.innerHTML=`<h2>${r[0]} since entry</h2><div class="kv"><span>Narrative score</span><b>${r[10][0]}</b></div><div class="kv"><span>Smart money</span><b>${r[10][1]}</b></div><div class="kv"><span>Price</span><b>${r[10][2]}</b></div>${dec}<h2 style="margin-top:22px">Exit checks</h2><div class="ex">${r[12].map(x=>`<div class="kv"><span style="color:var(--tx2)">${x}</span></div>`).join('')}</div><p class="brief" style="margin-top:18px"><b>Agent recommendation.</b> ${r[13]}</p>`}
+pt.querySelectorAll('.wr').forEach(r=>{r.onclick=()=>ppick(+r.dataset.i);r.onkeydown=e=>{if(e.key=='Enter')ppick(+r.dataset.i)}});ppick(0);
+
+const PR={Conservative:[0.1,0.5,10,3,5,85],Balanced:[0.25,1,15,5,8,75],Aggressive:[0.5,2,25,8,12,65],Custom:null};
+const LB=["Max per trade (SOL)","Max daily allocation (SOL)","Max token exposure (%)","Max open positions","Max daily loss (%)","Min confidence (%)"];
+let wm="Shadow",wp="Balanced",wOn=false;
+function seg(el,opts,get,set){el.innerHTML=opts.map(o=>`<button aria-pressed="${get()==o}">${o}</button>`).join('');el.querySelectorAll('button').forEach((b,i)=>b.onclick=()=>{set(opts[i]);wr()})}
+function wr(){seg(mode,["Paper","Shadow","Semi-auto","Auto"],()=>wm,v=>{if((v=="Semi-auto"||v=="Auto")&&!wOn){emsg.textContent="Turn on AI trading access before choosing "+v+".";return}wm=v});
+seg(prof,Object.keys(PR),()=>wp,v=>{wp=v;if(PR[v])vals=PR[v].slice()});
+sw.setAttribute('aria-checked',wOn);lim.className='lim'+(wOn?'':' off');
+lim.innerHTML=LB.map((l,i)=>`<div><label for="l${i}">${l}</label><input id="l${i}" type="number" value="${vals[i]}" ${wOn?'':'disabled'}></div>`).join('');
+lim.querySelectorAll('input').forEach((x,i)=>x.oninput=()=>{vals[i]=x.value;wp="Custom";prof.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',b.textContent=="Custom"))})}
+let vals=PR.Balanced.slice();
+sw.onclick=()=>{wOn=!wOn;if(!wOn&&(wm=="Semi-auto"||wm=="Auto"))wm="Shadow";emsg.textContent=wOn?"AI trading access is on. The agent still needs risk approval for every trade.":"AI trading access is off.";wr()};
+const EM=[["Pause agent","The agent is paused. No new decisions will run."],["Exit all positions","Exit orders queued for all open positions."],["Revoke AI access","AI access revoked. The agent can no longer sign for your wallet."],["Withdraw","Withdrawal started. Choose a destination address next."]];
+emg.innerHTML=EM.map((e,i)=>`<button data-i="${i}">${e[0]}</button>`).join('');
+emg.querySelectorAll('button').forEach((b,i)=>{let t;b.onclick=()=>{if(b.classList.contains('arm')){clearTimeout(t);b.classList.remove('arm');b.textContent=EM[i][0];emsg.textContent=EM[i][1];if(i==2){wOn=false;wm="Shadow";wr()}}else{b.classList.add('arm');b.textContent="Confirm";emsg.textContent="Press Confirm within 4 seconds to "+EM[i][0].toLowerCase()+".";t=setTimeout(()=>{b.classList.remove('arm');b.textContent=EM[i][0]},4000)}}});
+wr();
+
+const OP=[["ROBOT","Robotics",91,"Buy","88%",[92,91,85,74,87,32],"$0.00681","$2.8M","$681K","+14%",["3 independent high-score wallets entered within 11 minutes.","Narrative attention rose 284% while price moved 14%.","Liquidity grew 22%."],["The narrative is early and unproven.","The developer wallet still holds 7.2%.","One high-score wallet reduced its position."]],
+["QCAT","Quantum computing",83,"Watch","71%",[84,70,62,68,90,48],"$0.0042","$1.1M","$240K","+6%",["Likely the original token for this narrative.","Creator activity is rising across two platforms."],["Liquidity is thin for the size of the attention.","Only one leader wallet has entered so far."]],
+["PMKT","Prediction markets",79,"Watch","66%",[76,78,90,55,72,30],"$0.0210","$6.4M","$1.1M","+3%",["Deep liquidity and low manipulation risk.","Two independent wallets accumulated over the last hour."],["Momentum is modest.","The narrative may already be widely known."]],
+["NODE","DePIN",68,"Ignore","54%",[61,40,30,80,50,78],"$0.0031","$420K","$95K","+31%",["The narrative is growing steadily."],["Smart money is weak and liquidity is thin.","Price already moved +31% with little wallet support."]]];
+const BL=["Narrative","Smart money","Liquidity","Momentum","OG","Risk"];
+ol.innerHTML=OP.map((o,i)=>`<button class="op ${i==0?'sel':''}" data-i="${i}"><div><div class="t">${o[0]}</div><div class="m">${o[1]} &middot; score ${o[2]}</div><div style="margin-top:8px"><span class="tag ${o[3]=='Buy'?'buy':'watch'}">${o[3]} ${o[4]}</span></div></div><div class="bars">${o[5].map((v,k)=>`<div><small>${BL[k]}<b>${v}</b></small><div class="bar1"><i class="${k==5?'rk':v>=85?'hi':''}" style="width:${v}%"></i></div></div>`).join('')}</div></button>`).join('');
+function opick(i){const o=OP[i];ol.querySelectorAll('.op').forEach((b,j)=>b.classList.toggle('sel',j==i));
+od.innerHTML=`<div class="kv"><span>Price</span><b>${o[6]}</b></div><div class="kv"><span>Market cap</span><b>${o[7]}</b></div><div class="kv"><span>Liquidity</span><b>${o[8]}</b></div><div class="kv"><span>1h</span><b class="pos">${o[9]}</b></div><div class="cols" style="margin-top:20px"><div><h3>Why it is interesting</h3><ul>${o[10].map(x=>`<li>${x}</li>`).join('')}</ul></div><div><h3>Why it may fail</h3><ul>${o[11].map(x=>`<li>${x}</li>`).join('')}</ul></div></div><p class="note">This is a research signal, not a prediction. The risk governor still checks every trade.</p><button class="tb" id="otok" style="margin-top:12px">Open token</button>`;otok.onclick=()=>{tok(i);show('token')}}
+ol.querySelectorAll('.op').forEach(b=>b.onclick=()=>opick(+b.dataset.i));opick(0);tok(0);
+
+const AQ={"Why is ROBOT ranked highly?":["Three independent high-score wallets bought within 11 minutes, and robotics attention is up 284% while price is up 14%. Liquidity also grew 22%. The main doubts are that the narrative is early and the developer wallet still holds 7.2%.",["getToken()","getConsensus()","getNarrativeVelocity()","getTokenRisk()"]],
+"What changed in the last 15 minutes?":["One leader wallet bought $24,820 of ROBOT, and another high-score wallet reduced its position. Narrative velocity held near +280%. Nothing changed in liquidity.",["getWalletHistory()","getNarrativeVelocity()","getTokenMetrics()"]],
+"Are smart wallets still accumulating?":["Mostly yes. Net flow is +$438K, but the reduction by one high-score wallet is worth watching. If a second wallet reduces, the consensus score would drop.",["getSmartMoney()","getConsensus()","getWalletProfile()"]],
+"Is the narrative becoming saturated?":["Not yet. Robotics is in the accelerating stage with low saturation risk. AI agents is the one showing decay, with its score down from 91 to 74.",["getNarrative()","getNarrativeLifecycle()"]],
+"Should this position still be held?":["The current view is Hold. The narrative score rose from 87 to 91 since entry, smart money is still positive, and no exit signal has fired. Trailing stop and take-profit levels are unchanged.",["getPosition()","getRiskProfile()","getNarrativeLifecycle()"]]};
+qs.innerHTML=Object.keys(AQ).map(q=>`<button>${q}</button>`).join('');
+function ask(q){const a=AQ[q]||["This prototype only answers the suggested questions. The live agent would call its data tools and explain what it found.",["getNarratives()"]];
+th.insertAdjacentHTML('beforeend',`<div class="msg u">${q.replace(/</g,'&lt;')}</div><div class="msg"><p>${a[0]}</p><div class="tools">${a[1].map(t=>`<span>${t}</span>`).join('')}</div></div>`);main.scrollTop=main.scrollHeight}
+qs.querySelectorAll('button').forEach(b=>b.onclick=()=>ask(b.textContent));
+abtn.onclick=()=>{const q=ain.value.trim();if(q){ask(q);ain.value=''}};ain.onkeydown=e=>{if(e.key=='Enter')abtn.click()};
+
+(function(){const mk=(a,b)=>{let v=0;return Array.from({length:30},(_,i)=>v+=a+Math.sin(i*b)*a*2.2)};
+const S=[[mk(42,1.3),'var(--ac)'],[mk(20,.9),'var(--ac2)'],[mk(6,1.7),'var(--tx3)']];const mx=Math.max(...S.flat().filter(Array.isArray).flat()),mn=Math.min(0,...S.map(x=>Math.min(...x[0])));
+const X=i=>40+i*(660/29),Y=v=>230-(v-mn)/(mx-mn)*200;let h=[0,1,2,3].map(k=>`<line class="g" x1="40" x2="700" y1="${30+k*67}" y2="${30+k*67}"/>`).join('');
+S.forEach(x=>h+=`<polyline fill="none" stroke="${x[1]}" stroke-width="1.8" points="${x[0].map((v,i)=>X(i)+','+Y(v)).join(' ')}"/>`);asvg.innerHTML=h})();
+const bar=(l,v,t)=>`<div class="kv"><span style="color:var(--tx2)">${l}</span><span style="display:flex;gap:10px;align-items:center;min-width:55%"><span class="bar1" style="flex:1;margin:0"><i class="hi" style="width:${v}%"></i></span><b>${t||v+'%'}</b></span></div>`;
+acf.innerHTML=[["60 to 70",51],["70 to 80",61],["80 to 90",72],["90 and above",78]].map(x=>bar(x[0]+" confidence, win rate",x[1])).join('');
+asg.innerHTML=[["Smart money consensus",68],["Narrative acceleration",66],["Attention-price divergence",63],["Leader wallet",71],["OG token",70],["Liquidity expansion",59]].map(x=>bar(x[0],x[1])).join('');
+const TR=[["10:44","ROBOT","Buy","AI semi-auto","Consensus and divergence","0.18 SOL","$0.00681","$0.00684","0.4%","88%","Approved"],["10:20","AGNT","Reduce","AI auto","Narrative decay","50%","$0.0131","$0.0130","0.8%","74%","Approved"],["09:58","NODE","Buy","AI semi-auto","Weak smart money","0.10 SOL","$0.0031","-","-","54%","Rejected: confidence below 70%"],["09:12","GAMR","Sell","Stop loss","-25% stop","100%","$0.0331","$0.0310","6.3%","-","Approved"]];
+trb.innerHTML=TR.map(r=>`<tr>${r.map((c,i)=>`<td class="${[5,6,7,8,9].includes(i)?'r':''}">${i==1?'<b>'+c+'</b>':i==10&&c[0]=='R'?'<span class="warn">'+c+'</span>':c}</td>`).join('')}</tr>`).join('');
+
+const AL=[["10:47","Critical","Liquidity drop","GAMR liquidity fell 38% in 20 minutes."],["10:44","Important","AI buy","Agent bought ROBOT after risk approval."],["10:42","Important","Leader wallet entry","8Xi...A2 bought ROBOT, $24,820."],["10:31","Watch","Narrative accelerating","Robotics moved from emerging to accelerating."],["10:20","Important","Narrative decay","AI agents score fell from 91 to 74. Agent reduced AGNT."],["09:58","Info","Risk rejection","NODE buy rejected: confidence below 70%."],["09:40","Watch","New OG token candidate","QCAT may be the original quantum computing token."]];
+let afl="All";
+function arender(){seg(af,["All","Critical","Important","Watch","Info"],()=>afl,v=>afl=v);
+al.innerHTML=AL.filter(a=>afl=="All"||a[1]==afl).map(a=>`<div class="al ${a[1]}"><i></i><time>${a[0]}</time><div>${a[2]}<small>${a[3]}</small></div><span class="stage" style="margin:0">${a[1]}</span></div>`).join('')||'<p class="note">No alerts at this level right now. The agent is still watching.</p>'}
+const _sr=seg;seg=function(el,o,g,st){_sr(el,o,g,v=>{st(v);if(el===af)arender()})};arender();
+
+const OB={n:0,st:{auth:"Google",mode:"Observe only",risk:"Balanced",int:["All"]}};
+const OS=[["Sign in","Use Google or a Solana wallet. Your keys are never stored by us.",()=>ch("auth",[["Google","Sign in with your Google account"],["Wallet","Connect a Solana wallet"]])],
+["Create your trading wallet","A separate wallet the agent can use, with limits you set. You do not need to fund it now.",()=>`<div class="kv"><span>Trading wallet</span><b>Created after sign in</b></div><div class="kv"><span>Funding</span><b>Optional, later</b></div>`],
+["Choose a mode","You can change this at any time.",()=>ch("mode",[["Observe only","Signals and explanations, no trades"],["Semi auto","The agent proposes, you confirm each trade"],["Auto","The agent trades within your limits"]])],
+["Choose your risk level","Fixed limits always apply on top of this.",()=>ch("risk",[["Conservative","Small positions, high confidence only"],["Balanced","Moderate size and confidence"],["Aggressive","Larger positions, lower confidence bar"]])],
+["Pick narratives to follow","Choose as many as you like.",()=>`<div class="chips">${["All","AI","Gaming","Meme","DePIN","Robotics","RWA","Prediction markets"].map(x=>`<button aria-pressed="${OB.st.int.includes(x)}" data-x="${x}">${x}</button>`).join('')}</div>`],
+["Start your agent","Here is what you chose.",()=>Object.entries({Sign_in:OB.st.auth,Mode:OB.st.mode,Risk:OB.st.risk,Narratives:OB.st.int.join(", ")}).map(([k,v])=>`<div class="kv"><span>${k.replace('_',' ')}</span><b>${v}</b></div>`).join('')]];
+function ch(k,o){return o.map(x=>`<button class="ch" data-k="${k}" data-v2="${x[0]}" aria-pressed="${OB.st[k]==x[0]}"><b>${x[0]}</b><span>${x[1]}</span></button>`).join('')}
+function orender(){const s=OS[OB.n];ostep.textContent="Step "+(OB.n+1)+" of "+OS.length;oh1.textContent=s[0];op.textContent=s[1];oc.innerHTML=s[2]();
+oc.querySelectorAll('.ch').forEach(b=>b.onclick=()=>{OB.st[b.dataset.k]=b.dataset.v2;orender()});
+oc.querySelectorAll('.chips button').forEach(b=>b.onclick=()=>{const x=b.dataset.x,a=OB.st.int;if(x=="All")OB.st.int=["All"];else{OB.st.int=a.filter(y=>y!="All");OB.st.int.includes(x)?OB.st.int=OB.st.int.filter(y=>y!=x):OB.st.int.push(x);if(!OB.st.int.length)OB.st.int=["All"]}orender()});
+oback.style.visibility=OB.n?'visible':'hidden';onext.textContent=OB.n==OS.length-1?"Start agent":"Continue"}
+function oopen(){OB.n=0;onb.hidden=false;orender();onext.focus()}
+onext.onclick=()=>{if(OB.n==OS.length-1){onb.hidden=true;show('overview')}else{OB.n++;orender()}};oback.onclick=()=>{OB.n--;orender()};oskip.onclick=()=>onb.hidden=true;onbtn.onclick=oopen;
+document.addEventListener('keydown',e=>{if(e.key=='Escape'&&!onb.hidden)onb.hidden=true});
+
+ss.innerHTML=[["Helius","Online"],["Narrative providers","Degraded"],["AI models","Online"],["Redis","Online"],["Postgres","Online"],["Jupiter","Online"],["Jito","Online"],["Workers","Degraded"]].map(x=>`<div class="kv"><span style="color:var(--tx)">${x[0]}</span><span class="${x[1]=='Online'?'pos':'warn'}">&#9679; ${x[1]}</span></div>`).join('');
+let tm="System";seg(thm,["System","Dark","Light"],()=>tm,v=>{tm=v;if(v=="System")delete R.dataset.theme;else R.dataset.theme=v.toLowerCase();thm.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',b.textContent==v))});
+nt.innerHTML=[["Critical alerts",1],["Important alerts",1],["Watch alerts",0],["Info",0],["Agent trades",1]].map((n,i)=>`<div class="kv"><span>${n[0]}</span><button class="sw" role="switch" aria-checked="${!!n[1]}" aria-label="${n[0]}"><i></i></button></div>`).join('');
+nt.querySelectorAll('.sw').forEach(b=>b.onclick=()=>b.setAttribute('aria-checked',b.getAttribute('aria-checked')!='true'));
+
+function nrender(i){curN=i;const n=RN[i];ncrumb.textContent="Narratives / "+n[0];nname.textContent=n[0];
+nstrip.innerHTML=[["Narrative score",n[2]],["Stage",st[Math.round(n[1])]],["Velocity",`<span style="color:${vc(n[4])}">${n[4]}</span>`],["Organic score",n[5]]].map(r=>`<div><small>${r[0]}</small><strong>${r[1]}</strong></div>`).join('');
+nbody.hidden=i!=0;nph.hidden=i==0}
+nrender(0);
+function show(v){['overview','radar','smart','token','pos','wallet','opp','agent','narr','ana','trd','alerts','sys','set'].forEach(k=>document.getElementById('v-'+k).hidden=k!=v);
+document.querySelectorAll('[data-v]').forEach(a=>{v==a.dataset.v?a.setAttribute('aria-current','page'):a.removeAttribute('aria-current')});main.scrollTop=0}
+document.querySelectorAll('[data-v]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();if(a.dataset.v=='narr')nrender(curN);show(a.dataset.v)}));
+
+const PG=[["Overview","overview"],["Radar","radar"],["Narratives","narr"],["Opportunities","opp"],["Smart money","smart"],["Tokens","token"],["Positions","pos"],["Agent","agent"],["Trades","trd"],["Analytics","ana"],["Alerts","alerts"],["System","sys"],["Settings","set"],["Wallet","wallet"]];
+let pitems=[],pi=0,pback=null;
+function allCmds(){const c=PG.map(g=>({l:"Go to "+g[0],h:"Page",r:()=>show(g[1])}));
+c.push({l:"Start onboarding",h:"Command",r:oopen},{l:"Open agent panel",h:"Command",r:()=>{app.classList.remove('ag-c');if(innerWidth<=900)app.classList.add('ag-o')}},{l:"Pause agent",h:"Command",r:()=>{show('wallet');emsg.textContent="Use Pause agent above and confirm."}},{l:"Switch mode",h:"Command",r:()=>show('wallet')});
+RN.forEach((n,i)=>c.push({l:n[0],h:"Narrative",r:()=>{show('radar');pick(i)}}));
+W.forEach((w,i)=>c.push({l:"Wallet "+w[0],h:"Wallet",r:()=>{show('smart');wpick(i)}}));
+OP.forEach((o,i)=>c.push({l:o[0]+" ("+o[1]+")",h:"Token",r:()=>{tok(i);show('token')}}));return c}
+function prender(){const q=pin.value.toLowerCase();pitems=allCmds().filter(c=>c.l.toLowerCase().includes(q)).slice(0,30);pi=Math.min(pi,Math.max(pitems.length-1,0));
+plist.innerHTML=pitems.length?pitems.map((c,i)=>`<button role="option" aria-selected="${i==pi}" data-i="${i}">${c.l}<small>${c.h}</small></button>`).join(''):'<p class="note" style="padding:10px">No match. Try a token symbol, wallet address or narrative name.</p>';
+plist.querySelectorAll('button').forEach(b=>b.onclick=()=>prun(+b.dataset.i));const a=plist.querySelector('[aria-selected="true"]');if(a)a.scrollIntoView({block:'nearest'})}
+function popen(){pback=document.activeElement;pal.hidden=false;pin.value='';pi=0;prender();pin.focus()}
+function pclose(){pal.hidden=true;if(pback)pback.focus()}
+function prun(i){const c=pitems[i];if(!c)return;pclose();c.r()}
+pin.oninput=()=>{pi=0;prender()};
+pin.onkeydown=e=>{if(e.key=='ArrowDown'){e.preventDefault();pi=Math.min(pi+1,pitems.length-1);prender()}else if(e.key=='ArrowUp'){e.preventDefault();pi=Math.max(pi-1,0);prender()}else if(e.key=='Enter'){prun(pi)}else if(e.key=='Escape'){pclose()}};
+pal.onclick=e=>{if(e.target==pal)pclose()};kbtn.onclick=popen;
+document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()=='k'){e.preventDefault();pal.hidden?popen():pclose()}else if(e.key=='Escape'&&!pal.hidden)pclose()});
+
+document.querySelectorAll('table').forEach(t=>{const h=[...t.querySelectorAll('thead th')].map(x=>x.textContent);t.querySelectorAll('tbody tr').forEach(r=>[...r.children].forEach((c,i)=>c.dataset.label=h[i]||''))});
+if(innerWidth<=900)app.classList.add('ag-c');
+</script>
+</body>
+</html>

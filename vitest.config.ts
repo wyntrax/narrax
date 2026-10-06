@@ -1,0 +1,4 @@
+import { defineConfig } from 'vitest/config';
+
+// Integration tests share one database and run its global recompute jobs, so files run one at a time.
+export default defineConfig({ test: { fileParallelism: false } });
