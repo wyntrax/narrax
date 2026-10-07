@@ -22,6 +22,8 @@ import { registerIntelRoutes } from './intel';
 import { registerMeRoutes, type BalanceSource } from './me';
 import { registerGateway, type GatewayDeps } from './gateway';
 import type { ExecutionJob } from '@narra/queue';
+import { registerLinkedWalletRoutes } from './entitlements/linkRoutes';
+import { registerWyntraxWebhook, type WyntraxDeps } from './entitlements/webhook';
 
 const EvaluateBody = z.object({
   /** Raw model output. Untrusted until it passes the schema. */
@@ -31,9 +33,9 @@ const EvaluateBody = z.object({
   overrides: RiskLimitsSchema.partial().optional(),
 });
 
-export async function buildApp(opts: { webhooks?: WebhookDeps; account?: AccountDeps; /** Queues a Helius webhook sync. Leave out when Helius is not configured. */ requestWalletSync?: () => Promise<unknown>; /** Queues a confirmed order for the execution worker. */ enqueueExecution?: (job: ExecutionJob) => Promise<unknown>; /** The model behind agent chat. Without it chat answers 503. */ chatLlm?: LlmProvider | null; chatQuestionsPerMinute?: number; /** Health checks for the admin status view. */ ops?: OpsDeps; /** CORS, HSTS. */ http?: HttpOptions; /** Reports which providers are configured, for the admin connections view. */ connections?: () => ConnectionStatus[]; /** Reads SOL balances for GET /v1/me/wallets/balances. Without it balances are reported as unknown. */ balances?: BalanceSource; /** WebSocket gateway. Without it GET /v1/stream does not exist. */ realtime?: Omit<GatewayDeps, 'db' | 'verifier' | 'allowedOrigins'>; /** Set when the API sits behind a reverse proxy, so rate limits see the client address and not the proxy's. Never true when the API is exposed directly. */ trustProxy?: boolean } = {}): Promise<FastifyInstance> {
+export async function buildApp(opts: { webhooks?: WebhookDeps; account?: AccountDeps; /** Queues a Helius webhook sync. Leave out when Helius is not configured. */ requestWalletSync?: () => Promise<unknown>; /** Queues a confirmed order for the execution worker. */ enqueueExecution?: (job: ExecutionJob) => Promise<unknown>; /** The model behind agent chat. Without it chat answers 503. */ chatLlm?: LlmProvider | null; chatQuestionsPerMinute?: number; /** Health checks for the admin status view. */ ops?: OpsDeps; /** CORS, HSTS. */ http?: HttpOptions; /** Reports which providers are configured, for the admin connections view. */ connections?: () => ConnectionStatus[]; /** Reads SOL balances for GET /v1/me/wallets/balances. Without it balances are reported as unknown. */ balances?: BalanceSource; /** WebSocket gateway. Without it GET /v1/stream does not exist. */ realtime?: Omit<GatewayDeps, 'db' | 'verifier' | 'allowedOrigins'>; /** Set when the API sits behind a reverse proxy, so rate limits see the client address and not the proxy's. Never true when the API is exposed directly. */ trustProxy?: boolean; wyntrax?: WyntraxDeps } = {}): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: process.env.NODE_ENV === 'test' ? false : { level: 'info', redact: ['req.headers.authorization'] },
+    logger: process.env.NODE_ENV === 'test' ? false : { level: 'info', redact: ['req.headers.authorization', 'req.headers["x-wyntrax-signature"]'] },
     bodyLimit: HTTP_LIMITS.bodyLimitBytes, requestTimeout: HTTP_LIMITS.requestTimeoutMs, keepAliveTimeout: HTTP_LIMITS.keepAliveTimeoutMs,
     trustProxy: opts.trustProxy ?? false,
   });
@@ -57,7 +59,9 @@ export async function buildApp(opts: { webhooks?: WebhookDeps; account?: Account
   });
 
   if (opts.webhooks) registerWebhooks(app, opts.webhooks);
+  await registerWyntraxWebhook(app, opts.wyntrax);
   if (opts.account) {
+    registerLinkedWalletRoutes(app, opts.account);
     registerAccountRoutes(app, opts.account);
     registerReadRoutes(app, opts.account);
     registerAdminRoutes(app, { ...opts.account, connections: opts.connections });

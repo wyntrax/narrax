@@ -29,6 +29,7 @@ if (!chatLlm) console.log('no AI provider configured: chat is off');
 // An async function because this file runs as CommonJS under tsx, which has no top-level await.
 async function main() {
   const app = await buildApp({
+    wyntrax: { db, secret: process.env.WYNTRAX_WEBHOOK_SECRET || undefined, previousSecret: process.env.WYNTRAX_WEBHOOK_SECRET_PREVIOUS || undefined },
     chatLlm,
     requestWalletSync: syncConfigured ? () => queues.requestWalletSync() : undefined,
     enqueueExecution: (job) => queues.enqueueExecution(job),
