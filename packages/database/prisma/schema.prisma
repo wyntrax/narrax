@@ -175,6 +175,9 @@ model User {
   proposals     ChatProposal[]
   settings       UserSettings?
   dryRuns        DryRun[]
+  linkedWallets  LinkedWallet[]
+  walletLinkChallenges WalletLinkChallenge[]
+  accessGrants   AccessGrant[]
 }
 
 /// Per-user preferences. A user without a row gets the defaults named in packages/shared (alerts.ts).
@@ -1003,4 +1006,114 @@ model DryRun {
 
   @@index([userId, createdAt])
   @@index([outcome, createdAt])
+}
+
+// Entitlements are independent of custody, trading permissions and risk controls.
+enum EntitlementChain {
+  solana
+}
+
+enum WyntraxTier {
+  NONE
+  MEMBER
+  PRO
+  ELITE
+}
+
+// Intentionally cannot represent a paid tier, even for an admin grant.
+enum LocalAccessTier {
+  EARLY_ACCESS
+}
+
+enum AccessGrantSource {
+  EARLY_ACCESS
+  ADMIN
+}
+
+enum AccessGrantStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+model LinkedWallet {
+  id         String @id @default(cuid())
+  userId     String
+  user       User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chain      EntitlementChain
+  address    String
+  verifiedAt DateTime
+  createdAt  DateTime @default(now())
+  @@unique([chain, address])
+  @@index([userId])
+}
+
+model WalletLinkChallenge {
+  id          String @id @default(cuid())
+  userId      String
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chain       EntitlementChain
+  address     String
+  domain      String
+  nonceHash   String @unique
+  messageHash String
+  issuedAt    DateTime
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model WyntraxMembership {
+  wyntraxUserId     String @id
+  tier             WyntraxTier
+  version          BigInt
+  validUntil       DateTime?
+  balanceSnapshotAt DateTime?
+  sourceUpdatedAt  DateTime
+  receivedAt       DateTime
+  lastEventId      String?
+  lastTransport    String
+  wallets          WyntraxMembershipWallet[]
+  @@index([validUntil])
+  @@index([sourceUpdatedAt])
+}
+
+model WyntraxMembershipWallet {
+  id            String @id @default(cuid())
+  wyntraxUserId String
+  membership    WyntraxMembership @relation(fields: [wyntraxUserId], references: [wyntraxUserId], onDelete: Cascade)
+  chain         EntitlementChain
+  address       String
+  @@unique([wyntraxUserId, chain, address])
+  @@index([chain, address])
+}
+
+model AccessGrant {
+  id         String @id @default(cuid())
+  userId     String
+  user       User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source     AccessGrantSource
+  tier       LocalAccessTier @default(EARLY_ACCESS)
+  status     AccessGrantStatus @default(ACTIVE)
+  validUntil DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  revokedAt  DateTime?
+  createdBy  String?
+  reason     String?
+  @@unique([userId, source])
+  @@index([source, status, validUntil])
+}
+
+model WebhookEvent {
+  id            String @id
+  wyntraxUserId String
+  version       BigInt
+  bodyHash      String
+  occurredAt    DateTime
+  receivedAt    DateTime
+  outcome       String
+  @@index([wyntraxUserId, version])
+  @@index([receivedAt])
 }
