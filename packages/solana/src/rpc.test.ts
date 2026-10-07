@@ -6,6 +6,10 @@ const OWNER = 'Owner'.padEnd(40, '1');
 const tokenAcct = (amount: string) => ({ account: { data: { parsed: { info: { tokenAmount: { amount } } } } } });
 
 describe('SolanaRpc', () => {
+  it('exposes the simulation context slot as optional evidence', async () => {
+    const rpc = new SolanaRpc({ url: 'http://test', fetch: reply({ context: { slot: 42 }, value: { err: null, accounts: [null] } }) });
+    expect((await rpc.simulateTransaction('unsigned', ['a'])).slot).toBe(42);
+  });
   it('preserves an empty closed post-account object and unwraps the base64 tuple without reinterpreting it', async () => {
     const account = { lamports: 0, owner: '11111111111111111111111111111111', data: ['', 'base64'] };
     const rpc = new SolanaRpc({ url: 'http://test', fetch: reply({ value: { err: null, unitsConsumed: 1, accounts: [account, null], logs: [] } }) });

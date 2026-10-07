@@ -49,6 +49,7 @@ describe.skipIf(!up)('B5a dry-run executor on a real Postgres (Jupiter and the R
   const rpc: DryRunDeps['rpc'] = {
     async getMintInfo() { world.calls.getMintInfo++; if (world.failRpc) throw new RpcError('getAccountInfo failed'); return world.mintInfo; },
     async getAccounts() { world.calls.getAccounts++; return [sys(PRE_SOL), tokenAcct(5000n), null]; },
+    async getAccountsWithContext(addresses) { return { slot: 1, accounts: await rpc.getAccounts(addresses) }; },
     async simulateTransaction() {
       world.calls.simulate++;
       const s = world.simulate;

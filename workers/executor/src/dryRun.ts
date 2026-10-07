@@ -1,8 +1,9 @@
 import type { Prisma, PrismaClient } from '@narra/database';
+import { VersionedTransaction } from '@solana/web3.js';
 import { sanitizeUntrusted } from '@narra/shared';
 import { QuoteError, RpcError, WSOL_MINT as SOL_MINT, type JupiterClient, type SolanaRpc } from '@narra/solana';
 import {
-  TOKEN_PROGRAM, verifySimulation, verifySwapTransaction, type Reason, type RawAccount,
+  TOKEN_PROGRAM, resolveLookupTables, verifySimulation, verifySwapTransaction, type Reason, type RawAccount,
 } from '@narra/tx-verify';
 import type { DryRunner, DryRunSummary } from '@narra/worker-pipeline';
 import type { ExecutorConfig } from './config';
@@ -13,7 +14,7 @@ const LAMPORTS = 1_000_000_000;
 export interface DryRunDeps {
   db: PrismaClient;
   jupiter: Pick<JupiterClient, 'buildSwap'>;
-  rpc: Pick<SolanaRpc, 'getAccounts' | 'simulateTransaction' | 'getMintInfo'>;
+  rpc: Pick<SolanaRpc, 'getAccounts' | 'getAccountsWithContext' | 'simulateTransaction' | 'getMintInfo'>;
   config: ExecutorConfig;
   now?: () => Date;
 }
@@ -97,7 +98,19 @@ export function makeDryRunner(deps: DryRunDeps): DryRunner {
 
         // 3. Build the swap and look at it before anything else.
         const built = await jupiter.buildSwap({ quote, userPublicKey: wallet, maxPriorityFeeLamports: Number(config.limits.maxPriorityFeeLamports) });
-        const verdict = verifySwapTransaction(built.transactionBase64, { userWallet: wallet, side, inputMint, outputMint, inAmount: BigInt(quote.inAmount), limits: config.limits });
+        // Decode only to detect tables. Undecodable input still reaches the pure verifier's original refusal.
+        let tableAddresses: string[] = [];
+        try {
+          if (built.transactionBase64.length <= 1644) tableAddresses = VersionedTransaction.deserialize(Buffer.from(built.transactionBase64, 'base64')).message.addressTableLookups.map(l => l.accountKey.toBase58());
+        } catch { /* verifySwapTransaction records UNDECODABLE below */ }
+        const slots = { lookupResolution: null as number | null, preSimulation: null as number | null, simulation: null as number | null };
+        summary = { ...summary, slots, lookupTableAddresses: tableAddresses, lastValidBlockHeight: built.lastValidBlockHeight, quote: { inAmount: quote.inAmount, outAmount: quote.outAmount, minOut: quote.otherAmountThreshold, priceImpactPct: quote.priceImpactPct, slippageBps: quote.slippageBps, fetchedAt: quote.fetchedAt.toISOString() } };
+        const resolution = tableAddresses.length ? await resolveLookupTables(built.transactionBase64, rpc, config.limits) : undefined;
+        if (resolution) {
+          slots.lookupResolution = resolution.ok ? resolution.resolved.slot : resolution.slot;
+          if (!resolution.ok) { reasons.push(...resolution.reasons); return await record('REJECTED'); }
+        }
+        const verdict = verifySwapTransaction(built.transactionBase64, { userWallet: wallet, side, inputMint, outputMint, inAmount: BigInt(quote.inAmount), limits: config.limits, ...(resolution?.ok ? { resolvedLookupTables: resolution.resolved } : {}) });
         messageHash = verdict.summary.messageHash;
         summary = { ...summary, transaction: verdict.summary, lastValidBlockHeight: built.lastValidBlockHeight, quote: { inAmount: quote.inAmount, outAmount: quote.outAmount, minOut: quote.otherAmountThreshold, priceImpactPct: quote.priceImpactPct, slippageBps: quote.slippageBps, fetchedAt: quote.fetchedAt.toISOString() } };
         reasons.push(...verdict.reasons);
@@ -106,8 +119,11 @@ export function makeDryRunner(deps: DryRunDeps): DryRunner {
         // 4. Simulate, and check what it would do to the user's balances.
         const d = verdict.summary.derived;
         const addresses = [wallet, d.inputAccount, d.outputAccount];
-        const before = await rpc.getAccounts(addresses);
+        const preAccounts = await rpc.getAccountsWithContext(addresses);
+        const before = preAccounts.accounts;
+        slots.preSimulation = preAccounts.slot;
         const sim = await rpc.simulateTransaction(built.transactionBase64, addresses);
+        slots.simulation = sim.slot ?? null;
         const effect = verifySimulation(
           { err: sim.err, unitsConsumed: sim.unitsConsumed, pre: { wallet: toRaw(before[0] ?? null), inputAccount: toRaw(before[1] ?? null), outputAccount: toRaw(before[2] ?? null) }, post: { wallet: toRaw(sim.accounts[0] ?? null), inputAccount: toRaw(sim.accounts[1] ?? null), outputAccount: toRaw(sim.accounts[2] ?? null) } },
           { side, inAmount: BigInt(quote.inAmount), minOutAmount: BigInt(quote.otherAmountThreshold!), maxOverheadLamports: config.limits.maxOverheadLamports, maxComputeUnits: config.limits.maxComputeUnits },
