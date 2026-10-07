@@ -6,6 +6,13 @@ const OWNER = 'Owner'.padEnd(40, '1');
 const tokenAcct = (amount: string) => ({ account: { data: { parsed: { info: { tokenAmount: { amount } } } } } });
 
 describe('SolanaRpc', () => {
+  it('preserves an empty closed post-account object and unwraps the base64 tuple without reinterpreting it', async () => {
+    const account = { lamports: 0, owner: '11111111111111111111111111111111', data: ['', 'base64'] };
+    const rpc = new SolanaRpc({ url: 'http://test', fetch: reply({ value: { err: null, unitsConsumed: 1, accounts: [account, null], logs: [] } }) });
+    expect((await rpc.simulateTransaction('unsigned', ['closed', 'missing'])).accounts).toEqual([{ lamports: 0, owner: account.owner, data: '' }, null]);
+    const invalid = new SolanaRpc({ url: 'http://test', fetch: reply({ value: { err: null, accounts: [{ ...account, data: '' }] } }) });
+    await expect(invalid.simulateTransaction('unsigned', ['closed'])).rejects.toThrow(RpcError);
+  });
   it('preserves the old account read and exposes context only through the additive method', async () => {
     const requests: string[] = [];
     const fetcher = (async (_url: unknown, init: RequestInit) => {
