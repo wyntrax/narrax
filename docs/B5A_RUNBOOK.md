@@ -86,7 +86,28 @@ Both BONK and WIF were independently matched by Jupiter token search and DEX Scr
 
 All routes existed, all serialized transactions fit 1232 bytes, and reported impact was below 1%. Legacy BUY RPC simulation returned no execution error but the effect checker returned `TOKEN_ACCOUNT_UNREADABLE` for both tokens (121785 / 69086 units). Effect-summary deltas remained null. This independent blocker is not fixed here. Exits were not simulated. Legacy routes exist at this size, but are not a guarantee for every future route; reducing maxAccounts does not promise zero tables.
 
+Quote evidence, captured 2026-10-07T01:02:42.494Z (base units, 100 bps slippage throughout; impact is the repository client's percent conversion):
+
+| Token | Variant | Side | In | Expected out | Minimum out | Impact % |
+|---|---|---|---:|---:|---:|---:|
+| BONK | Current | BUY | 6325000 | 20874104397 | 20665363354 | 0 |
+| BONK | Current | SELL | 20874104397 | 6325845 | 6262587 | 0.121399 |
+| BONK | Legacy | BUY | 6325000 | 20873226293 | 20664494031 | 0 |
+| BONK | Legacy | SELL | 20873226293 | 6320315 | 6257112 | 0.210258 |
+| BONK | max32 | BUY | 6325000 | 20872500504 | 20663775499 | 0 |
+| BONK | max32 | SELL | 20872500504 | 6324880 | 6261632 | 0.130400 |
+| WIF | Current | BUY | 6325000 | 3116892 | 3085724 | 0 |
+| WIF | Current | SELL | 3116892 | 6325015 | 6261765 | 0.056769 |
+| WIF | Legacy | BUY | 6325000 | 3116892 | 3085724 | 0 |
+| WIF | Legacy | SELL | 3116892 | 6325015 | 6261765 | 0.063641 |
+| WIF | max32 | BUY | 6325000 | 3115900 | 3084741 | 0 |
+| WIF | max32 | SELL | 3115900 | 6323002 | 6259772 | 0 |
+
+Every versioned BUY had the two messages `Instruction 3 (associated-token) names an account loaded from a lookup table, which cannot be verified.` and the same message for instruction 6 (`ACCOUNT_NOT_STATIC`). Every versioned SELL had the instruction 3 message only. Legacy verifiers had no reasons. Both legacy effect-verifier failures reported `A token account was not a readable Token program account.` (`TOKEN_ACCOUNT_UNREADABLE`); `walletLamportsSpent`, `inputTokensSpent`, `outputTokensGained` were all null. Quote-to-simulation time: BONK 616 ms; WIF 610 ms (10000 ms limit). No ACCEPTED balance-effect result was obtained.
+
 The first current-variant rejection is saved unmodified in `packages/tx-verify/src/captured-fixtures.ts`, including base64 transaction, raw account data, capture time and RPC slot. The script never overwrites it. Pure tests do not fetch the network or simulate this historical blockhash. Compatibility tests live under tx-verify (within the approved edit scope); they assert exact default Jupiter URL/body bytes. No executor wiring is authorized before the review checkpoint.
+
+Part B checkpoint: captured transaction plus resolved tables passes the pure verifier with no reasons; absent resolution still returns two `ACCOUNT_NOT_STATIC` reasons. Resolver failures are `LOOKUP_TABLE_UNRESOLVED`, `LOOKUP_TABLE_INVALID`, `LOOKUP_INDEX_OUT_OF_RANGE`, with `TOO_MANY_LOOKUP_TABLES` checked before I/O and `UNDECODABLE` for invalid transactions. Resolution makes addresses visible without granting permissions. See the new lookup-table section of `SECURITY_REVIEW_PLAN_B5.md` for trust assumptions and the independent simulation blocker. Do not wire this into `dryRun.ts` until owner approval.
 
 ## 5. Drills (do these once)
 
