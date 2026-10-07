@@ -121,6 +121,15 @@ export class SolanaRpc {
     return r.value.map((a) => (a ? { lamports: a.lamports, owner: a.owner, data: a.data[0] } : null));
   }
 
+  /** Same confirmed account read, retaining the RPC context slot as review evidence only. */
+  async getAccountsWithContext(addresses: string[]): Promise<{ slot: number; accounts: (RpcAccount | null)[] }> {
+    if (addresses.length === 0 || addresses.length > 100) throw new RpcError('getMultipleAccounts needs 1 to 100 addresses');
+    const schema = MultipleAccountsResult.extend({ context: z.object({ slot: z.number().int().nonnegative().safe() }) });
+    const r = await this.call('getMultipleAccounts', [addresses, { encoding: 'base64', commitment: 'confirmed' }], schema);
+    if (r.value.length !== addresses.length) throw new RpcError('getMultipleAccounts returned the wrong number of accounts');
+    return { slot: r.context.slot, accounts: r.value.map((a) => (a ? { lamports: a.lamports, owner: a.owner, data: a.data[0] } : null)) };
+  }
+
   /**
    * Runs an unsigned transaction against the node's state and returns the post-state of the named accounts. Nothing is sent.
    * Signature verification is off (the transaction is unsigned) and the blockhash is NOT replaced, so an expired one fails.
