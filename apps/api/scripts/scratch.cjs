@@ -31,6 +31,8 @@ async function main() {
     await maintenance('CREATE DATABASE "narra_ent_shadow"');
     try { run('node_modules/prisma/build/index.js', ['migrate', 'diff', '--from-migrations', 'packages/database/prisma/migrations', '--to-schema-datamodel', 'packages/database/prisma/schema.prisma', '--shadow-database-url', shadow.toString(), '--script', '--exit-code']); }
     finally { await maintenance('DROP DATABASE "narra_ent_shadow"'); }
+  } else if (command === 'deployed-diff') {
+    run('node_modules/prisma/build/index.js', ['migrate', 'diff', '--from-url', target.toString(), '--to-schema-datamodel', 'packages/database/prisma/schema.prisma', '--script', '--exit-code']);
   } else if (command === 'deploy' || command === 'generate' || command === 'validate') {
     run('node_modules/prisma/build/index.js', [...(command === 'deploy' ? ['migrate', 'deploy'] : [command]), '--schema', 'packages/database/prisma/schema.prisma']);
   } else if (command === 'test') run('node_modules/vitest/vitest.mjs', ['run', ...args]);

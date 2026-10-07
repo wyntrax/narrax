@@ -20,11 +20,16 @@ export async function applyMembershipState(db: PrismaClient, state: IncomingMemb
         return 'duplicate' as const;
       }
     }
-    const previous = await tx.wyntraxMembership.findUnique({ where: { wyntraxUserId: state.wyntraxUserId }, select: { version: true } });
+    const previous = await tx.wyntraxMembership.findUnique({ where: { wyntraxUserId: state.wyntraxUserId }, include: { wallets: true } });
     const status = previous && BigInt(state.version) <= previous.version ? 'stale' as const : 'applied' as const;
     if (status === 'applied') {
       const { wallets, ...data } = state;
-      const value = { ...data, version: BigInt(state.version), receivedAt: now, lastEventId: receipt?.id ?? null, lastTransport: receipt ? 'WEBHOOK' : 'RECONCILE' };
+      const walletKeys = (ws: typeof wallets) => [...new Set(ws.map(w => `${w.chain}:${w.address}`))].sort().join(',');
+      const continuous = !!previous?.validUntil && previous.validUntil > now && walletKeys(previous.wallets as typeof wallets) === walletKeys(wallets);
+      const paid = ['PRO', 'ELITE'].includes(state.tier) && !!state.validUntil && state.validUntil > now;
+      const proSince = paid ? (continuous && ['PRO', 'ELITE'].includes(previous!.tier) ? previous!.proSince ?? now : now) : null;
+      const eliteSince = paid && state.tier === 'ELITE' ? (continuous && previous!.tier === 'ELITE' ? previous!.eliteSince ?? now : now) : null;
+      const value = { ...data, proSince, eliteSince, version: BigInt(state.version), receivedAt: now, lastEventId: receipt?.id ?? null, lastTransport: receipt ? 'WEBHOOK' : 'RECONCILE' };
       await tx.wyntraxMembership.upsert({ where: { wyntraxUserId: state.wyntraxUserId }, create: value, update: value });
       await tx.wyntraxMembershipWallet.deleteMany({ where: { wyntraxUserId: state.wyntraxUserId } });
       await tx.wyntraxMembershipWallet.createMany({ data: wallets.map(w => ({ ...w, wyntraxUserId: state.wyntraxUserId })), skipDuplicates: true });

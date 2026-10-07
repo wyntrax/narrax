@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@narra/database';
 import { z } from 'zod';
-import { sanitizeUntrusted } from '@narra/shared';
+import { sanitizeUntrusted, ACCESS_TIERS, FEATURE_TIERS } from '@narra/shared';
 import { AccessError, audit, lock, requireAdminActor, TX_OPTIONS } from './common';
 
 const Domain = z.string().max(256).refine(value => {
@@ -11,6 +11,9 @@ export const SETTING_SCHEMAS = {
   'early_access.seat_cap': z.number().int().nonnegative().safe(),
   'early_access.invite_required': z.boolean(),
   'entitlements.wallet_link_domain': Domain,
+  'entitlements.enforced': z.boolean(),
+  'entitlements.shadow_log': z.boolean(),
+  'entitlements.features': z.record(z.object({ requiredTier: z.enum(ACCESS_TIERS).optional(), min_entitlement_age_hours: z.number().finite().min(0).max(8760).optional() }).strict()).refine(v => Object.keys(v).every(k => Object.hasOwn(FEATURE_TIERS, k))),
 } as const;
 type SettingKey = keyof typeof SETTING_SCHEMAS;
 export async function localSettings(tx: Pick<Prisma.TransactionClient, 'systemSetting'>) {

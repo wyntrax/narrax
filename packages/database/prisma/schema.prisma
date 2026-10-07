@@ -1065,6 +1065,8 @@ model WalletLinkChallenge {
 }
 
 model WyntraxMembership {
+  proSince          DateTime?
+  eliteSince        DateTime?
   wyntraxUserId     String @id
   tier             WyntraxTier
   version          BigInt

@@ -3,7 +3,7 @@ export const ACCESS_TIERS = ['NONE', 'EARLY_ACCESS', 'MEMBER', 'PRO', 'ELITE'] a
 export type AccessTier = typeof ACCESS_TIERS[number];
 export const FEATURE_TIERS = {
   'research.narratives': 'EARLY_ACCESS', 'research.tokens': 'EARLY_ACCESS', 'research.overview': 'EARLY_ACCESS',
-  'research.screener': 'MEMBER', 'research.rotation': 'MEMBER', 'research.opportunities': 'MEMBER', 'research.smart_money': 'MEMBER',
+  'research.screener': 'PRO', 'research.rotation': 'EARLY_ACCESS', 'research.opportunities': 'PRO', 'research.smart_money': 'PRO',
   'research.analysis': 'PRO', 'research.wallet_detail': 'PRO', 'research.decision_analytics': 'PRO',
   'research.advanced_analytics': 'ELITE', 'research.chat': 'ELITE',
 } as const satisfies Record<string, AccessTier>;
