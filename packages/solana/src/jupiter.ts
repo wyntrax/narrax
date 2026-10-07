@@ -18,6 +18,10 @@ export interface QuoteRequest {
   /** Base units (lamports for SOL). */
   amount: bigint;
   slippageBps: number;
+  /** Opt-in probe: must agree with buildSwap's asLegacyTransaction. */
+  asLegacyTransaction?: boolean;
+  /** Jupiter's rough route account budget, not a transaction-size guarantee. */
+  maxAccounts?: number;
 }
 
 export interface Quote {
@@ -59,6 +63,8 @@ export class JupiterClient {
     url.searchParams.set('outputMint', req.outputMint);
     url.searchParams.set('amount', req.amount.toString());
     url.searchParams.set('slippageBps', String(req.slippageBps));
+    if (req.asLegacyTransaction !== undefined) url.searchParams.set('asLegacyTransaction', String(req.asLegacyTransaction));
+    if (req.maxAccounts !== undefined) url.searchParams.set('maxAccounts', String(req.maxAccounts));
 
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.opts.timeoutMs ?? 4000);
@@ -109,7 +115,7 @@ export class JupiterClient {
           userPublicKey: req.userPublicKey,
           wrapAndUnwrapSol: true,
           dynamicComputeUnitLimit: true,
-          asLegacyTransaction: false,
+          asLegacyTransaction: req.asLegacyTransaction ?? false,
           prioritizationFeeLamports: { priorityLevelWithMaxLamports: { maxLamports: req.maxPriorityFeeLamports, priorityLevel: 'high' } },
         }),
         signal: ctrl.signal,
@@ -139,6 +145,8 @@ export interface BuiltSwap {
 
 export interface BuildSwapRequest {
   quote: Quote;
+  /** Opt-in only; set the same option when obtaining the quote. */
+  asLegacyTransaction?: boolean;
   userPublicKey: string;
   /** Hard ceiling on the priority fee Jupiter may add, in lamports. */
   maxPriorityFeeLamports: number;

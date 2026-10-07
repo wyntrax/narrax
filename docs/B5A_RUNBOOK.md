@@ -62,6 +62,32 @@ For each item read:
 3. For every ACCEPTED item, whether the simulated balance changes match the quote. If `walletLamportsSpent` is far above the SOL you meant to spend, say so.
 4. Any `ERROR` with its code (`SWAP_BUILD_FAILED`, `RPC_FAILED`, `UNEXPECTED`).
 
+## Lookup-table probe (2026-10-07; review checkpoint)
+
+Run `npx tsx scripts/b5a-lookup-probe.ts --output <new-local-json-path>` without workers. It connects only to public token sources, Jupiter and Helius; it does not connect to the database or queues. BUY input is 6,325,000 lamports, slippage 100 bps; SELL input is the corresponding BUY quote output and is verifier-only. It uses the existing RPC simulation and effect verifier, executor config/limits and quote-to-simulation window. Simulation retains `sigVerify:false` and `replaceRecentBlockhash:false`: a live blockhash is required.
+
+Current documentation checked before adding opt-in parameters:
+- [GET quote](https://developers.jup.ag/docs/api-reference/swap/v1/quote.md): `asLegacyTransaction` (default false), `maxAccounts` (rough account budget, default 64).
+- [POST swap](https://developers.jup.ag/docs/api-reference/swap/v1/swap.md): `asLegacyTransaction` must agree with the quote. No direct-route/intermediate-token options were added or used.
+- [Gateway migration](https://developers.jup.ag/docs/portal/migration.md) and [setup](https://developers.jup.ag/docs/portal/setup.md): current documented host is `api.jup.ag`; `lite-api.jup.ag` is progressively phased out, with no fixed retirement date on the current page. Keyless access on `api.jup.ag` is available at 0.5 RPS; `x-api-key` is recommended for higher limits, not universally mandatory. The repo default remains `lite-api.jup.ag/swap/v1`, which worked for all probe requests with the configured header. Host migration and Swap V2 remain separate review items.
+
+Both BONK and WIF were independently matched by Jupiter token search and DEX Screener, then passed `getMintInfo`: classic Token program, null freeze/mint authorities, no extensions.
+- BONK: `DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263`; sources: `https://api.jup.ag/tokens/v2/search?query=BONK` and `https://api.dexscreener.com/tokens/v1/solana/DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263`.
+- WIF (`$WIF`): `EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm`; sources: `https://api.jup.ag/tokens/v2/search?query=dogwifhat` and `https://api.dexscreener.com/tokens/v1/solana/EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm`.
+
+| Token | Variant | BUY bytes / instructions / tables | SELL bytes / instructions / tables | Verifier BUY / SELL |
+|---|---|---|---|---|
+| BONK | Current v0 | 820 / 8 / 2 | 1051 / 5 / 3 | ACCOUNT_NOT_STATIC / ACCOUNT_NOT_STATIC |
+| BONK | Legacy | 1148 / 8 / 0 | 775 / 5 / 0 | PASS / PASS |
+| BONK | v0 maxAccounts=32 | 820 / 8 / 2 | 889 / 5 / 2 | ACCOUNT_NOT_STATIC / ACCOUNT_NOT_STATIC |
+| WIF | Current v0 | 664 / 8 / 1 | 625 / 5 / 1 | ACCOUNT_NOT_STATIC / ACCOUNT_NOT_STATIC |
+| WIF | Legacy | 876 / 8 / 0 | 775 / 5 / 0 | PASS / PASS |
+| WIF | v0 maxAccounts=32 | 664 / 8 / 1 | 625 / 5 / 1 | ACCOUNT_NOT_STATIC / ACCOUNT_NOT_STATIC |
+
+All routes existed, all serialized transactions fit 1232 bytes, and reported impact was below 1%. Legacy BUY RPC simulation returned no execution error but the effect checker returned `TOKEN_ACCOUNT_UNREADABLE` for both tokens (121785 / 69086 units). Effect-summary deltas remained null. This independent blocker is not fixed here. Exits were not simulated. Legacy routes exist at this size, but are not a guarantee for every future route; reducing maxAccounts does not promise zero tables.
+
+The first current-variant rejection is saved unmodified in `packages/tx-verify/src/captured-fixtures.ts`, including base64 transaction, raw account data, capture time and RPC slot. The script never overwrites it. Pure tests do not fetch the network or simulate this historical blockhash. Compatibility tests live under tx-verify (within the approved edit scope); they assert exact default Jupiter URL/body bytes. No executor wiring is authorized before the review checkpoint.
+
 ## 5. Drills (do these once)
 
 - **Kill switch.** `PUT /v1/admin/executor/kill-switch` `{"enabled":true,"reason":"drill"}`. The next dry run must be REJECTED with `KILL_SWITCH` and make no Jupiter or node call. Turn it off with a reason. A corrupted value (put `{"enabled":"maybe"}` straight into `SystemSetting.executor.kill_switch`) must also stop it.
