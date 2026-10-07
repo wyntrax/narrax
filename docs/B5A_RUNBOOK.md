@@ -109,6 +109,25 @@ The first current-variant rejection is saved unmodified in `packages/tx-verify/s
 
 Part B checkpoint: captured transaction plus resolved tables passes the pure verifier with no reasons; absent resolution still returns two `ACCOUNT_NOT_STATIC` reasons. Resolver failures are `LOOKUP_TABLE_UNRESOLVED`, `LOOKUP_TABLE_INVALID`, `LOOKUP_INDEX_OUT_OF_RANGE`, with `TOO_MANY_LOOKUP_TABLES` checked before I/O and `UNDECODABLE` for invalid transactions. Resolution makes addresses visible without granting permissions. See the new lookup-table section of `SECURITY_REVIEW_PLAN_B5.md` for trust assumptions and the independent simulation blocker. Do not wire this into `dryRun.ts` until owner approval.
 
+### Closed-account diagnosis and effect recheck (2026-10-07)
+
+`npx tsx scripts/b5a-lookup-probe.ts --diagnose-effects --output <new-json-path>` runs only legacy BUYs and retains wire RPC results, wrapper account values, complete logs and fee/rent evidence. `--capture-effects-fixture` writes the two public captures once to `packages/tx-verify/src/captured-simulation-fixtures.ts` (never overwrites). `--resolved-effects` runs current-v0 and legacy BUYs, resolving tables before verification only in this standalone probe. Executor wiring remains pending approval.
+
+The original failure was **postIn only**: closed wSOL returned `{lamports:0,owner:"11111111111111111111111111111111",data:["","base64"]}`. The RPC wrapper correctly retained the object and unwrapped the tuple to `data:""`. Pre-input/pre-output were null; post-output was a valid 165-byte Token account. `tokenAmountOf` now treats exactly zero lamports plus the literal empty data string as nonexistent, consistently for pre/post input/output. Funded System accounts, wrong-owner accounts with data, short Token data and nonempty malformed encodings are still unreadable. No RPC production code changed.
+
+Fresh effect results (all BUY 6325000 lamports; 100 bps; verifier/effects both `ok:true`, no reasons):
+
+| Token / variant | Wallet spent | Input tokens spent | Output gained | Expected output | Minimum output | Compute used | Priority fee |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| BONK / legacy | 7876423 | 0 | 20849749702 | 20874719990 | 20665972791 | 121865 | 57983 |
+| BONK / v0 (3 tables) | 7925498 | 0 | 20836406018 | 20877890649 | 20669111743 | 196808 | 107058 |
+| WIF / legacy | 7818738 | 0 | 3136435 | 3136435 | 3105071 | 64168 | 298 |
+| WIF / v0 (1 table) | 7818753 | 0 | 3136435 | 3136435 | 3105071 | 64168 | 313 |
+
+For each, loss = 6325000 swap + 1488440 output ATA rent + priority fee + 5000 base fee. The wSOL ATA costs 1488440 rent transiently and refunds it on close, net zero. Live `getMinimumBalanceForRentExemption(165)` returned 1488440 (not the historical 2039280); `getFeeForMessage` matched the raw simulation fee. All four residuals are zero. Input token delta is zero because the transient wSOL ATA is absent/closed on both sides; SOL input is reflected in wallet loss. Quote-to-simulation times: 509, 514, 513, 821 ms respectively; flags and 10000 ms window unchanged.
+
+Confirmed RPC reads are not an atomic snapshot: the WIF legacy pre-read was slot 454076926 and simulation slot 454076925. Its raw simulation pre-wallet balance agreed with the separate pre-read; no slot acceptance rule was added. SELL effects, funded/preexisting ATA live cases and executor integration remain untested in this follow-up. Nothing was signed/sent and no database was connected.
+
 ## 5. Drills (do these once)
 
 - **Kill switch.** `PUT /v1/admin/executor/kill-switch` `{"enabled":true,"reason":"drill"}`. The next dry run must be REJECTED with `KILL_SWITCH` and make no Jupiter or node call. Turn it off with a reason. A corrupted value (put `{"enabled":"maybe"}` straight into `SystemSetting.executor.kill_switch`) must also stop it.

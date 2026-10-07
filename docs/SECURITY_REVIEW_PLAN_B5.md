@@ -30,6 +30,8 @@ The captured current-route BONK fixture has two tables; it passes with resolved 
 
 **Separate unresolved blocker:** legacy BUY RPC simulation returned `err:null` for both probe tokens, but the existing effect verifier returned `TOKEN_ACCOUNT_UNREADABLE`, before producing balance deltas. The raw pre/post accounts were not retained, so the cause is not established (closed wSOL account representation is a hypothesis only). The effect checker is unchanged. Kill-switch ordering, host migration, Swap V2, signing/sending/Jito, landing strategy and limits remain outside this patch. Executor wiring and end-to-end rerun await explicit approval.
 
+**2026-10-07 follow-up:** raw legacy BONK/WIF RPC captures confirmed that the closed wSOL post-account was System-owned, zero-lamport and empty-data, rather than null. The wrapper faithfully decoded `["","base64"]`. Owner-approved normalization in `tokenAmountOf` treats only `lamports === 0 && data === ''` as nonexistent, before the existing owner/length checks. Captured real BUY effects now pass; tampered output and excessive SOL loss still reject. Fresh legacy and resolved-v0 BUYs both passed for both tokens, with wallet loss fully explained by swap input, output ATA rent and fees. See the runbook for figures. SELL effects and executor integration are still pending; this follow-up does not authorize wiring.
+
 ## 1. What exists today (from the code, not from memory)
 
 | Piece | Where | State |

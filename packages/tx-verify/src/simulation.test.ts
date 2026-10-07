@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { verifySimulation, tokenAmountOf, type EffectExpectations, type RawAccount, type SimulationFacts } from './simulation';
 import { TOKEN_PROGRAM } from './programs';
+import { capturedSimulationFixtures } from './captured-simulation-fixtures';
 
 const tokenAcct = (amount: bigint, owner = TOKEN_PROGRAM): RawAccount => {
   const b = Buffer.alloc(165); b.writeBigUInt64LE(amount, 64);
@@ -17,12 +18,58 @@ const sellExp: EffectExpectations = { side: 'SELL', inAmount: 1000n, minOutAmoun
 const codes = (r: { reasons: { code: string }[] }) => r.reasons.map((x) => x.code);
 
 describe('tokenAmountOf', () => {
+  it.each([
+    ['closed System account', wallet(0), 0n],
+    ['empty zero-lamport Token account', { lamports: 0, owner: TOKEN_PROGRAM, data: '' }, 0n],
+    ['null account', null, 0n],
+    ['funded System account', wallet(1), null],
+    ['zero-lamport System account with data', { ...wallet(0), data: 'AA==' }, null],
+    ['zero-lamport Token account with short data', { lamports: 0, owner: TOKEN_PROGRAM, data: 'AA==' }, null],
+    ['nonempty invalid encoding', { ...wallet(0), data: '!' }, null],
+    ['wrong owner with token-shaped data', tokenAcct(123n, wallet(0).owner), null],
+    ['genuine funded token account', tokenAcct(12345n), 12345n],
+  ] as const)('%s preserves the narrow nonexistent-account boundary', (_name, account, expected) => {
+    expect(tokenAmountOf(account)).toBe(expected);
+  });
   it('reads the amount, treats a missing account as zero, and refuses anything that is not a Token account', () => {
     expect(tokenAmountOf(tokenAcct(12345n))).toBe(12345n);
     expect(tokenAmountOf(null)).toBe(0n);
     expect(tokenAmountOf(tokenAcct(5n, 'SomeOtherProgram1111111111111111111111111111'))).toBeNull();
     expect(tokenAmountOf({ lamports: 1, owner: TOKEN_PROGRAM, data: Buffer.alloc(10).toString('base64') })).toBeNull();
   });
+});
+
+describe('captured legacy BUY effects (public RPC data, no network)', () => {
+  for (const [index, capture] of capturedSimulationFixtures.entries()) {
+    const factsFromCapture = (): SimulationFacts => ({
+      err: capture.simulation.rpcError, unitsConsumed: capture.simulation.unitsConsumed,
+      pre: { wallet: { ...capture.capture.before[0] }, inputAccount: capture.capture.before[1], outputAccount: capture.capture.before[2] },
+      post: { wallet: { ...capture.capture.after[0] }, inputAccount: { ...capture.capture.after[1] }, outputAccount: { ...capture.capture.after[2] } },
+    });
+    const expectations: EffectExpectations = { ...buyExp, inAmount: BigInt(capture.quote.in), minOutAmount: BigInt(capture.quote.minOut) };
+    it(`${capture.token}: accepts the real capture with exact balance deltas`, () => {
+      const r = verifySimulation(factsFromCapture(), expectations);
+      expect(r.ok).toBe(true);
+      expect(r.reasons).toEqual([]);
+      expect(r.summary).toEqual(index === 0
+        ? { err: null, unitsConsumed: 105910, walletLamportsSpent: '7822178', inputTokensSpent: '0', outputTokensGained: '20827134548' }
+        : { err: null, unitsConsumed: 63826, walletLamportsSpent: '7818717', inputTokensSpent: '0', outputTokensGained: '3135402' });
+      // The captured wire representation really was an object, not a wrapper-created null.
+      expect(capture.capture.after[1]).toEqual(wallet(0));
+    });
+    it(`${capture.token}: still rejects output below minimum`, () => {
+      const f = factsFromCapture();
+      const data = Buffer.from(f.post.outputAccount!.data, 'base64');
+      data.writeBigUInt64LE(expectations.minOutAmount - 1n, 64);
+      f.post.outputAccount!.data = data.toString('base64');
+      expect(codes(verifySimulation(f, expectations))).toEqual(['OUTPUT_BELOW_MINIMUM']);
+    });
+    it(`${capture.token}: still rejects excessive wallet loss`, () => {
+      const f = factsFromCapture();
+      f.post.wallet!.lamports = f.pre.wallet!.lamports - Number(expectations.inAmount + expectations.maxOverheadLamports) - 1;
+      expect(codes(verifySimulation(f, expectations))).toEqual(['WALLET_LOSES_TOO_MUCH_SOL']);
+    });
+  }
 });
 
 describe('verifySimulation: buying', () => {
