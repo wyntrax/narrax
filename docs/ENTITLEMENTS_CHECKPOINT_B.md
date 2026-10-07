@@ -199,3 +199,26 @@ Commands run through the guard (each prints host/db and asserts scratch target b
 Contract deviations: **none**. Implementation sequencing note: atomic seat/admin services were built before Stage 4 to satisfy the owner's Checkpoint A conditions; their HTTP endpoints remain deferred. No route gating or reconciliation implementation was advanced past Checkpoint B.
 
 **Owner decision requested:** approve Checkpoint B before Stage 4. No further stage proceeds automatically.
+
+## Checkpoint B addendum
+
+Owner approved B with conditions. These answers were verified before starting Stage 4. `addendum.test.ts` ran **7 passed, 0 skipped**; the existing crypto and webhook suites passed **21 + 6** tests. Test-only key generation/signing is now explicitly authorized; production remains verification-only. The new end-to-end test uses real noble Ed25519 proofs, real locally signed/verified ES256 JWTs and real scratch PostgreSQL; no proof/auth/persistence mock participates in that lifecycle. Live Privy issuance remains unverified.
+
+| Item | Answer | File and proving test |
+|---|---|---|
+| a. Exact raw bytes | YES | `webhook.ts` Buffer parser before JSON; `webhook.test.ts`: “raw bytes before parsing; contract response, duplicate and header identity” (whitespace tampering and correctly signed formatted JSON). |
+| b. Constant-time comparison; safe mismatch | YES | `wyntrax.ts` fixed-size HMAC `timingSafeEqual` with length guard; `crypto.test.ts`: malformed signature table and exact vector. Invalid public syntax/length can reject early; no secret-dependent byte-by-byte comparison is used. This is a cryptographic implementation guarantee, not a claim of identical whole-request timing. |
+| c. Try both secrets; no matched-key logging | YES | `wyntrax.ts` evaluates both `check` calls before OR; no logging in verifier. `crypto.test.ts`: “accepts previous secret only when primary is configured”; `webhook.test.ts`: rotation/no Privy test. Neither response/audit contains a matched-key field. |
+| d. Timestamp both directions | YES | `crypto.test.ts`: ±301 rejection and ±300 acceptance tests. |
+| e. One atomic receipt/state transaction | YES | `membershipStore.ts`, unique `WebhookEvent.id` in migration 0011; `integration.test.ts`: audit failure rolls back receipt/state, duplicate concurrency test. |
+| f. Atomic concurrent ordering | YES | `addendum.test.ts`: “parallel versions always end at the higher version and committed versions never decrease” observes writes under actual PostgreSQL locks; existing multi-version race test also passes. |
+| g. Early size limit/auth before writes | YES | Fastify bounds Buffer accumulation and checks declared size before reading. `addendum.test.ts`: chunked oversized stream receives 413 before end-of-stream; invalid HMAC invokes zero DB transactions. Detecting an undeclared oversized stream necessarily reads the chunk that crosses the limit, but never accumulates/parses the full body. |
+| h. Contract codes/generic responses | YES | Encapsulated `webhook.ts` error handler restricts parser/framework errors to 400/413/429/503; handlers emit generic 401 or exact 200 status bodies. `webhook.test.ts` covers applied/duplicate and all error statuses; `addendum.test.ts` asserts generic invalid-payload response and no writes. Error body uses the approved repo `{error,requestId}` shape, without check details. |
+| i. Atomic, bound, five-minute nonce | YES | `linking.ts` conditional consume inside insertion/audit transaction; `integration.test.ts` single-winner nonce race; `addendum.test.ts` real replay, wrong user/domain/address and expiry tests. |
+| j. Simultaneous same-wallet linking | YES | `LinkedWallet(chain,address)` unique index and sanitized conflict; `addendum.test.ts`: “two users simultaneously proving the same address: one 200, one clean 409, unique owner”. |
+| k. Audits omit sensitive proof material | YES | `addendum.test.ts` real lifecycle inspects audit rows for exact secret, signature, nonce and whole message and finds none. |
+| l. Invalid payloads reject without writes/case kept | YES | `addendum.test.ts`: invalid wire states table verifies 400, zero receipt/membership/audit writes, and byte-for-byte stored address. |
+| m. Stored unlinked state activates after proof | YES | `addendum.test.ts`: “unlinked membership is stored without a grant, activates after proof, and unlink removes access immediately”. |
+| n. Unlink removes derived access immediately | YES | Same test re-resolves persisted state immediately after authenticated HTTP unlink and obtains NONE. |
+
+The real lifecycle also rejects a signature from another real key, a signature over modified bytes and a genuine signature after challenge expiry. Complete output will be included in the Checkpoint C packet.

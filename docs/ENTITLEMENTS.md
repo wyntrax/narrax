@@ -5,6 +5,19 @@
 
 ## 1. Invariants and scope
 
+v1: MEMBER reserved; Wyntrax sends NONE, PRO, ELITE.
+
+### Approved MEMBER reassignment (Checkpoint C work)
+
+The owner approved the proposed table via the in-session question before any map change. The wire contract/schema still accept MEMBER.
+
+| Previous MEMBER feature | Routes / alternate surfaces | Approved live minimum |
+|---|---|---|
+| research.screener | GET /v1/tokens with filters/sort | PRO |
+| research.rotation | GET /v1/narratives/rotation; overview rotation | EARLY_ACCESS |
+| research.opportunities | GET /v1/opportunities; overview opportunity; opportunity/decision realtime and chat reads | PRO |
+| research.smart_money | GET /v1/smart-money/wallets; search wallet hits; consensus realtime | PRO |
+
 - Tier order: `NONE < EARLY_ACCESS < MEMBER < PRO < ELITE`. BASIC means the features assigned to EARLY_ACCESS below, not another tier.
 - Wyntrax alone determines token balances and membership eligibility. Its wire tiers are exactly `NONE | MEMBER | PRO | ELITE`; reject everything else, including EARLY_ACCESS. Chain is exactly `solana` in v1. Addresses remain case-sensitive base58 throughout storage, lookup, audit and response.
 - Signed-in users must explicitly join early access and have a verified linked wallet. An imported Wyntrax wallet never creates a NARRA wallet link or user.

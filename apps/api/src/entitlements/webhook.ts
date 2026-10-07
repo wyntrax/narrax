@@ -7,6 +7,11 @@ import { applyWyntraxEvent } from './membershipStore';
 export interface WyntraxDeps { db?: PrismaClient; secret?: string; previousSecret?: string; now?: () => Date }
 export async function registerWyntraxWebhook(app: FastifyInstance, deps: WyntraxDeps = {}) {
   await app.register(async scoped => {
+    scoped.setErrorHandler((error, req, reply) => {
+      const status = (error as { statusCode?: number }).statusCode;
+      const code = status === 413 ? 413 : status === 429 ? 429 : status && status < 500 ? 400 : 503;
+      return reply.code(code).send({ error: code === 413 ? 'PAYLOAD_TOO_LARGE' : code === 429 ? 'RATE_LIMITED' : code === 400 ? 'INVALID_INPUT' : 'WYNTRAX_UNAVAILABLE', requestId: req.requestId });
+    });
     scoped.removeAllContentTypeParsers();
     // Parsing JSON happens only after the exact raw bytes have passed authentication.
     scoped.addContentTypeParser('*', { parseAs: 'buffer', bodyLimit: 16384 }, (_req, body, done) => done(null, body));
