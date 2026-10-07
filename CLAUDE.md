@@ -138,3 +138,7 @@ Not built: signing and sending (B5b onward), the circuit breakers, the wallet fl
 ## Next
 
 Backlog order is in `docs/CONTINUATION.md` section 5. **B5 is staged: `docs/SECURITY_REVIEW_PLAN_B5.md` is approved and B5a (dry run) is built and merged. B5b (signing for the owner's wallet only, a tiny hard cap) needs the owner's separate go-ahead after they have read the dry-run output (`docs/B5A_RUNBOOK.md`). Do not write signing, sending or key-handling code before that.** B9 (admin and operations) is built.
+
+## Entitlements checkpoint
+
+See `docs/ENTITLEMENTS.md` and `docs/ENTITLEMENTS_CHECKPOINT_B.md`. Stages 1–3 add research entitlements, wallet proof verification and Wyntrax ingestion; Stage 4 gating waits for owner approval at Checkpoint B. Entitlement operations never change mode, trading permissions, execution controls or risk. This branch verifies only against localhost:5432/narra_ent and Redis /5, with API port 4010; use the guarded `apps/api/scripts/scratch.cjs` runner. Existing rules above remain in force.

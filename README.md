@@ -329,3 +329,6 @@ execution queue --> workers/executor (own process)
 
 ## Next
 **B5b (signing for the owner's wallet only, a tiny hard cap) needs the owner's go-ahead after reading the dry-run output** (`docs/B5A_RUNBOOK.md`). B5c (widen AUTO) and B5d (wallet flows) are separate later approvals. B10 hardening comes after B5 is built. See `docs/CONTINUATION.md` section 5.
+
+## Entitlements (Checkpoint B)
+Early-access/Wyntrax schema, pure research-tier resolution, verified wallet linking and the signed membership webhook are implemented; enforcement and reconciliation await later stages. Entitlements cannot grant trading authority or gate safety/own-data access. See [the design](docs/ENTITLEMENTS.md) and [Checkpoint B evidence](docs/ENTITLEMENTS_CHECKPOINT_B.md). Local verification uses `node apps/api/scripts/scratch.cjs test` with the isolated `narra_ent` database, Redis /5 and port 4010; it refuses another database target.

@@ -4,13 +4,13 @@ This file is for whoever (or whatever assistant) continues the build. It says wh
 
 "NARRA" is a placeholder brand name, set by `PROJECT_NAME`.
 
-## Entitlements design checkpoint (2026-10-07)
+## Entitlements security checkpoint (2026-10-07)
 
-Stage 0 is documented in [`ENTITLEMENTS.md`](ENTITLEMENTS.md), awaiting owner approval at **Checkpoint A**. No entitlement implementation or migration has been added. The design inventories existing routes, preserves own-data/safety access, and keeps all trading authority independent of entitlements.
+Checkpoint A was approved with conditions. Stages 1–3 are implemented for **Checkpoint B**, documented in [`ENTITLEMENTS.md`](ENTITLEMENTS.md) and [`ENTITLEMENTS_CHECKPOINT_B.md`](ENTITLEMENTS_CHECKPOINT_B.md): schema/migration, pure resolver, atomic local-grant services, wallet linking and HMAC webhook. All route enforcement remains Stage 4; the existing own-data/safety paths remain entitlement-independent.
 
-Work is isolated on branch `entitlements` in `C:\dev\narra-entitlements`, based on `main` at `4120916`; the original checkout stays on `b5a-lookup-tables`. Private environment uses port 4010, the new empty scratch database `narra_ent` at localhost:5432 and Redis DB 5. `narra_ent_shadow` was created and dropped; recreate it only for the post-approval migration check. `npm ci` completed and the contract HMAC vector reproduced exactly (326 bytes). Implementation tests, typecheck and migration checks have not run for this design-only checkpoint. No workers or live providers were started.
+Work is isolated on branch `entitlements` in `C:\dev\narra-entitlements`, based on `main` at `4120916`; the original checkout stays on `b5a-lookup-tables`. Private environment uses port 4010, scratch database `narra_ent` at localhost:5432 and Redis DB 5. Migrations through `0011_entitlements` applied; full-chain Prisma diff was empty and the shadow database dropped. `npm ci` completed before/after adding two exact-version direct dependencies. The contract vector reproduces exactly (326 bytes). Targeted checks: 126 tests passed; **full suite: 66 files, 995 tests passed, no skips**; typecheck passed. See the checkpoint report for verification limits. No pipeline/executor workers or live providers were started.
 
-Next: obtain approval of the design and its explicit scope/product decisions, then Stages 1-3. Stop again at **Checkpoint B** after linking/webhook implementation and security evidence, before gating. Optional invites and per-tier chat quotas require their own approval.
+Next: stop for owner security review at **Checkpoint B** before Stage 4 gating. Optional invites and per-tier chat quotas still require separate approval.
 
 ---
 

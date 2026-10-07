@@ -1,6 +1,6 @@
 # Early access and Wyntrax entitlements
 
-**Status: Stage 0 design only; awaiting owner approval at Checkpoint A.**
+**Status: Checkpoint A approved with conditions; Stages 1–3 implemented for Checkpoint B review. Stage 4 enforcement is not implemented.**
 2026-10-07. Baseline: `4120916` (`main`), worktree `C:\dev\narra-entitlements`, branch `entitlements`. CONTRACT v1 supplied by the owner is authoritative. This document proposes NARRA implementation and product mapping; it does not amend that contract.
 
 ## 1. Invariants and scope
@@ -81,7 +81,7 @@ Missing rollout flags use the documented defaults. Malformed flags/settings are 
 The resolver does not allocate a seat. A separate pure admission decision accepts enabled/cap/occupied/hasVerifiedWallet/alreadyJoined/invite state; I/O enforces that decision atomically:
 
 - Explicit join under a transaction-level advisory lock for early-access capacity; all joins, local admin grants/revokes and cap/enable changes take the same lock. Lock/recheck the user's link state before admission. This serializes competing final-seat claims.
-- Count distinct users with ACTIVE unexpired local grants (both sources) as occupied seats. An already seated user may retry idempotently at capacity. No hidden unbounded auto-enrollment.
+- A used seat is one distinct USER with at least one ACTIVE, unexpired **EARLY_ACCESS-tier** AccessGrant, source EARLY_ACCESS or ADMIN. Two sources and five linked wallets still count once. A user who also holds a valid Wyntrax tier **still occupies that one seat**. A Wyntrax-only user with no such local grant occupies zero seats. Revoked or expired grants do not count. An already seated user may retry idempotently at capacity. No hidden unbounded auto-enrollment.
 - Reducing the cap stops new admission; it does not evict existing seats. Disabling suppresses local benefits but keeps seat reservations. Unlinking the last wallet suppresses local benefits; the reservation remains until revoke/leave/expiry. This prevents silent churn in who wins seats.
 - Leave revokes the caller's EARLY_ACCESS self-join grant; ADMIN grants require an admin revoke. Revoke removes that source, not an unrelated valid Wyntrax grant. No global negative override is introduced.
 - Admin-issued grants use the same wallet, enable and seat checks. Finite expiry required for ADMIN grants, reason required; self-join may have null expiry. Rejoining requires admission checks again.
@@ -146,7 +146,7 @@ Secrets remain env-only: `WYNTRAX_WEBHOOK_SECRET`, optional `WYNTRAX_WEBHOOK_SEC
 
 ## 8. Feature-to-tier map: actual route inventory
 
-**Proposed for approval.** Always-open means no entitlement gate, not anonymous access. Existing auth/admin/HMAC requirements remain. Route groups below cover registrations in `app.ts`, including loop-generated account routes. Automatically generated HEAD routes inherit GET behavior; OPTIONS carries no feature data.
+**Approved target for Stage 4; not yet enforced at Checkpoint B.** Always-open means no entitlement gate, not anonymous access. Existing auth/admin/HMAC requirements remain. Route groups below cover registrations in `app.ts`, including loop-generated account routes. Automatically generated HEAD routes inherit GET behavior; OPTIONS carries no feature data.
 
 | Existing routes / group | Class / feature | Notes |
 |---|---|---|
@@ -289,4 +289,26 @@ Approval requested for:
 
 Install output also reported 14 dependency audit findings (7 moderate, 5 high, 2 critical) and pending install-script approvals; no dependency remediation or script-approval configuration was changed. Contract deviations: none. No contract/repository incompatibility was found requiring a wire change. The reconcile field omission, sender-only 72-hour rule, old migration prose and out-of-scope root edits are explicitly handled above rather than assumed away.
 
-Stop here for Checkpoint A. Stages 1-3 may proceed only after approval, and Stage 4 waits for Checkpoint B.
+Checkpoint A was approved with conditions: atomic user seats, EARLY_ACCESS-only manual grants, named always-open route tests, exact-version direct dependencies in apps/api only, additive README/CLAUDE sections, and continued scratch isolation. Stage 4 waits for Checkpoint B.
+
+## 14. As built at Checkpoint B
+
+Schema `0011_entitlements`, pure resolver/admission policy, four authenticated linked-wallet endpoints and the HMAC webhook are implemented. Local settings/grant/revoke **services** implement the approved seat/admin rules now so their concurrency and non-escalation can be reviewed; their HTTP admin/join endpoints remain Stage 4. Feature metadata is pure and has no HTTP enforcement hook yet. A stored `entitlements.enforced=true` therefore does not activate enforcement in this build.
+
+| Tier / surface | Implemented policy metadata | HTTP behavior at B |
+|---|---|---|
+| NONE / always-open | Resolver defaults to NONE; no implicit admin tier | Existing auth/ownership/abuse checks; no feature gate |
+| EARLY_ACCESS | Narratives, tokens, overview; 20-row research page metadata | No feature gate or tier page clamp yet |
+| MEMBER | Screener, rotation, opportunities, smart-money; 40-row metadata | No feature gate or tier page clamp yet |
+| PRO | Analysis, wallet detail, decision analytics; 70-row metadata | No feature gate or tier page clamp yet |
+| ELITE | Advanced analytics, new chat turns; 100-row metadata | No feature gate or tier page clamp yet |
+| Linked wallets | Challenge, verify, list, unlink | Privy authentication and owner scoping; no tier check |
+| Wyntrax events | State ingestion only | Raw-body HMAC, own rate/body limits; independent of Privy |
+
+`apps/api/src/entitlements/alwaysOpen.test.ts` names the always-open HTTP routes individually and checks their availability against enforcement OFF and ON with an explicit NONE user and a resolver that throws if called. It also proves private WebSocket replay/live delivery. The existing routes' normal validation/resource errors remain valid (for example a missing owned record is 404); the test does not claim every invalid request succeeds. Mixed-data filtering, meaningful enforced research denials and quota clamping remain Stage 4. Each mixed surface is documented in section 8: overview, search, opportunities, opportunity analysis, owned wallet detail/history, realtime and chat research-tool data.
+
+The schema's `LocalAccessTier` enum contains only EARLY_ACCESS; even a direct database insert cannot store MEMBER/PRO/ELITE in AccessGrant. `grantEarlyAccess`, `revokeLocalGrant` and `updateLocalSettings` share the transaction-level `narra-entitlements:seats` advisory lock. Grants also serialize against linking/unlinking with the user's lock. Lowering the cap retains existing access, unlinking never mutates a grant, and every actual grant/revoke mutation is audited in the same transaction. Idempotent retries do not create another grant/audit mutation. Tests launch eight competing joins for two seats and three competing proof claims for one remaining wallet slot.
+
+Dependencies: direct declarations are restricted to `apps/api/package.json`: `@noble/curves` **1.9.7**, `bs58` **4.0.1**. The lockfile adds exactly these two entries under apps/api; no resolved package/version changes. `npm ci` ran before and after. Pure resolver stays in shared; base58 boundary validation lives in API to avoid introducing a shared dependency outside the approval.
+
+Verification limits: wallet lifecycle/concurrency integration tests use a fake successful signature verifier; real Ed25519 verification is independently exercised with the published RFC 8032 vector, including wrong key/message/signature/encoding rejection. No test or production wallet-signing code was added. Real Privy, a real browser wallet challenge round trip and live Wyntrax delivery are unverified. See `ENTITLEMENTS_CHECKPOINT_B.md` for the full report, remaining risks, commands and diff artifacts.
