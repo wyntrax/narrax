@@ -4,13 +4,13 @@ This file is for whoever (or whatever assistant) continues the build. It says wh
 
 "NARRA" is a placeholder brand name, set by `PROJECT_NAME`.
 
-## Entitlements security checkpoint (2026-10-07)
+## Entitlements security checkpoint C (2026-10-08)
 
-Checkpoint A was approved with conditions. Stages 1–3 are implemented for **Checkpoint B**, documented in [`ENTITLEMENTS.md`](ENTITLEMENTS.md) and [`ENTITLEMENTS_CHECKPOINT_B.md`](ENTITLEMENTS_CHECKPOINT_B.md): schema/migration, pure resolver, atomic local-grant services, wallet linking and HMAC webhook. All route enforcement remains Stage 4; the existing own-data/safety paths remain entitlement-independent.
+Checkpoints A and B were approved with conditions. Stages 1–5 are implemented for **Checkpoint C**, documented in [`ENTITLEMENTS.md`](ENTITLEMENTS.md), the [B addendum](ENTITLEMENTS_CHECKPOINT_B.md#checkpoint-b-addendum) and [`ENTITLEMENTS_CHECKPOINT_C.md`](ENTITLEMENTS_CHECKPOINT_C.md). Named research gating, owned-data preservation, audited admin controls, optional paid-entitlement age and bounded partner reconciliation are built. The owner approved rotation → EARLY_ACCESS and screener/opportunities/smart-money → PRO. MEMBER remains contract-valid/reserved. Enforcement defaults OFF; age defaults 0.
 
-Work is isolated on branch `entitlements` in `C:\dev\narra-entitlements`, based on `main` at `4120916`; the original checkout stays on `b5a-lookup-tables`. Private environment uses port 4010, scratch database `narra_ent` at localhost:5432 and Redis DB 5. Migrations through `0011_entitlements` applied; full-chain Prisma diff was empty and the shadow database dropped. `npm ci` completed before/after adding two exact-version direct dependencies. The contract vector reproduces exactly (326 bytes). Targeted checks: 126 tests passed; **full suite: 66 files, 995 tests passed, no skips**; typecheck passed. See the checkpoint report for verification limits. No pipeline/executor workers or live providers were started.
+Work is isolated on branch `entitlements` in `C:\dev\narra-entitlements`, based on `main` at `4120916`; the original checkout stays on `b5a-lookup-tables`. Private environment uses port 4010, scratch database `narra_ent` at localhost:5432 and Redis DB 5. Migration `0012_entitlement_age` applied; deployed scratch schema diff is empty. No database other than `narra_ent` was touched during C. B's full-chain shadow diff remains historical evidence. No dependency/lock changes after B. **Final full suite: 71 files, 1,049 tests passed, zero skips; typecheck passed.** Real signature/JWT/Postgres lifecycle and real localhost contract delivery passed; partner fetch and schedule use fakes. No pipeline/executor process or live Wyntrax/Privy was started/called. Source/test tip is `3e2d55c`; see report for commits and evidence.
 
-Next: stop for owner security review at **Checkpoint B** before Stage 4 gating. Optional invites and per-tier chat quotas still require separate approval.
+Next: stop for owner security review at **Checkpoint C**. Review rollout and live Wyntrax/Privy/provider validation before enabling production enforcement. Optional invites and per-tier daily chat quotas still require separate approval. Do not merge or push.
 
 ---
 

@@ -1,0 +1,181 @@
+DATABASE_URL host=localhost:5432 db=narra_ent; confirmed scratch only (Redis /5, API port 4010).
+
+ RUN  v2.1.9 C:/dev/narra-entitlements
+
+ ✓ apps/api/src/b7.test.ts (25 tests) 5798ms
+   ✓ B7 API routes (needs Postgres) > alerts > lists only the caller's notifications, newest first, with unread count, filters and paging 300ms
+   ✓ B7 API routes (needs Postgres) > settings > saves and returns each section, sanitizes text, audits, and keeps sections independent 372ms
+   ✓ B7 API routes (needs Postgres) > overview, intelligence bar and rotation > reports an unknown SOL price as null and a stale one as stale, never as a number it cannot vouch for 482ms
+   ✓ B7 API routes (needs Postgres) > overview, intelligence bar and rotation > builds the dashboard from the data, with a rules-built brief and the caller's own counts only 534ms
+   ✓ B7 API routes (needs Postgres) > tracked wallet detail and search > builds a wallet profile with performance, cluster, funding, relationships and narrative history, and hides inactive wallets 404ms
+   ✓ B7 API routes (needs Postgres) > tracked wallet detail and search > searches tokens, narratives, wallets, creators and transaction signatures, and treats % and _ as plain text 775ms
+   ✓ B7 API routes (needs Postgres) > token screener and pagination > keeps the simple list working with a cursor, and pages narratives, opportunities, smart-money wallets and confirmations 484ms
+ ✓ workers/pipeline/src/b4.integration.test.ts (19 tests) 7627ms
+   ✓ B4: fan-out, paper trading and confirmations on a real Postgres > entry fan-out and the paper entry > turns a fresh BUY decision into one paper order, trade and position, with the exit rules captured 1328ms
+   ✓ B4: fan-out, paper trading and confirmations on a real Postgres > entry fan-out and the paper entry > is idempotent: the same decision and user twice makes one job, one order and one position 699ms
+   ✓ B4: fan-out, paper trading and confirmations on a real Postgres > entry fan-out and the paper entry > different users get different jobs from one decision, and neither overwrites the other 669ms
+   ✓ B4: fan-out, paper trading and confirmations on a real Postgres > entry fan-out and the paper entry > a stricter user limit shrinks the size; the user cannot exceed the system limit 334ms
+   ✓ B4: fan-out, paper trading and confirmations on a real Postgres > entry fan-out and the paper entry > holds one open position per token per user, even for a second decision 315ms
+   ✓ B4: fan-out, paper trading and confirmations on a real Postgres > exits > a take-profit REDUCE sells part once, tracks it, and does not repeat; a SELL then closes the rest 527ms
+   ✓ B4: fan-out, paper trading and confirmations on a real Postgres > exits > exits are not blocked by the daily-loss limit, while a buy is 492ms
+   ✓ B4: fan-out, paper trading and confirmations on a real Postgres > exits > a rejected exit is retried after the cooldown, and never while it is queued 471ms
+   ✓ B4: fan-out, paper trading and confirmations on a real Postgres > portfolio snapshots > writes a paper snapshot valued at current prices, and skips a user whose held token has no fresh price 649ms
+   ✓ B4: fan-out, paper trading and confirmations on a real Postgres > semi-auto pending confirmations > an exit in SEMI_AUTO needs confirmation too, as a CRITICAL alert, and sells nothing yet 382ms
+ ✓ workers/executor/src/dryRun.integration.test.ts (41 tests) 4052ms
+   ✓ B5a dry-run executor on a real Postgres (Jupiter and the RPC are fakes) > a good order > is accepted and recorded with a full decoded summary, and writes no order, trade or position 713ms
+   ✓ B5a dry-run executor on a real Postgres (Jupiter and the RPC are fakes) > idempotency > two simultaneous deliveries of one job end with one row and the same verdict 311ms
+ ✓ apps/api/src/entitlements/integration.test.ts (15 tests) 4787ms
+   ✓ wallet linking on real scratch PostgreSQL (proof success is a fake; crypto vectors tested separately) > enforces unique wallet ownership, invalidates old proofs on unlink, and permits fresh relink 306ms
+   ✓ wallet linking on real scratch PostgreSQL (proof success is a fake; crypto vectors tested separately) > replaces challenges, bounds outstanding nonces and invalidates a changed domain 338ms
+   ✓ wallet linking on real scratch PostgreSQL (proof success is a fake; crypto vectors tested separately) > HTTP requires authentication, returns repo errors, hides other links and supports unlink 442ms
+   ✓ atomic seats and restricted manual grants (services; HTTP administration waits for Stage 4) > serializes concurrent final-seat joins and preserves users when cap is lowered 685ms
+   ✓ atomic seats and restricted manual grants (services; HTTP administration waits for Stage 4) > disabled, invite-required, wallet missing and expiration fail closed; revoked seat can be reused 320ms
+   ✓ non-escalation: guarded capabilities plus real database snapshots > all implemented entitlement mutations leave trading authority, execution and risk unchanged 539ms
+ ✓ apps/api/src/chat.test.ts (19 tests) 5168ms
+   ✓ agent chat routes (needs Postgres) > limits questions per minute per client address 833ms
+   ✓ agent chat routes (needs Postgres) > keeps users apart: conversations, positions and what the model is shown 403ms
+   ✓ agent chat routes (needs Postgres) > suggestions the user applies themselves > a race of simultaneous applies has exactly one winner 499ms
+   ✓ agent chat routes (needs Postgres) > limits on use > allows one question at a time per user 769ms
+ ✓ packages/agent/src/agent.test.ts (157 tests) 299ms
+ ✓ workers/pipeline/src/wallets.integration.test.ts (15 tests) 2371ms
+   ✓ tracked wallets on a real Postgres > funding > counts wallets in a funding cluster once in smart money consensus 830ms
+ ✓ apps/api/src/entitlements/gating.test.ts (35 tests) 6685ms
+   ✓ enforced research boundaries on scratch PostgreSQL > ordinary token list, screener and approved rotation distinguish EARLY_ACCESS from PRO 340ms
+   ✓ enforced research boundaries on scratch PostgreSQL > search retains caller trade matches and never another user’s trade at NONE 449ms
+   ✓ enforced research boundaries on scratch PostgreSQL > age starts locally, survives renewal, resets on NONE and expiry; unlink age cannot be inherited 302ms
+   ✓ enforced research boundaries on scratch PostgreSQL > real WebSocket enforces shared replay/live access and expiry while keeping private delivery 357ms
+ ✓ workers/pipeline/src/positionMonitor.integration.test.ts (13 tests) 3105ms
+   ✓ position monitor on a real Postgres > holds a healthy position quietly: records once, no alert, then only a heartbeat each hour 552ms
+ ✓ packages/analytics/src/analytics.test.ts (31 tests) 403ms
+ ✓ apps/api/src/analytics.test.ts (8 tests) 3456ms
+   ✓ analytics endpoints (needs Postgres) > requires sign-in on every endpoint, and admin on the full backtest reports 453ms
+   ✓ analytics endpoints (needs Postgres) > with enough independent events it reports sufficient, counts unknown and pending separately, and drops same-token overlaps 1296ms
+   ✓ analytics endpoints (needs Postgres) > pages through outcomes with a cursor, newest first, with no gaps or repeats, and a symbol sent as plain text 340ms
+ ✓ apps/api/src/adminOps.test.ts (11 tests) 2133ms
+ ✓ workers/pipeline/src/b7.integration.test.ts (8 tests) 2571ms
+   ✓ B7 workers: notification dispatch and realtime publishing (needs Postgres and Redis) > dispatchAlerts > applies each user's preferences to global alerts, and never holds back a CRITICAL one 445ms
+   ✓ B7 workers: notification dispatch and realtime publishing (needs Postgres and Redis) > publishNewEvents > does not replay history on its first run, then publishes new rows once, scoped correctly 748ms
+ ✓ apps/api/src/wallets.test.ts (17 tests) 1859ms
+ ✓ packages/ai/src/ai.test.ts (19 tests) 88ms
+ ✓ packages/positions/src/positions.test.ts (30 tests) 37ms
+ ✓ packages/trading/src/trading.test.ts (25 tests) 31ms
+ ✓ apps/api/src/gateway.test.ts (11 tests) 10512ms
+   ✓ realtime gateway over a real WebSocket (needs Postgres and Redis) > closes a socket that never authenticates, and one that sends anything else first 1716ms
+   ✓ realtime gateway over a real WebSocket (needs Postgres and Redis) > delivers channel events only to subscribers, and a private event only to its owner 1117ms
+   ✓ realtime gateway over a real WebSocket (needs Postgres and Redis) > replays what a reconnecting client missed, once each and in order, and nothing from before its last id 454ms
+   ✓ realtime gateway over a real WebSocket (needs Postgres and Redis) > closes a connection when its token expires 1549ms
+   ✓ realtime gateway over a real WebSocket (needs Postgres and Redis) > closes every client with 1001 when the server shuts down 2276ms
+ ✓ apps/api/src/adminStatus.test.ts (6 tests) 2005ms
+   ✓ admin status and costs (needs Postgres) > status > reports database, redis, queues, controls, counts and budgets, and warns about what needs attention 370ms
+ ✓ workers/pipeline/src/b6.integration.test.ts (4 tests) 13653ms
+   ✓ B6: outcome tracking and backtesting on a real Postgres > trackOutcomes > measures a decision, keeps an open window open, finalizes it later, and leaves final rows alone 899ms
+   ✓ B6: outcome tracking and backtesting on a real Postgres > runBacktest > reports no conclusion at all when there is too little data, and says why 578ms
+   ✓ B6: outcome tracking and backtesting on a real Postgres > runBacktest > with enough synthetic history it reports a clear difference, saves the run, and writes nothing else 11888ms
+ ✓ workers/pipeline/src/pipeline.test.ts (22 tests) 38ms
+ ✓ apps/api/src/entitlements/addendum.test.ts (7 tests) 1985ms
+   ✓ Checkpoint B addendum: real signatures and persistence > real challenge -> ed25519 verify -> link -> webhook -> entitlement, with real JWT verification and no faked proof 452ms
+ ✓ apps/api/src/read.test.ts (9 tests) 2062ms
+ ✓ workers/pipeline/src/aiAnalysis.integration.test.ts (9 tests) 1611ms
+   ✓ AI analysis on a real Postgres > collects trusted numbers and labels the token text as untrusted 312ms
+ ✓ workers/pipeline/src/b9.integration.test.ts (5 tests) 2458ms
+   ✓ B9: system limits, the global pause and the blacklist reach the Governor (real Postgres) > the global pause stops new entries before any quote is spent, and a job queued before the pause is rejected by the Governor 1077ms
+   ✓ B9: system limits, the global pause and the blacklist reach the Governor (real Postgres) > exits are not stopped by the pause 421ms
+   ✓ B9: system limits, the global pause and the blacklist reach the Governor (real Postgres) > admin-lowered system limits shrink orders for everyone, including a user whose own limit is looser, and a reset restores them 433ms
+ ✓ packages/market-data/src/market.test.ts (24 tests) 48ms
+ ✓ workers/pipeline/src/prismaStores.test.ts (12 tests) 40ms
+ ✓ packages/smart-money/src/smartMoney.test.ts (19 tests) 25ms
+ ✓ apps/api/src/entitlements/reconcile.test.ts (10 tests) 1566ms
+   ✓ partner client and reconciliation (fake fetch, real scratch persistence) > pages opaque cursors, uses Bearer/redirect rejection and advances watermark only at the end 370ms
+ ✓ packages/tx-verify/src/verify.test.ts (26 tests) 1066ms
+ ✓ apps/api/src/confirmations.test.ts (9 tests) 2559ms
+   ✓ confirmation routes (needs Postgres) > requires sign-in on every endpoint 385ms
+   ✓ confirmation routes (needs Postgres) > lists only the signed-in user's confirmations, with an expired one shown as expired 663ms
+   ✓ confirmation routes (needs Postgres) > a race of simultaneous confirms has exactly one winner and queues exactly one job 496ms
+ ✓ workers/pipeline/src/marketData.integration.test.ts (10 tests) 1573ms
+   ✓ market data refresh on a real Postgres > creates tokens from real launches only, and sanitizes their names 341ms
+   ✓ market data refresh on a real Postgres > feeds token resolution end to end: ranks real candidates and never a honeypot 658ms
+ ✓ packages/token-intel/src/tokenIntel.test.ts (17 tests) 24ms
+ ✓ apps/api/src/entitlements/alwaysOpen.test.ts (71 tests) 4163ms
+   ✓ named always-open routes at NONE with enforced=true > GET /v1/overview preserves own-data/control availability when enforcement turns on 591ms
+ ✓ packages/narrative/src/narrative.test.ts (17 tests) 2562ms
+   ✓ velocity and stage > detects decay after a peak and death after silence 706ms
+   ✓ velocity and stage > separates a rising mainstream narrative from a saturated one 1746ms
+ ✓ workers/pipeline/src/tokenResolution.integration.test.ts (7 tests) 3589ms
+   ✓ token resolution on a real Postgres > labels the first launch as OG, a sequel as derivative, and a look-alike as suspicious 875ms
+   ✓ token resolution on a real Postgres > is repeatable without duplicate alerts, relations or opportunity rows 456ms
+   ✓ token resolution on a real Postgres > writes a new opportunity row only when the score moves after enough time 930ms
+   ✓ token resolution on a real Postgres > watches a narrative with no token, then picks up a launch without ranking it early 870ms
+ ✓ packages/solana/src/funding.test.ts (13 tests) 69ms
+ ✓ packages/realtime/src/hub.test.ts (14 tests) 39ms
+ ✓ apps/api/src/executorAdmin.test.ts (8 tests) 2024ms
+ ✓ packages/risk/src/systemLimits.test.ts (13 tests) 37ms
+ ✓ packages/solana/src/b5a.test.ts (7 tests) 88ms
+ ✓ packages/shared/src/env.test.ts (13 tests) 55ms
+ ✓ packages/risk/src/governor.test.ts (10 tests) 36ms
+ ✓ apps/api/src/http.test.ts (11 tests) 1195ms
+   ✓ HTTP hardening > puts a request id on every response, and echoes a plain one from the caller 499ms
+ ✓ apps/api/src/admin.test.ts (5 tests) 2391ms
+   ✓ admin and analysis routes (needs Postgres) > lets an admin read and change the models, and audits the change 429ms
+ ✓ workers/pipeline/src/prismaStores.integration.test.ts (4 tests) 1258ms
+   ✓ prisma stores on a real Postgres > loads the pre-trade state from real rows 512ms
+ ✓ workers/executor/src/isolation.test.ts (13 tests) 168ms
+ ✓ apps/api/src/account.test.ts (8 tests) 1901ms
+   ✓ account routes (needs Postgres) > requires a valid token 372ms
+   ✓ account routes (needs Postgres) > creates the user on first sign-in with safe defaults 564ms
+   ✓ account routes (needs Postgres) > only allows automated modes once AI access is on, and drops them when it goes off 393ms
+ ✓ packages/risk/src/exits.test.ts (10 tests) 15ms
+ ✓ packages/tx-verify/src/simulation.test.ts (10 tests) 18ms
+ ✓ workers/pipeline/src/walletIntelligence.integration.test.ts (5 tests) 1702ms
+   ✓ wallet intelligence on a real Postgres > scores, labels and links the wallets from their trades 392ms
+ ✓ apps/api/src/entitlements/webhook.test.ts (6 tests) 1057ms
+   ✓ webhook HTTP boundary with real scratch persistence > raw bytes before parsing; contract response, duplicate and header identity 522ms
+ ✓ workers/pipeline/src/narrativeIngestion.integration.test.ts (5 tests) 1503ms
+   ✓ narrative ingestion on a real Postgres > creates the narrative, stores hashes only, scores it and raises an alert 866ms
+ ✓ packages/realtime/src/stream.integration.test.ts (9 tests) 1044ms
+   ✓ event stream (needs Redis) > the reader forwards only events published after it started 987ms
+ ✓ packages/ai/src/review.test.ts (6 tests) 39ms
+ ✓ packages/solana/src/solana.test.ts (8 tests) 69ms
+ ✓ apps/api/src/entitlements/crypto.test.ts (21 tests) 146ms
+ ✓ packages/shared/src/entitlements.test.ts (10 tests) 13ms
+ ✓ packages/queue/src/queue.test.ts (4 tests) 2276ms
+   ✓ queues (needs Redis) > processes a redelivered webhook event only once 659ms
+   ✓ queues (needs Redis) > never retries a failed execution job 1525ms
+ ✓ packages/smart-money/src/funding.test.ts (10 tests) 16ms
+ ✓ apps/api/src/app.test.ts (5 tests) 380ms
+ ✓ packages/shared/src/alerts.test.ts (7 tests) 110ms
+ ✓ workers/pipeline/src/chainPorts.test.ts (4 tests) 22ms
+ ✓ apps/api/src/entitlements/isolation.test.ts (3 tests) 22ms
+ ✓ workers/executor/src/config.test.ts (5 tests) 13ms
+ ✓ packages/solana/src/rpc.test.ts (3 tests) 55ms
+ ✓ packages/narrative/src/rotation.test.ts (6 tests) 11ms
+ ✓ apps/api/src/entitlements/inventory.test.ts (1 test) 29ms
+ ✓ packages/shared/src/untrusted.test.ts (5 tests) 12ms
+stdout | apps/api/src/entitlements/contractCheck.test.ts > contract script: offline fixed vector and real localhost:4010 HTTP cases; remote targets refused
+DATABASE_URL host=localhost:5432 db=narra_ent; contract check listener localhost:4010 only.
+
+stdout | apps/api/src/entitlements/contractCheck.test.ts > contract script: offline fixed vector and real localhost:4010 HTTP cases; remote targets refused
+PASS offline: exact 326-byte CONTRACT vector signature
+
+
+stdout | apps/api/src/entitlements/contractCheck.test.ts > contract script: offline fixed vector and real localhost:4010 HTTP cases; remote targets refused
+DATABASE_URL host=localhost:5432 db=narra_ent; target localhost:4010 (server must use scratch configuration).
+contract vector: HTTP 200 (expected 200) {"ok":true,"status":"duplicate"}
+tampered body: HTTP 401 (expected 401) {"error":"UNAUTHORIZED","requestId":"00e4b965-864e-44d5-a65a-22b9b08e9ac4"}
+wrong secret: HTTP 401 (expected 401) {"error":"UNAUTHORIZED","requestId":"21e9e9c7-ae07-4df0-84fe-1fd056aa5da2"}
+old timestamp: HTTP 401 (expected 401) {"error":"UNAUTHORIZED","requestId":"2261e1fc-38dd-42a9-9b54-4fadad125e48"}
+duplicate event id: HTTP 200 (expected 200) {"ok":true,"status":"duplicate"}
+stale version: HTTP 200 (expected 200) {"ok":true,"status":"stale"}
+unknown tier: HTTP 400 (expected 400) {"error":"INVALID_INPUT","requestId":"eeeb50ff-11ee-44e8-90a7-98ae7b2d8d2e"}
+
+
+ ✓ apps/api/src/entitlements/contractCheck.test.ts (1 test) 1377ms
+   ✓ contract script: offline fixed vector and real localhost:4010 HTTP cases; remote targets refused 1375ms
+ ✓ packages/trading/src/killSwitch.test.ts (3 tests) 14ms
+
+ Test Files  71 passed (71)
+      Tests  1049 passed (1049)
+   Start at  04:21:31
+   Duration  236.76s (transform 4.75s, setup 0ms, collect 66.89s, tests 121.21s, environment 41ms, prepare 16.69s)
+
+The CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.
+

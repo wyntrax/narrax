@@ -1,6 +1,6 @@
 # Early access and Wyntrax entitlements
 
-**Status: Checkpoint A approved with conditions; Stages 1–3 implemented for Checkpoint B review. Stage 4 enforcement is not implemented.**
+**Status: Checkpoints A and B approved with conditions. Stages 4–5 implemented for Checkpoint C review; enforcement defaults OFF.**
 2026-10-07. Baseline: `4120916` (`main`), worktree `C:\dev\narra-entitlements`, branch `entitlements`. CONTRACT v1 supplied by the owner is authoritative. This document proposes NARRA implementation and product mapping; it does not amend that contract.
 
 ## 1. Invariants and scope
@@ -159,7 +159,7 @@ Secrets remain env-only: `WYNTRAX_WEBHOOK_SECRET`, optional `WYNTRAX_WEBHOOK_SEC
 
 ## 8. Feature-to-tier map: actual route inventory
 
-**Approved target for Stage 4; not yet enforced at Checkpoint B.** Always-open means no entitlement gate, not anonymous access. Existing auth/admin/HMAC requirements remain. Route groups below cover registrations in `app.ts`, including loop-generated account routes. Automatically generated HEAD routes inherit GET behavior; OPTIONS carries no feature data.
+**Implemented at Checkpoint C with the owner's approved MEMBER reassignment.** Always-open means no entitlement gate, not anonymous access. Existing auth/admin/HMAC requirements remain. Route groups below cover registrations in `app.ts`, including loop-generated account routes. Automatically generated HEAD routes inherit GET behavior; OPTIONS carries no feature data.
 
 | Existing routes / group | Class / feature | Notes |
 |---|---|---|
@@ -174,10 +174,10 @@ Secrets remain env-only: `WYNTRAX_WEBHOOK_SECRET`, optional `WYNTRAX_WEBHOOK_SEC
 | GET `/v1/narratives`, `/v1/narratives/:slug` | EARLY_ACCESS / `research.narratives` | Existing narrative list/detail. |
 | GET `/v1/tokens` ordinary list/text query; GET `/v1/tokens/:mint` | EARLY_ACCESS / `research.tokens` | Includes the currently returned basic token metrics/risk/consensus snapshot; detailed wallet analytics are a different feature. |
 | GET `/v1/intelligence-bar` | EARLY_ACCESS / `research.overview` | Existing global summary counts/flow/heat. |
-| GET `/v1/tokens` with existing `isScreenerRequest` filters/sort | MEMBER / `research.screener` | Select feature after validated query, not by a client-supplied tier/feature flag. |
-| GET `/v1/narratives/rotation` | MEMBER / `research.rotation` | Existing windows 1h/6h/24h/7d. |
-| GET `/v1/opportunities` | MEMBER / `research.opportunities`, mixed-data exception below | Shared ranking and global decision hints; preserve caller-owned decisions at NONE. |
-| GET `/v1/smart-money/wallets` | MEMBER / `research.smart_money` | Existing tracked-wallet leaderboard. |
+| GET `/v1/tokens` with existing `isScreenerRequest` filters/sort | PRO / `research.screener` | Select feature after validated query, not by a client-supplied tier/feature flag. |
+| GET `/v1/narratives/rotation` | EARLY_ACCESS / `research.rotation` | Existing windows 1h/6h/24h/7d. |
+| GET `/v1/opportunities` | PRO / `research.opportunities`, mixed-data exception below | Shared ranking and global decision hints; preserve caller-owned decisions at NONE. |
+| GET `/v1/smart-money/wallets` | PRO / `research.smart_money` | Existing tracked-wallet leaderboard. |
 | GET `/v1/opportunities/:id/analysis` | PRO / `research.analysis`, mixed-data exception below | Shared AI bull/bear/risk/guardrail analysis. An existing user-specific decision remains readable. |
 | GET `/v1/wallets/:address`, `/v1/wallets/:address/trades` | PRO / `research.wallet_detail` | Existing tracked-wallet funding/cluster/performance/history. If address belongs to the caller through an existing user-scoped Wallet or verified LinkedWallet, allow reading its existing detail/history without a tier; no new tracking is triggered. |
 | GET `/v1/analytics/decisions/summary`, `/v1/analytics/decisions/outcomes` | PRO / `research.decision_analytics` | Global outcome measurements, not the user's own PnL. |
@@ -198,7 +198,7 @@ No withdrawal/exit-all route exists yet. Their future implementations must join 
 Never put a blanket `requireFeature` hook on mixed groups. Split queries/response construction by ownership before shared-data access:
 
 - **Overview:** always return `me` and timestamp. At eligible tiers include bar/top narratives (`research.overview` plus narratives), hottest opportunity (`research.opportunities`), rotation (`research.rotation`). Rebuild brief from allowed inputs only. Locked sections are explicitly marked in response metadata and null/empty, not represented as observed zero activity. Skip restricted queries.
-- **Search:** MY_TRADE is always queried/returned for the caller. Tokens/narratives/creators need EARLY_ACCESS (respective token/narrative features); wallet leaderboard hits need MEMBER; TRACKED_WALLET transaction results need wallet-detail access, except caller-owned addresses established by user-scoped Wallet/LinkedWallet records. Do not leak restricted results through total counts, cursors or metadata.
+- **Search:** MY_TRADE is always queried/returned for the caller. Tokens/narratives/creators need EARLY_ACCESS (respective token/narrative features); wallet leaderboard hits need PRO; TRACKED_WALLET transaction results need wallet-detail access, except caller-owned addresses established by user-scoped Wallet/LinkedWallet records. Do not leak restricted results through total counts, cursors or metadata.
 - **Opportunities/analysis:** current queries can include `AgentDecision.userId = caller`, even though current pipeline decisions are normally global. Without the research feature, return only caller-owned decisions and their existing associated analysis context; list membership must require such a decision. Never fall back to a global decision for an ineligible caller. Empty own-only lists remain 200; inaccessible global-only detail is FEATURE_LOCKED. Own-data responses get no tier-dependent quota.
 - **Realtime:** `notification.created`, `position.evaluated`, `confirmation.created`, `trade.created` retain existing owner isolation and are always delivered. `alert.created` stays open as a safety-notification surface. `narrative.updated` maps to narratives, `opportunity.created` and `decision.created` to opportunities, `consensus.updated` to smart-money, `market.sol` to tokens. In the API gateway, an ordered, bounded asynchronous egress adapter authorizes each research event from fresh state before sending; private/control events do not wait for entitlement reads. Apply at the final socket send boundary so replay, queued replay/live events and later revocation cannot bypass it. Drop denied events without closing private access; fail closed for research if resolution fails. Test ordering, backpressure and expiry while connected. No new EVENT_DEFS are needed.
 - **Chat:** gate new turns before model calls. API-side agent-port wrappers check every research tool independently (`listOpportunities`, token/consensus fields, global recent decisions/outcomes, backtestSummary), including when an admin feature override lowers chat's minimum. Own-data tools remain ownership-scoped. Never let model text select a feature or user. Existing apply/reject handlers stay entitlement-independent.
@@ -306,6 +306,8 @@ Checkpoint A was approved with conditions: atomic user seats, EARLY_ACCESS-only 
 
 ## 14. As built at Checkpoint B
 
+Historical snapshot below; Stage 4/5 implementation and the approved reassignment supersede the earlier deferred work. See section 15 and `ENTITLEMENTS_CHECKPOINT_C.md`.
+
 Schema `0011_entitlements`, pure resolver/admission policy, four authenticated linked-wallet endpoints and the HMAC webhook are implemented. Local settings/grant/revoke **services** implement the approved seat/admin rules now so their concurrency and non-escalation can be reviewed; their HTTP admin/join endpoints remain Stage 4. Feature metadata is pure and has no HTTP enforcement hook yet. A stored `entitlements.enforced=true` therefore does not activate enforcement in this build.
 
 | Tier / surface | Implemented policy metadata | HTTP behavior at B |
@@ -325,3 +327,25 @@ The schema's `LocalAccessTier` enum contains only EARLY_ACCESS; even a direct da
 Dependencies: direct declarations are restricted to `apps/api/package.json`: `@noble/curves` **1.9.7**, `bs58` **4.0.1**. The lockfile adds exactly these two entries under apps/api; no resolved package/version changes. `npm ci` ran before and after. Pure resolver stays in shared; base58 boundary validation lives in API to avoid introducing a shared dependency outside the approval.
 
 Verification limits: wallet lifecycle/concurrency integration tests use a fake successful signature verifier; real Ed25519 verification is independently exercised with the published RFC 8032 vector, including wrong key/message/signature/encoding rejection. No test or production wallet-signing code was added. Real Privy, a real browser wallet challenge round trip and live Wyntrax delivery are unverified. See `ENTITLEMENTS_CHECKPOINT_B.md` for the full report, remaining risks, commands and diff artifacts.
+
+## 15. Checkpoint C implementation
+
+`requireFeature` runs after auth on the exact shared-route manifest in `apps/api/src/entitlements/gating.ts`. Mixed routes filter queries by ownership/feature instead of gating their whole envelope. Every request re-resolves state; private WebSocket events bypass the bounded research queue. Research replay/live events pass the same fresh per-event check at final socket egress. Chat's new-turn gate and per-tool wrappers are independent so a lowered chat override cannot expose other paid tools.
+
+The exact admin setting allowlist is in `settings.ts`. `entitlements.features` is a feature-keyed object with optional `requiredTier` and `min_entitlement_age_hours`; unknown features/fields, negative/nonfinite ages and ages above 8760 hours are rejected. Default age is **0 for every feature**. Admin updates require a reason and transactional audit. An age above zero requires a current PRO/ELITE source meeting the feature's tier and age; local EARLY_ACCESS and reserved MEMBER cannot satisfy it.
+
+Migration `0012_entitlement_age` adds nullable `proSince`/`eliteSince`. The version-ordered applicator starts age at local receipt time, retains it across continuous same-wallet renewals, resets it on NONE, expiry or wallet-set change, and starts ELITE age on upgrade. Missing historical timestamps start with the next accepted update; stale/equal versions cannot refresh them. Age is also bounded by the caller's linked-wallet verification time, so unlink/relink and a new owner cannot inherit a prior user's waiting period. This is observed continuity, not proof that token balances never changed between Wyntrax checks.
+
+Reconciliation is implemented in `apps/api/src/entitlements/{partner,reconcile}.ts`; `workers/pipeline/src/entitlementRegistration.ts` contains queue/worker registration only. API and worker use that registration adapter without new dependencies or edits to `packages/queue`. The queue is `wyntrax-reconcile`, every 15 minutes, concurrency 1, one queue attempt; partner calls have their own maximum three attempts and 10-second abort. A six-minute DB lease spans the five-minute/100-page invocation limit, across processes. Cursor/run progress and the last completed starting-time watermark live under internal `entitlements.reconcile_state`, which is not admin-editable. Incremental overlap is five minutes; a daily full scan repairs gaps. Failure preserves cursor and watermark; earlier applied items are replay-safe. Absence never revokes. Expired local grants and old challenges are swept in batches of at most 500 when a run completes; resolver expiry works even with the job disabled.
+
+Partner page validation expects `{items,nextCursor}` with each full-state item `{wyntraxUserId,version,tier,wallets,validUntil?,balanceSnapshotAt,updatedAt}`. Live partner response shape, ordering and cursor lifetime remain unverified. No arbitrary wallet lookup is exposed. Bearer credentials stay in headers; only trusted HTTPS origins are accepted, redirects are rejected, streamed responses are capped at 1 MiB, retries cover network/timeouts/429/5xx only, and errors omit remote bodies and credentials.
+
+## Rollout
+
+1. Apply migration `0012_entitlement_age`; set trusted `entitlements.wallet_link_domain`. Configure env-only `WYNTRAX_WEBHOOK_SECRET`, optionally `WYNTRAX_WEBHOOK_SECRET_PREVIOUS` for rotation. Keep `entitlements.enforced=false` (default). Verify receiver and wallet linking first.
+2. Enable/review shadow denial logging (`entitlements.shadow_log=true`, default). Logs contain feature and enforcement metadata only. Configure local `early_access.enabled` and `early_access.seat_cap` through audited admin settings; no automatic enrollment occurs.
+3. Configure `WYNTRAX_API_BASE_URL` (HTTPS origin) and `WYNTRAX_API_KEY` to enable scheduled/manual reconciliation. Unset either disables it. Verify live API shape before production use. Review feature overrides; leave age controls at 0 until deliberately configured.
+4. Enable `entitlements.enforced=true` only after reviewing the named-route map and live integration. Own-data/safety/admin routes stay open subject to normal authentication/ownership.
+5. **Rollback:** set `entitlements.enforced=false` through the audited admin settings endpoint. Leave shadow logging on for diagnosis; clear a mistaken feature override if needed. Receiver ingestion may continue while enforcement is off.
+
+Local manual check, only in this worktree with `narra_ent`, Redis /5 and `API_PORT=4010`: put the literal public fixture secret in local ignored `.env` as `WYNTRAX_WEBHOOK_SECRET=test_secret_do_not_use`. Run `node scripts/wyntrax-contract-check.mjs --offline` to verify the fixed vector without HTTP. Start the API with that local env, then run `node scripts/wyntrax-contract-check.mjs --now` to re-sign the unchanged vector body with the current timestamp and run adversarial cases. Without `--now`, the fixed old timestamp should return 401. The script refuses any target except `http://localhost:4010`, follows no redirects, prints only status/body/expected status, and sets a failure exit code on mismatches. The automated contract test starts only the API receiver on that port and shuts it down afterward; no workers start.

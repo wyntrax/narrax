@@ -332,3 +332,6 @@ execution queue --> workers/executor (own process)
 
 ## Entitlements (Checkpoint B)
 Early-access/Wyntrax schema, pure research-tier resolution, verified wallet linking and the signed membership webhook are implemented; enforcement and reconciliation await later stages. Entitlements cannot grant trading authority or gate safety/own-data access. See [the design](docs/ENTITLEMENTS.md) and [Checkpoint B evidence](docs/ENTITLEMENTS_CHECKPOINT_B.md). Local verification uses `node apps/api/scripts/scratch.cjs test` with the isolated `narra_ent` database, Redis /5 and port 4010; it refuses another database target.
+
+### Entitlements Checkpoint C
+Research gating (default OFF), audited admin controls, optional entitlement-age settings and bounded Wyntrax reconciliation are built. MEMBER remains contract-valid/reserved; the approved v1 map uses EARLY_ACCESS, PRO and ELITE. See [Checkpoint C](docs/ENTITLEMENTS_CHECKPOINT_C.md) and the [rollout/manual contract check](docs/ENTITLEMENTS.md#rollout). Roll back enforcement with `entitlements.enforced=false`.
