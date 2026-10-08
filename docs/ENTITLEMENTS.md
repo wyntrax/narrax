@@ -397,6 +397,8 @@ Local manual check, only in this worktree with `narra_ent`, Redis /5 and `API_PO
 
 Illustrative nginx location snippet for an operator-managed TLS virtual host (not installed or started by this task). `narra_api` denotes its privately reachable API upstream; local isolated testing continues to use only port 4010. Preserve a dedicated JSON 413 response without body/header logging:
 
+Apply the ingress restriction and forwarded-header overwrite to **every** proxied API/WebSocket location, not only this webhook location, because `TRUST_PROXY` is an app-wide setting.
+
 ```nginx
 location = /v1/integrations/wyntrax/events {
     client_max_body_size 16k;

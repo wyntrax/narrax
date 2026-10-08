@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrisma, Prisma } from '@narra/database';
+import { resolveEntitlements } from '@narra/shared';
 import { partnerClient } from './partner';
 import { reconcile, sweepExpired } from './reconcile';
 import { applyMembershipState } from './membershipStore';
@@ -54,6 +55,29 @@ describe('partner client and reconciliation (fake fetch, real scratch persistenc
     expect((await db.wyntraxMembership.findUniqueOrThrow({ where: { wyntraxUserId: i.wyntraxUserId } })).tier).toBe('PRO');
     await reconcile(db, { ...config, fetch: async () => response([item('e', 6, 'NONE')]) }, () => at);
     expect((await db.wyntraxMembership.findUniqueOrThrow({ where: { wyntraxUserId: i.wyntraxUserId } })).tier).toBe('NONE');
+  });
+  it('a member missing from nonempty and empty partner pages remains unchanged and eligible until validUntil', async () => {
+    const member = item('absence-proof');
+    await reconcile(db, { ...config, fetch: async () => response([member]) }, () => at);
+    const load = () => db.wyntraxMembership.findUniqueOrThrow({ where: { wyntraxUserId: member.wyntraxUserId }, include: { wallets: true } });
+    const before = await load();
+    const tier = (row: Awaited<ReturnType<typeof load>>, time: Date) => resolveEntitlements({ userId, linkedWallets: [{ userId, chain: 'solana', address, verifiedAt: at }], grants: [], memberships: [row], earlyAccessEnabled: false }, time).effectiveTier;
+    for (const page of [[item('other-member')], []]) {
+      await reconcile(db, { ...config, fetch: async () => response(page) }, () => new Date(+at + 900000));
+      const after = await load(); expect(after).toEqual(before); expect(tier(after, new Date(+at + 900000))).toBe('PRO');
+    }
+    expect(tier(await load(), new Date(+new Date(member.validUntil) - 1))).toBe('PRO');
+    expect(tier(await load(), new Date(member.validUntil))).toBe('NONE');
+    expect(await load()).toEqual(before); // Read-time expiry retains the monotonic version tombstone.
+  });
+  it.each([true, false])('accepts explicit NONE with empty wallets=%s and nullable/omitted validUntil', async empty => {
+    const member = item(`none-proof-${empty}`);
+    await reconcile(db, { ...config, fetch: async () => response([member]) }, () => at);
+    const revoked = { ...member, version: 2, tier: 'NONE', wallets: empty ? [] : member.wallets, validUntil: empty ? null : undefined };
+    expect(await reconcile(db, { ...config, fetch: async () => response([revoked]) }, () => at)).toMatchObject({ status: 'complete', applied: 1 });
+    const row = await db.wyntraxMembership.findUniqueOrThrow({ where: { wyntraxUserId: member.wyntraxUserId }, include: { wallets: true } });
+    expect(row).toMatchObject({ tier: 'NONE', version: 2n, validUntil: null }); expect(row.wallets).toHaveLength(empty ? 0 : 1);
+    expect(resolveEntitlements({ userId, linkedWallets: [{ userId, chain: 'solana', address, verifiedAt: at }], grants: [], memberships: [row], earlyAccessEnabled: false }, at).effectiveTier).toBe('NONE');
   });
   it('concurrent runs have one DB lease winner and no second fetch', async () => {
     let release!: () => void, entered!: () => void; const blocked = new Promise<void>(r => { release = r; }), started = new Promise<void>(r => { entered = r; });
