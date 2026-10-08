@@ -12,6 +12,7 @@ import { DexScreenerSource, GeckoTerminalSource } from '@narra/market-data';
 import { OpenAiCompatibleProvider } from '@narra/ai';
 import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, monitorPositions, syncWalletWebhook, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, type ChainPorts, type WalletEventDeps } from './index';
 import { assertEnv } from '@narra/shared';
+import { createEntitlementQueue, createEntitlementWorker, scheduleReconcile } from './entitlementRegistration';
 
 // First, before any connection is opened: stop with a clear list of what is wrong. Messages never contain a value.
 assertEnv('worker');
@@ -19,6 +20,8 @@ assertEnv('worker');
 const connection = createRedis();
 const queues = createQueues(connection);
 const db = createPrisma();
+const wyntraxConfig = { baseUrl: process.env.WYNTRAX_API_BASE_URL, apiKey: process.env.WYNTRAX_API_KEY };
+const entitlementQueue = wyntraxConfig.baseUrl && wyntraxConfig.apiKey ? createEntitlementQueue(connection) : null;
 const jupiter = new JupiterClient({ apiKey: process.env.JUPITER_API_KEY });
 const notWired = (name: string) => async (): Promise<never> => { throw new Error(`${name} needs HELIUS_RPC_URL`); };
 // Without an RPC URL the ports throw, so real-wallet work fails closed instead of guessing balances.
@@ -59,6 +62,7 @@ if (!llm) console.log('no AI provider configured');
 
 // Registering the repeating jobs. Done in an async block because this file runs as CommonJS under tsx, which has no top-level await.
 const scheduled = (async () => {
+  if (entitlementQueue) await scheduleReconcile(entitlementQueue);
   await queues.scheduleWalletIntelligence();
   await queues.scheduleAiAnalysis();
   await queues.scheduleNarrativeIngestion();
@@ -78,6 +82,7 @@ const scheduled = (async () => {
 scheduled.then(() => console.log('schedules registered'), (e) => { console.error('could not register schedules:', e instanceof Error ? e.message : e); process.exit(1); });
 
 const workers = [
+  ...(entitlementQueue ? [createEntitlementWorker(connection, db, wyntraxConfig)] : []),
   new Worker(QUEUE_NAMES.walletEvents, (j) => processWalletEvent(SwapEventSchema.parse(j.data), walletDeps), { connection, concurrency: 8 }),
   // One recompute at a time: it rewrites profiles, clusters and consensus together.
   new Worker(QUEUE_NAMES.walletIntelligence, async () => JSON.stringify(await recomputeWalletIntelligence(db)), { connection, concurrency: 1 }),
@@ -111,7 +116,7 @@ const workers = [
 ];
 for (const w of workers) w.on('failed', (job, err) => console.error(JSON.stringify({ msg: 'job_failed', queue: w.name, id: job?.id, err: err.message })));
 
-const shutdown = async () => { await Promise.all(workers.map((w) => w.close())); await queues.close(); connection.disconnect(); await db.$disconnect(); process.exit(0); };
+const shutdown = async () => { await Promise.all(workers.map((w) => w.close())); await entitlementQueue?.close(); await queues.close(); connection.disconnect(); await db.$disconnect(); process.exit(0); };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 console.log('workers started');
