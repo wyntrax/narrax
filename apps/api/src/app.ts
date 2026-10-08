@@ -24,6 +24,8 @@ import { registerGateway, type GatewayDeps } from './gateway';
 import type { ExecutionJob } from '@narra/queue';
 import { registerLinkedWalletRoutes } from './entitlements/linkRoutes';
 import { registerWyntraxWebhook, type WyntraxDeps } from './entitlements/webhook';
+import { registerFeatureGates } from './entitlements/gating';
+import { registerEntitlementRoutes } from './entitlements/routes';
 
 const EvaluateBody = z.object({
   /** Raw model output. Untrusted until it passes the schema. */
@@ -61,6 +63,8 @@ export async function buildApp(opts: { webhooks?: WebhookDeps; account?: Account
   if (opts.webhooks) registerWebhooks(app, opts.webhooks);
   await registerWyntraxWebhook(app, opts.wyntrax);
   if (opts.account) {
+    registerFeatureGates(app, opts.account.db, opts.account.now);
+    registerEntitlementRoutes(app, opts.account, opts.wyntrax?.enqueueReconcile);
     registerLinkedWalletRoutes(app, opts.account);
     registerAccountRoutes(app, opts.account);
     registerReadRoutes(app, opts.account);

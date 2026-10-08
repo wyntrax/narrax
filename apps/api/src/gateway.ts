@@ -5,6 +5,8 @@ import type { PrismaClient } from '@narra/database';
 import { CLOSE, ClientMessage, MAX_CLIENT_MESSAGE_BYTES, RealtimeHub, startStreamReader, type EventStream, type HubOptions, type HubSocket, type StreamEvent } from '@narra/realtime';
 import { resolveUserId } from './account';
 import type { AuthVerifier } from './auth';
+import { researchEgress } from './entitlements/egress';
+import { canReadFeature } from './entitlements/access';
 
 /** Starting values, not tuned. */
 export const GATEWAY_LIMITS = {
@@ -96,8 +98,14 @@ export async function registerGateway(app: FastifyInstance, deps: GatewayDeps): 
     const origin = req.headers.origin;
     if (origins.length && origin && !origins.includes(origin)) { socket.close(CLOSE.FORBIDDEN, 'origin_not_allowed'); return; }
 
+    let entitlementUserId: string | null = null, entitlementSessionExpiry = 0;
+    const egress = researchEgress(m => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(m)); }, async feature => {
+      if (!entitlementUserId || entitlementSessionExpiry <= now()) return false;
+      const allowed = await canReadFeature(deps.db, entitlementUserId, feature, new Date(now()), entry => app.log.info(entry, 'research access decision'));
+      return allowed && entitlementSessionExpiry > now();
+    });
     const hubSocket: HubSocket = {
-      send: (m) => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(m)); },
+      send: m => egress.send(m),
       close: (code, reason) => { try { socket.close(code, reason.slice(0, 100)); } catch { /* already closed */ } },
       bufferedBytes: () => socket.bufferedAmount,
     };
@@ -114,7 +122,7 @@ export async function registerGateway(app: FastifyInstance, deps: GatewayDeps): 
       try { socket.ping(); } catch { /* closing */ }
     }, L.heartbeatMs);
     heartbeat.unref();
-    const cleanup = () => { clearInterval(heartbeat); hub.disconnect(id); };
+    const cleanup = () => { egress.close(); clearInterval(heartbeat); hub.disconnect(id); };
     socket.on('close', cleanup);
     socket.on('error', cleanup);
 
@@ -144,6 +152,7 @@ export async function registerGateway(app: FastifyInstance, deps: GatewayDeps): 
           const userId = await resolveUserId(deps.db, v.privyUserId);
           const r = hub.authenticate(id, userId, expiresAtMs, msg.channels);
           if (!r.ok) return hub.close(id, r.close, r.reason);
+          entitlementUserId = userId; entitlementSessionExpiry = expiresAtMs;
           const first = !authed;
           authed = true;
           hub.send(id, { type: 'ready', connectionId: id, channels: r.channels, serverTime: new Date(now()).toISOString() });

@@ -4,14 +4,16 @@ import type { PrismaClient } from '@narra/database';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { IdCursor, Limit, decodeCursor, encodeCursor, likeEscape } from './paging';
 import { ScreenerQuery, isScreenerRequest, runScreener } from './screener';
+import { canReadFeature, featureDecision, requireFeature } from './entitlements/access';
 
 const n = (v: { toString(): string } | null | undefined) => (v == null ? null : Number(v.toString()));
 const Paging = z.object({ limit: Limit, cursor: IdCursor.optional() });
 const OppCursor = z.tuple([z.number().finite(), z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)]);
 
 /** Read-only endpoints that feed the UI. Market data is shared; positions and trades are scoped to the signed-in user. */
-export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps, 'db' | 'verifier'>): void {
+export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps, 'db' | 'verifier' | 'now'>): void {
   const db: PrismaClient = deps.db;
+  const now = deps.now ?? (() => new Date());
   const opts = { preHandler: makeAuthenticate(deps), config: { rateLimit: { max: 120, timeWindow: '1 minute' } } };
   const bad = { error: 'INVALID_INPUT' } as const;
 
@@ -59,14 +61,17 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
     const after = q.data.cursor ? decodeCursor(q.data.cursor, OppCursor) : null;
     if (q.data.cursor && !after) return reply.code(400).send(bad);
     const me = req.userId!;
+    const shared = await canReadFeature(db, me, 'research.opportunities', now(), entry => req.log.info(entry, 'research access decision'));
+    if (shared) q.data.limit = Math.min(q.data.limit, (await featureDecision(db, me, 'research.opportunities', now())).pageLimit);
     // Newest 500, then the latest per token, then best score first (ties by id). Pages are cut from that list, so the list is
     // limited to the newest 500 opportunities however far a client pages.
     const rows = await db.opportunity.findMany({
+      where: shared ? {} : { analyses: { some: { decisions: { some: { userId: me } } } } },
       orderBy: { createdAt: 'desc' }, take: 500,
       include: {
         token: { select: { mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1 } } },
         narrative: { select: { name: true, slug: true, stage: true } },
-        analyses: { orderBy: { createdAt: 'desc' }, take: 1, include: { decisions: { where: { OR: [{ userId: null }, { userId: me }] }, orderBy: { createdAt: 'desc' }, take: 1 } } },
+        analyses: { where: shared ? {} : { decisions: { some: { userId: me } } }, orderBy: { createdAt: 'desc' }, take: 1, include: { decisions: { where: shared ? { OR: [{ userId: null }, { userId: me }] } : { userId: me }, orderBy: { createdAt: 'desc' }, take: 1 } } },
       },
     });
     const seen = new Set<string>();
@@ -95,7 +100,9 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
   app.get('/v1/opportunities/:id/analysis', opts, async (req, reply) => {
     const { id } = req.params as { id: string };
     const me = req.userId!;
-    const a = await db.agentAnalysis.findFirst({
+    const own = await db.agentAnalysis.findFirst({ where: { opportunityId: id, decisions: { some: { userId: me } } }, orderBy: { createdAt: 'desc' }, include: { decisions: { where: { userId: me }, orderBy: { createdAt: 'desc' }, take: 1 } } });
+    if (!own) { await requireFeature(db, 'research.analysis', now)(req, reply); if (reply.sent) return; }
+    const a = own ?? await db.agentAnalysis.findFirst({
       where: { opportunityId: id }, orderBy: { createdAt: 'desc' },
       include: { decisions: { where: { OR: [{ userId: null }, { userId: me }] }, orderBy: [{ userId: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }], take: 1 } },
     });
@@ -115,6 +122,9 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
   app.get('/v1/tokens', opts, async (req, reply) => {
     const q = ScreenerQuery.safeParse(req.query);
     if (!q.success) return reply.code(400).send({ ...bad, fields: [...new Set(q.error.issues.map((i) => i.path.join('.')))] });
+    const feature = isScreenerRequest(q.data) ? 'research.screener' : 'research.tokens';
+    await requireFeature(db, feature, now)(req, reply); if (reply.sent) return;
+    q.data.limit = Math.min(q.data.limit, Number((req.query as { limit?: number }).limit ?? q.data.limit));
     if (isScreenerRequest(q.data)) {
       const r = await runScreener(db, q.data, new Date());
       if (!r) return reply.code(400).send(bad);

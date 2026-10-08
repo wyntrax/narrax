@@ -5,6 +5,7 @@ import { detectRotation, ROTATION_RULES, type RotationResult } from '@narra/narr
 import { sanitizeUntrusted } from '@narra/shared';
 import { SOL_PRICE_KEY } from '@narra/worker-pipeline';
 import { makeAuthenticate, type AccountDeps } from './account';
+import { canReadFeature } from './entitlements/access';
 
 const HOUR = 3_600_000;
 /** A SOL price older than this is returned with stale: true, so the UI never shows an old number as current. Matches readSolUsd. */
@@ -107,26 +108,29 @@ export function registerOverviewRoutes(app: FastifyInstance, deps: Pick<AccountD
 
   app.get('/v1/overview', opts, async (req) => {
     const at = now(); const userId = req.userId!;
-    const [{ top, bar }, rotation, hottest, openPositions, pendingConfirmations, unreadAlerts] = await Promise.all([
-      loadBar(db, at),
-      loadRotation(db, '24h', at),
-      db.opportunity.findFirst({
+    const [overviewAccess, narrativeAccess, rotationAccess, opportunityAccess] = await Promise.all((['research.overview', 'research.narratives', 'research.rotation', 'research.opportunities'] as const).map(key => canReadFeature(db, userId, key, at, entry => req.log.info(entry, 'research access decision'))));
+    const [summary, rotation, hottest, openPositions, pendingConfirmations, unreadAlerts] = await Promise.all([
+      overviewAccess ? loadBar(db, at) : null,
+      rotationAccess ? loadRotation(db, '24h', at) : null,
+      opportunityAccess ? db.opportunity.findFirst({
         where: { createdAt: { gte: new Date(at.getTime() - 24 * HOUR) } }, orderBy: [{ score: 'desc' }, { id: 'asc' }],
         include: { token: { select: { mint: true, symbol: true, metrics: { orderBy: { at: 'desc' }, take: 1 } } }, narrative: { select: { name: true, slug: true } } },
-      }),
+      }) : null,
       db.position.count({ where: { userId, status: 'OPEN' } }),
       db.pendingConfirmation.count({ where: { userId, status: 'PENDING', expiresAt: { gt: at } } }),
       db.notification.count({ where: { userId, readAt: null } }),
     ]);
     const m = hottest?.token.metrics[0];
+    const bar = summary?.bar ?? null, top = narrativeAccess ? summary?.top ?? [] : [];
     return {
       at, bar,
+      locked: { overview: !overviewAccess, narratives: !narrativeAccess, rotation: !rotationAccess, opportunities: !opportunityAccess },
       strip: {
         topNarratives: top.map((t) => ({ id: t.id, slug: t.slug, name: t.name, stage: t.stage, score: t.score, velocity: t.velocity })),
         hottestOpportunity: hottest ? { id: hottest.id, createdAt: hottest.createdAt, score: hottest.score, token: { mint: hottest.token.mint, symbol: hottest.token.symbol, priceUsd: n(m?.priceUsd), marketCapUsd: n(m?.marketCapUsd) }, narrative: hottest.narrative } : null,
       },
-      rotation: { detected: rotation.detected, window: rotation.window, falling: rotation.falling, rising: rotation.rising, unknown: rotation.unknown },
-      brief: { generated: 'rules', points: composeBrief(top, bar, rotation) },
+      rotation: rotation ? { detected: rotation.detected, window: rotation.window, falling: rotation.falling, rising: rotation.rising, unknown: rotation.unknown } : null,
+      brief: { generated: 'rules', points: bar ? composeBrief(top, bar, rotation) : [] },
       me: { openPositions, pendingConfirmations, unreadAlerts },
     };
   });

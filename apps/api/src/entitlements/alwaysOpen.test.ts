@@ -73,7 +73,8 @@ describe('named always-open routes at NONE with enforced=true', () => {
       expect(resolver).not.toHaveBeenCalled();
     } finally { socket.close(); }
   });
-  it.each(ALWAYS_OPEN_HTTP)('%s does not consult the resolver or change availability when enforcement turns on', async name => {
+  it.each(ALWAYS_OPEN_HTTP)('%s preserves own-data/control availability when enforcement turns on', async name => {
+    resolver.mockClear();
     const [method, path] = name.split(' ') as ['GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', string];
     expect(app.hasRoute({ method, url: path }), name).toBe(true);
     const endpoint = path.replace(':id', 'missing-fixture').replace(':address', 'So11111111111111111111111111111111111111112').replace(':mint', 'So11111111111111111111111111111111111111112');
@@ -87,6 +88,11 @@ describe('named always-open routes at NONE with enforced=true', () => {
     expect(enforced.body).not.toContain('FEATURE_LOCKED');
     expect(enforced.statusCode).not.toBe(500);
     if (method === 'GET' && !path.includes(':') && path !== '/v1/admin/status') expect(enforced.statusCode).toBe(200);
-    expect(resolver).not.toHaveBeenCalled();
+    if (path === '/v1/overview') {
+      expect(resolver).toHaveBeenCalled(); expect(enforced.json().me).toEqual(baseline.json().me);
+      expect(enforced.json()).toMatchObject({ bar: null, rotation: null, strip: { topNarratives: [], hottestOpportunity: null } });
+    } else if (path === '/v1/search') {
+      expect(resolver).toHaveBeenCalled(); expect(enforced.json().results).toMatchObject({ tokens: [], narratives: [], wallets: [], creators: [] });
+    } else expect(resolver).not.toHaveBeenCalled();
   });
 });

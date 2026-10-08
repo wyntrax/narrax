@@ -6,6 +6,7 @@ import { AGENT_LIMITS, TIGHTENABLE_FIELDS, describeTighten, runAgent, sanitizeUs
 import { aiEnabled, loadAiConfig } from '@narra/worker-pipeline';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { effectiveLimits, makeAgentPorts } from './chatPorts';
+import { researchPorts } from './entitlements/chatAccess';
 
 const Body = z.object({ conversationId: z.string().min(1).max(64).optional(), message: z.string().min(1).max(AGENT_LIMITS.maxUserMessageChars) }).strict();
 const IdParams = z.object({ id: z.string().min(1).max(64) });
@@ -68,7 +69,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): void {
       } else conversationId = (await db.chatConversation.create({ data: { userId } })).id;
 
       await db.chatMessage.create({ data: { conversationId, userId, role: 'USER', content: message, createdAt: at } });
-      const result = await runAgent({ llm: deps.llm, model: cfg.fastModel, temperature: cfg.temperature, maxTokens: cfg.maxTokensPerCall, ports, ctx: { userId, now: at, conversationId }, userMessage: message, history });
+      const result = await runAgent({ llm: deps.llm, model: cfg.fastModel, temperature: cfg.temperature, maxTokens: cfg.maxTokensPerCall, ports: researchPorts(ports, db, userId, now, entry => req.log.info(entry, 'research access decision')), ctx: { userId, now: at, conversationId }, userMessage: message, history });
       await db.$transaction([
         db.chatMessage.create({
           data: {

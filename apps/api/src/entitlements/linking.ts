@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@narra/database';
 import { z } from 'zod';
+import { sanitizeUntrusted } from '@narra/shared';
 import { AccessError, audit, lock, lockUser, TX_OPTIONS, WalletInput } from './common';
 import { challengeMessage, hash, newNonce, verifyWalletProof } from './crypto';
 import { localSettings } from './settings';
@@ -54,14 +55,18 @@ export async function verifyWalletChallenge(db: PrismaClient, userId: string, in
     throw e;
   }
 }
-export async function unlinkWallet(db: PrismaClient, userId: string, id: string, now: Date) {
+export async function unlinkWallet(db: PrismaClient, userId: string, id: string, now: Date, admin?: { actorId: string; reason: string }) {
   return db.$transaction(async tx => {
+    if (admin) {
+      const actor = await tx.user.findUnique({ where: { id: admin.actorId }, select: { isAdmin: true } });
+      if (!actor?.isAdmin || !admin.reason.trim()) throw new AccessError('FORBIDDEN', 403);
+    }
     await lockUser(tx, userId);
     const link = await tx.linkedWallet.findFirst({ where: { id, userId } });
     if (!link) throw new AccessError('NOT_FOUND', 404);
     await tx.walletLinkChallenge.updateMany({ where: { userId, chain: link.chain, address: link.address, consumedAt: null }, data: { consumedAt: now } });
     await tx.linkedWallet.delete({ where: { id } });
-    await audit(tx, userId, 'entitlements.wallet_unlinked', { linkId: id, chain: link.chain, address: link.address });
+    await audit(tx, admin?.actorId ?? userId, 'entitlements.wallet_unlinked', { userId, linkId: id, chain: link.chain, address: link.address, ...(admin ? { reason: sanitizeUntrusted(admin.reason, 300) } : {}) });
     // AccessGrant is intentionally untouched: an unlink never frees a user's seat.
   }, TX_OPTIONS);
 }

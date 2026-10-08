@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { PrismaClient } from '@narra/database';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { IdCursor, Limit, likeEscape } from './paging';
+import { canReadFeature, requireFeature } from './entitlements/access';
 
 const n = (v: { toString(): string } | null | undefined) => (v == null ? null : Number(v.toString()));
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
@@ -19,10 +20,12 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
   const now = deps.now ?? (() => new Date());
   const opts = { preHandler: makeAuthenticate(deps), config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
   const bad = { error: 'INVALID_INPUT' } as const;
+  const ownAddresses = async (userId: string) => [...await db.wallet.findMany({ where: { userId }, select: { address: true } }), ...await db.linkedWallet.findMany({ where: { userId, chain: 'solana' }, select: { address: true } })].map(w => w.address);
 
   app.get('/v1/wallets/:address', opts, async (req, reply) => {
     const p = AddressParam.safeParse(req.params);
     if (!p.success) return reply.code(400).send(bad);
+    if (!(await ownAddresses(req.userId!)).includes(p.data.address)) { await requireFeature(db, 'research.wallet_detail', now)(req, reply); if (reply.sent) return; }
     // Deactivated wallets are no longer tracked, so they are not shown (their history is kept in the database).
     const w = await db.trackedWallet.findFirst({
       where: { address: p.data.address, active: true },
@@ -86,6 +89,7 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     const p = AddressParam.safeParse(req.params);
     const q = z.object({ limit: Limit, cursor: IdCursor.optional(), side: z.enum(['BUY', 'SELL']).optional() }).safeParse(req.query);
     if (!p.success || !q.success) return reply.code(400).send(bad);
+    if (!(await ownAddresses(req.userId!)).includes(p.data.address)) { await requireFeature(db, 'research.wallet_detail', now)(req, reply); if (reply.sent) return; q.data.limit = Math.min(q.data.limit, Number((req.query as { limit?: number }).limit ?? q.data.limit)); }
     const w = await db.trackedWallet.findFirst({ where: { address: p.data.address, active: true }, select: { id: true } });
     if (!w) return reply.code(404).send({ error: 'NOT_FOUND' });
     if (q.data.cursor && !(await db.walletTrade.count({ where: { id: q.data.cursor, walletId: w.id } }))) return reply.code(400).send(bad);
@@ -112,16 +116,21 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     const isAddress = looksBase58 && term.length >= 32 && term.length <= 44;
     const isSignature = looksBase58 && term.length >= 80 && term.length <= 90;
     const addressPrefix = looksBase58 && term.length >= 4;
+    const log = (entry: object) => req.log.info(entry, 'research access decision');
+    const [tokenAccess, narrativeAccess, walletAccess, detailAccess, owned] = await Promise.all([
+      canReadFeature(db, userId, 'research.tokens', now(), log), canReadFeature(db, userId, 'research.narratives', now(), log),
+      canReadFeature(db, userId, 'research.smart_money', now(), log), canReadFeature(db, userId, 'research.wallet_detail', now(), log), ownAddresses(userId),
+    ]);
 
     const [tokens, narratives, wallets, creators, walletTx, myTx] = await Promise.all([
-      db.token.findMany({
+      tokenAccess ? db.token.findMany({
         where: { OR: [{ symbol: { contains: like, mode: 'insensitive' } }, { name: { contains: like, mode: 'insensitive' } }, ...(addressPrefix ? [{ mint: { startsWith: like } }] : [])] },
         take, orderBy: [{ symbol: 'asc' }, { id: 'asc' }], select: { mint: true, symbol: true, name: true, blacklisted: true },
-      }),
-      db.narrative.findMany({ where: { stage: { not: 'DEAD' }, OR: [{ name: { contains: like, mode: 'insensitive' } }, { slug: { contains: likeEscape(term.toLowerCase().replace(/\s+/g, '-')) } }] }, take, orderBy: [{ score: 'desc' }, { id: 'asc' }], select: { slug: true, name: true, stage: true, score: true } }),
-      db.trackedWallet.findMany({ where: { active: true, OR: [{ label: { contains: like, mode: 'insensitive' } }, ...(addressPrefix ? [{ address: { startsWith: like } }] : [])] }, take, orderBy: [{ id: 'asc' }], select: { address: true, label: true, profile: { select: { score: true } } } }),
-      db.creator.findMany({ where: { handle: { contains: likeEscape(term.replace(/^@/, '').toLowerCase()), mode: 'insensitive' } }, take, orderBy: [{ id: 'asc' }], select: { platform: true, handle: true } }),
-      isSignature ? db.walletTrade.findMany({ where: { signature: term, wallet: { active: true } }, take: 1, select: { signature: true, side: true, at: true, token: { select: { mint: true, symbol: true } }, wallet: { select: { address: true } } } }) : Promise.resolve([]),
+      }) : [],
+      narrativeAccess ? db.narrative.findMany({ where: { stage: { not: 'DEAD' }, OR: [{ name: { contains: like, mode: 'insensitive' } }, { slug: { contains: likeEscape(term.toLowerCase().replace(/\s+/g, '-')) } }] }, take, orderBy: [{ score: 'desc' }, { id: 'asc' }], select: { slug: true, name: true, stage: true, score: true } }) : [],
+      walletAccess ? db.trackedWallet.findMany({ where: { active: true, OR: [{ label: { contains: like, mode: 'insensitive' } }, ...(addressPrefix ? [{ address: { startsWith: like } }] : [])] }, take, orderBy: [{ id: 'asc' }], select: { address: true, label: true, profile: { select: { score: true } } } }) : [],
+      narrativeAccess ? db.creator.findMany({ where: { handle: { contains: likeEscape(term.replace(/^@/, '').toLowerCase()), mode: 'insensitive' } }, take, orderBy: [{ id: 'asc' }], select: { platform: true, handle: true } }) : [],
+      isSignature ? db.walletTrade.findMany({ where: { signature: term, wallet: { active: true, ...(detailAccess ? {} : { address: { in: owned } }) } }, take: 1, select: { signature: true, side: true, at: true, token: { select: { mint: true, symbol: true } }, wallet: { select: { address: true } } } }) : Promise.resolve([]),
       isSignature ? db.trade.findMany({ where: { signature: term, userId }, take: 1, select: { signature: true, side: true, executedAt: true, simulated: true, order: { select: { token: { select: { mint: true, symbol: true } } } } } }) : Promise.resolve([]),
     ]);
 
