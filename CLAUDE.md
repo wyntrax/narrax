@@ -141,7 +141,7 @@ Backlog order is in `docs/CONTINUATION.md` section 5. **B5 is staged: `docs/SECU
 
 ## Entitlements checkpoint
 
-See `docs/ENTITLEMENTS.md` and `docs/ENTITLEMENTS_CHECKPOINT_B.md`. Stages 1–3 add research entitlements, wallet proof verification and Wyntrax ingestion; Stage 4 gating waits for owner approval at Checkpoint B. Entitlement operations never change mode, trading permissions, execution controls or risk. This branch verifies only against localhost:5432/narra_ent and Redis /5, with API port 4010; use the guarded `apps/api/scripts/scratch.cjs` runner. Existing rules above remain in force.
+See `docs/ENTITLEMENTS.md`. Stages 1–5 implement research entitlements, wallet proof verification, Wyntrax ingestion, research gating and reconciliation. Entitlement operations never change mode, trading permissions, execution controls or risk. This branch verifies only against localhost:5432/narra_ent and Redis /5, with API port 4010; use the guarded `apps/api/scripts/scratch.cjs` runner. Existing rules above remain in force.
 
 ### Entitlements Checkpoint C
-Checkpoint B was approved with conditions; Stage 4/5 evidence is in `docs/ENTITLEMENTS_CHECKPOINT_C.md`. Enforcement defaults OFF; age controls default 0. Test-only Ed25519 challenge signing was explicitly approved to verify the real lifecycle; production remains verification-only. Continue to preserve own-data/safety access and trading non-escalation. Stop at Checkpoint C for owner review; no push or merge.
+Checkpoint C was approved with conditions; review evidence is archived outside the repo at `C:\dev\narra-entitlements-review`. Enforcement defaults OFF; age controls default 0. Test-only Ed25519 challenge signing was explicitly approved to verify the real lifecycle; production remains verification-only. Preserve own-data/safety access and trading non-escalation. Stop after the requested cleanup/readiness verification; no push or merge.

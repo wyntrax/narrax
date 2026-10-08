@@ -1,9 +1,0 @@
-node apps/api/scripts/scratch.cjs typecheck (exit 0)
-DATABASE_URL host=localhost:5432 db=narra_ent; confirmed scratch only (Redis /5, API port 4010).
-
-
-node apps/api/scripts/scratch.cjs deployed-diff (exit 0)
-DATABASE_URL host=localhost:5432 db=narra_ent; confirmed scratch only (Redis /5, API port 4010).
--- This is an empty migration.
-
-

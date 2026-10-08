@@ -1,6 +1,6 @@
 # Early access and Wyntrax entitlements
 
-**Status: Checkpoints A and B approved with conditions. Stages 4–5 implemented for Checkpoint C review; enforcement defaults OFF.**
+**Status: Checkpoints A, B and C approved with conditions. Stages 1–5 implemented; enforcement defaults OFF. Review packets are archived outside the repo at `C:\dev\narra-entitlements-review\checkpoint-c-637ce8a`.**
 2026-10-07. Baseline: `4120916` (`main`), worktree `C:\dev\narra-entitlements`, branch `entitlements`. CONTRACT v1 supplied by the owner is authoritative. This document proposes NARRA implementation and product mapping; it does not amend that contract.
 
 ## 1. Invariants and scope
@@ -306,7 +306,7 @@ Checkpoint A was approved with conditions: atomic user seats, EARLY_ACCESS-only 
 
 ## 14. As built at Checkpoint B
 
-Historical snapshot below; Stage 4/5 implementation and the approved reassignment supersede the earlier deferred work. See section 15 and `ENTITLEMENTS_CHECKPOINT_C.md`.
+Historical snapshot below; Stage 4/5 implementation and the approved reassignment supersede the earlier deferred work. See section 15; the checkpoint reports are in the external review archive named above.
 
 Schema `0011_entitlements`, pure resolver/admission policy, four authenticated linked-wallet endpoints and the HMAC webhook are implemented. Local settings/grant/revoke **services** implement the approved seat/admin rules now so their concurrency and non-escalation can be reviewed; their HTTP admin/join endpoints remain Stage 4. Feature metadata is pure and has no HTTP enforcement hook yet. A stored `entitlements.enforced=true` therefore does not activate enforcement in this build.
 
@@ -326,7 +326,7 @@ The schema's `LocalAccessTier` enum contains only EARLY_ACCESS; even a direct da
 
 Dependencies: direct declarations are restricted to `apps/api/package.json`: `@noble/curves` **1.9.7**, `bs58` **4.0.1**. The lockfile adds exactly these two entries under apps/api; no resolved package/version changes. `npm ci` ran before and after. Pure resolver stays in shared; base58 boundary validation lives in API to avoid introducing a shared dependency outside the approval.
 
-Verification limits: wallet lifecycle/concurrency integration tests use a fake successful signature verifier; real Ed25519 verification is independently exercised with the published RFC 8032 vector, including wrong key/message/signature/encoding rejection. No test or production wallet-signing code was added. Real Privy, a real browser wallet challenge round trip and live Wyntrax delivery are unverified. See `ENTITLEMENTS_CHECKPOINT_B.md` for the full report, remaining risks, commands and diff artifacts.
+Verification limits at B: wallet lifecycle/concurrency integration tests used a fake successful signature verifier; real Ed25519 verification was independently exercised with the published RFC 8032 vector. C added the explicitly authorized real-signature lifecycle test with a locally signed/verified JWT and scratch PostgreSQL. Production code is verification-only. Real Privy issuance, browser wallet UX and live Wyntrax delivery remain unverified. Historical reports and full diff/test artifacts are retained in the external review archive.
 
 ## 15. Checkpoint C implementation
 
@@ -342,10 +342,82 @@ Partner page validation expects `{items,nextCursor}` with each full-state item `
 
 ## Rollout
 
-1. Apply migration `0012_entitlement_age`; set trusted `entitlements.wallet_link_domain`. Configure env-only `WYNTRAX_WEBHOOK_SECRET`, optionally `WYNTRAX_WEBHOOK_SECRET_PREVIOUS` for rotation. Keep `entitlements.enforced=false` (default). Verify receiver and wallet linking first.
-2. Enable/review shadow denial logging (`entitlements.shadow_log=true`, default). Logs contain feature and enforcement metadata only. Configure local `early_access.enabled` and `early_access.seat_cap` through audited admin settings; no automatic enrollment occurs.
-3. Configure `WYNTRAX_API_BASE_URL` (HTTPS origin) and `WYNTRAX_API_KEY` to enable scheduled/manual reconciliation. Unset either disables it. Verify live API shape before production use. Review feature overrides; leave age controls at 0 until deliberately configured.
-4. Enable `entitlements.enforced=true` only after reviewing the named-route map and live integration. Own-data/safety/admin routes stay open subject to normal authentication/ownership.
-5. **Rollback:** set `entitlements.enforced=false` through the audited admin settings endpoint. Leave shadow logging on for diagnosis; clear a mistaken feature override if needed. Receiver ingestion may continue while enforcement is off.
+The procedure below is operator guidance, not permission for an agent to enable production or start workers. Current verification stays on `narra_ent`, Redis /5 and port 4010. Store review evidence outside this repo. Checkpoint C approval does not merge, push or enable enforcement.
+
+1. **Prepare schema and proxy:** back up the target before a separately authorized deployment; apply migrations through `0012_entitlement_age`. Locally use `node apps/api/scripts/scratch.cjs deploy`, then `node apps/api/scripts/scratch.cjs deployed-diff` (empty expected). Configure the proxy as below before trusting forwarded IPs. Use env-only `WYNTRAX_WEBHOOK_SECRET`, optional `WYNTRAX_WEBHOOK_SECRET_PREVIOUS` for rotation; never send these values through admin settings or logs.
+2. **Receiver first, enforcement OFF:** through the authenticated admin settings endpoint set `entitlements.enforced=false` and `entitlements.shadow_log=false`. Set `entitlements.wallet_link_domain` to the exact trusted frontend origin. Verify the offline/local contract check below, including tampering and duplicate/stale delivery. Before live rollout, obtain a genuine Wyntrax delivery and a genuine Privy/browser-wallet challenge→verify→link result. Check `/v1/me/entitlements` matches the signed wallet; unlink must remove its derived access immediately. These live checks have not yet been performed.
+3. **Configure local access deliberately:** set `early_access.enabled` and `early_access.seat_cap` through audited settings with the owner-approved cap. Exercise join/leave and one finite EARLY_ACCESS admin grant/revoke. Read `GET /v1/admin/early-access/stats` to confirm counts and no identities. Check each approved feature minimum; `entitlements.features={}` means the built map and age 0. Do not enable an age requirement during the initial rollout.
+4. **Verify reconciliation before enforcing:** set both `WYNTRAX_API_BASE_URL` (trusted HTTPS origin) and `WYNTRAX_API_KEY` in the separately authorized deployment. Unset either disables the job. Verify actual page shape, cursor ordering/lifetime and Bearer authentication. An authorized operator may start the scheduled consumer and POST `{ "reason": "pre-enforcement verification" }` to `/v1/admin/entitlements/reconcile`; verify a completed run and watermark before the next step. Test NONE with empty wallets, missing-member preservation and expiry. No pipeline/executor process is started by this task.
+5. **Shadow observation:** set `entitlements.shadow_log=true`, keeping `entitlements.enforced=false`, using the command template below. Follow the observation window, sample coverage and zero-unexplained-denial criteria below. Pause the rollout on any failed criterion; keep enforcement OFF and repeat the window after policy/ingestion fixes.
+6. **Enforce only the named surfaces:** after the owner accepts the recorded shadow review, PUT `{ "settings": { "entitlements.enforced": true, "entitlements.shadow_log": true }, "reason": "owner-approved named-route rollout" }` to `/v1/admin/entitlements/settings`. Confirm rollout state via GET settings and `/v1/me/entitlements`, then repeat the full NONE/EARLY_ACCESS/PRO/ELITE probe matrix, own-data/control smoke checks and paid WebSocket expiry check. Watch 403/503/429 rates and ingestion failures continuously for the first hour and daily for the first week. Any unexpected entitled-user denial, own-data/control regression or unexplained ingestion failure triggers rollback.
+
+### Shadow-log review and acceptance threshold
+
+Starting operational policy (not a measured SLO): observe **at least 48 consecutive hours**, including one representative peak period and at least two successful daily full reconciliation scans. Extend the window if traffic or upstream validation is insufficient. For **each named feature**, record at least **100 known-eligible checks** and explicit NONE, expired, unlinked, disabled-local, and relevant age-boundary cases using controlled accounts. Include HTTP, mixed fields, chat tools and public/private realtime replay/live paths. An admin has no implicit paid tier.
+
+- Select JSON log entries with `code="ENTITLEMENT_DENIAL"` and `enforced=false`, grouped by `feature`. These are would-be denials; do not mistake an HTTP 200 in shadow mode for entitlement eligibility. HTTP request logs supply request IDs; join them in the restricted operator tooling without logging tokens, signatures, nonces or wallet payloads. Realtime logs intentionally omit identity. Diagnose a specific test case with the audited admin trace GET `/v1/admin/users/:userId/entitlements`, looking at source validity, linked wallet, requiredTier and age, then reproduce at a known time.
+- Classify **every observed denial** as expected (NONE, expired, unlinked or below the configured minimum/age), unexpected (known eligible), or unexplained. Investigate spikes by feature, clock/window errors, wallet-case mismatches, delayed/missing partner versions, domain mismatches and accidental settings overrides. Also review webhook 400/401/413/429/503, `WYNTRAX_STORAGE_FAILURE`, `entitlements.reconcile_failed` audits, and the reconciliation watermark/lease via restricted operational diagnostics. Current snapshots cannot reconstruct historical eligibility; preserve controlled probe expectations/timestamps externally.
+- **Acceptance: 0 unexpected or unexplained would-be denials, 0 own-data/control failures, and 0 unresolved ingestion/reconcile failures for the entire window.** The acceptable unexpected-denial fraction is **0%** of known-eligible checks. Expected denials for ineligible accounts may be any fraction, even 100% of their attempts, but must match the approved policy and be acknowledged in the owner review. No arbitrary overall denial-rate target substitutes for classification.
+- Log counts measure denied feature evaluations, not unique users or requests; one overview/chat/stream session can evaluate several features. The application does not emit every allowed evaluation, so these logs alone cannot provide an all-traffic denominator. Use externally recorded feature-aware probe counts for the 0% criterion; report raw denial counts separately. If a denial cannot be classified with the available evidence, extend observation and obtain a controlled reproduction before enforcing.
+
+### Exact settings and rollback command (PowerShell, local scratch)
+
+Have an authorized local admin bearer token supplied privately in `$env:NARRA_ADMIN_TOKEN`; never print it, paste its literal value into command history, or enable verbose/debug HTTP logging. The following function fixes the target to localhost:4010 and prints the safe DB confirmation before each request. The API must have been started with the guarded scratch environment; a URL alone cannot prove its database target.
+
+```powershell
+function Set-LocalEntitlementSettings($Settings, [string]$Reason) {
+  if (-not $env:NARRA_ADMIN_TOKEN) { throw 'Admin session token required' }
+  Write-Host 'DATABASE_URL host=localhost:5432 db=narra_ent; Redis /5; API localhost:4010'
+  $Body = @{ settings = $Settings; reason = $Reason } | ConvertTo-Json -Depth 8 -Compress
+  Invoke-RestMethod -Method Put -Uri 'http://localhost:4010/v1/admin/entitlements/settings' `
+    -Headers @{ Authorization = "Bearer $env:NARRA_ADMIN_TOKEN" } `
+    -ContentType 'application/json' -Body $Body
+}
+# Receiver-only initial stage:
+Set-LocalEntitlementSettings @{ 'entitlements.enforced' = $false; 'entitlements.shadow_log' = $false } 'receiver verification'
+# Start the 48-hour shadow review:
+Set-LocalEntitlementSettings @{ 'entitlements.enforced' = $false; 'entitlements.shadow_log' = $true } 'start shadow review'
+# Only after owner acceptance of the review:
+Set-LocalEntitlementSettings @{ 'entitlements.enforced' = $true; 'entitlements.shadow_log' = $true } 'owner-approved named-route rollout'
+# Immediate rollback; no restart or schema rollback required:
+Set-LocalEntitlementSettings @{ 'entitlements.enforced' = $false; 'entitlements.shadow_log' = $true } 'rollback unexpected access denial'
+```
+
+Expect `{ "ok": true }`; confirm GET admin settings shows enforcement false after rollback, a previously locked research request regains its baseline availability, and own-data/control routes still work. Keep receiver/reconciliation running in an authorized deployment to repair state while enforcement is off. Rollback disables policy denial, not existing authentication, abuse limits or fail-closed behavior when entitlement storage is unavailable; escalate infrastructure failures separately.
 
 Local manual check, only in this worktree with `narra_ent`, Redis /5 and `API_PORT=4010`: put the literal public fixture secret in local ignored `.env` as `WYNTRAX_WEBHOOK_SECRET=test_secret_do_not_use`. Run `node scripts/wyntrax-contract-check.mjs --offline` to verify the fixed vector without HTTP. Start the API with that local env, then run `node scripts/wyntrax-contract-check.mjs --now` to re-sign the unchanged vector body with the current timestamp and run adversarial cases. Without `--now`, the fixed old timestamp should return 401. The script refuses any target except `http://localhost:4010`, follows no redirects, prints only status/body/expected status, and sets a failure exit code on mismatches. The automated contract test starts only the API receiver on that port and shuts it down afterward; no workers start.
+
+## Reverse-proxy readiness
+
+**Raw-byte invariant:** Wyntrax signs timestamp + dot + HTTP entity body bytes. A proxy may remove chunk framing or buffer the request; it must preserve entity bytes exactly, including whitespace, CRLF and UTF-8. Do not parse/re-serialize JSON, normalize text, decompress/recompress requests, rewrite the body, or combine/replace signature headers. Preserve the three `X-Wyntrax-*` headers and Content-Type. The receiver verifies its bounded raw Buffer before JSON parsing or persistence and rejects Content-Encoding. TLS termination does not change this rule.
+
+**Size:** the API's webhook-specific limit is **16,384 bytes**, which matches nginx `client_max_body_size 16k` (16 × 1024), not nginx's larger default of 1m. Configure this at the exact webhook location. Known Content-Length can be rejected before body reading; unknown/chunked input must be read until it crosses the bound, then rejected without parsing/persistence. Keep the API limit even with an edge limit. nginx normally generates an HTML 413; if the sender needs the contract JSON body for edge-generated errors, configure the local error response below as well. `proxy_intercept_errors off` preserves API error responses.
+
+**Client IP:** default `TRUST_PROXY=false` ignores forwarded addresses, appropriate for directly reachable APIs. `TRUST_PROXY=true` passes Fastify's boolean `trustProxy` option, which trusts forwarded addresses from **every upstream peer**; this is safe only if network/container/firewall rules restrict API ingress to the trusted reverse proxy. The current setting is not a CIDR allowlist. A single nginx edge must **overwrite** incoming `X-Forwarded-For` with `$remote_addr`, not append untrusted client values. If another load balancer precedes nginx, configure nginx's real-IP module with only that balancer's exact trusted addresses; test the entire hop chain before enabling trust. Never expose the API listener directly with trust enabled. Limits remain per API process; production replicas need a shared/edge limiter for a fleet-wide cap.
+
+Illustrative nginx location snippet for an operator-managed TLS virtual host (not installed or started by this task). `narra_api` denotes its privately reachable API upstream; local isolated testing continues to use only port 4010. Preserve a dedicated JSON 413 response without body/header logging:
+
+```nginx
+location = /v1/integrations/wyntrax/events {
+    client_max_body_size 16k;
+    proxy_request_buffering on;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Request-ID $request_id;
+    # Request body and X-Wyntrax-* headers pass through unchanged by default.
+    proxy_intercept_errors off;
+    error_page 413 = @wyntrax_body_too_large;
+    proxy_pass http://narra_api;
+}
+location @wyntrax_body_too_large {
+    internal;
+    default_type application/json;
+    return 413 '{"error":"PAYLOAD_TOO_LARGE","requestId":"$request_id"}';
+}
+```
+
+Evidence: `apps/api/src/entitlements/proxy.test.ts` forwards byte chunks through an **in-process relay** into the real API parser with real scratch persistence, checks the stored SHA-256 equals the exact signed bytes, rejects proxy JSON reserialization, accepts exactly 16,384 bytes and rejects 16,385. Its real route limiter tests prove two forwarded client addresses get separate buckets with trust enabled, and share the proxy's bucket with trust disabled. `addendum.test.ts` separately proves rejection before end-of-stream for oversized chunked input. These tests do **not** run nginx/TLS or prove deployment firewall rules; no additional listening port is used. Before deployment, an operator must repeat the vector, tamper, 16k boundary and two-client-IP/forged-forwarded-header checks through the actual proxy, verify API direct access is blocked, and confirm no proxy/WAF plugin transforms or logs signed payloads.
+
+Reconciliation regression evidence: `reconcile.test.ts` proves a persisted member missing from both nonempty and empty pages retains byte-for-byte state and PRO eligibility until the exact validUntil boundary. Expiry removes effective access without deleting its version tombstone. Separate table cases accept explicit NONE with either empty or retained wallets and null/omitted validUntil, replacing state and producing NONE immediately. Absence alone never implies revocation.
