@@ -9,7 +9,7 @@ if (target.hostname !== 'localhost' || target.port !== '5432' || target.pathname
 const db = createPrisma(target.toString()), tag = `proxy-${randomUUID()}`;
 let sequence = 0;
 const now = () => new Date(Number(VECTOR_TIME) * 1000);
-const event = () => { const e = JSON.parse(VECTOR_BODY); e.id = `${tag}-${++sequence}`; e.data.wyntraxUserId = `${tag}-member-${sequence}`; return e; };
+const event = () => { const e = JSON.parse(VECTOR_BODY); e.id = `${tag}-${++sequence}`; e.data.membershipId = `${tag}-member-${sequence}`; return e; };
 const sign = (body: Buffer) => 'v1=' + createHmac('sha256', VECTOR_SECRET).update(VECTOR_TIME + '.').update(body).digest('hex');
 // In-process forwarding boundary, no nginx process or additional listening port. Byte chunks are
 // reassembled without JSON parsing; changed transfer framing does not change signed entity bytes.
@@ -20,15 +20,15 @@ const relay = (app: Awaited<ReturnType<typeof buildApp>>, body: Buffer, id: stri
 });
 afterAll(async () => {
   await db.webhookEvent.deleteMany({ where: { id: { startsWith: tag } } });
-  await db.wyntraxMembership.deleteMany({ where: { wyntraxUserId: { startsWith: tag } } });
-  await db.auditLog.deleteMany({ where: { detail: { path: ['wyntraxUserId'], string_starts_with: tag } } });
+  await db.wyntraxEntitlement.deleteMany({ where: { membershipId: { startsWith: tag } } });
+  await db.auditLog.deleteMany({ where: { detail: { path: ['membershipId'], string_starts_with: tag } } });
   await db.$disconnect();
 });
 describe('reverse-proxy readiness (in-process relay, real API parser and PostgreSQL)', () => {
   it('verifies forwarded raw UTF-8/CRLF/whitespace bytes and rejects proxy JSON reserialization', async () => {
     const app = await buildApp({ trustProxy: true, wyntrax: { db, secret: VECTOR_SECRET, now } });
     try {
-      const e = event(); e.data.wyntraxUserId += '-é';
+      const e = event(); e.data.membershipId += '-é';
       const raw = Buffer.from(' \r\n' + JSON.stringify(e, null, 2).replace(/\n/g, '\r\n') + '\t ');
       expect((await relay(app, raw, e.id)).json()).toEqual({ ok: true, status: 'applied' });
       expect((await db.webhookEvent.findUniqueOrThrow({ where: { id: e.id } })).bodyHash).toBe(createHash('sha256').update(raw).digest('hex'));

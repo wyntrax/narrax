@@ -33,17 +33,17 @@ async function clearGrants() { await db.accessGrant.deleteMany({ where: { userId
 const grant = (id: string, actor: string | null = null, tier = 'EARLY_ACCESS') => grantEarlyAccess(db, id, { tier, validUntil: actor ? later : null, reason: 'test join' }, actor, now);
 async function challenge(id: string, addr = address()) { return { ...(await createWalletChallenge(db, id, { chain: 'solana', address: addr }, clock)), address: addr }; }
 const verification = (c: { challengeId: string; message: string }) => ({ challengeId: c.challengeId, message: c.message, signature: 'fixture-proof' });
-function event(version = 1, wyntraxUserId = `${tag}-member-${++seq}`) {
-  const e = JSON.parse(VECTOR_BODY); e.id = `${tag}-event-${++seq}`; e.version = version; e.data.wyntraxUserId = wyntraxUserId;
-  members.push(wyntraxUserId); eventIds.push(e.id); return e;
+function event(sequence = 1, membershipId = `${tag}-member-${++seq}`) {
+  const e = JSON.parse(VECTOR_BODY); e.id = `${tag}-event-${++seq}`; e.data.seq = sequence; e.data.membershipId = membershipId;
+  members.push(membershipId); eventIds.push(e.id); return e;
 }
 beforeAll(async () => { oldSettings = await db.systemSetting.findMany({ where: { key: { in: settingsKeys } } }); admin = await user(true); await configure(); });
 afterAll(async () => {
   vi.restoreAllMocks();
-  await db.auditLog.deleteMany({ where: { OR: [{ userId: { in: users } }, { detail: { path: ['wyntraxUserId'], string_starts_with: tag } }, { detail: { path: ['eventId'], string_starts_with: tag } }] } });
+  await db.auditLog.deleteMany({ where: { OR: [{ userId: { in: users } }, { detail: { path: ['membershipId'], string_starts_with: tag } }, { detail: { path: ['eventId'], string_starts_with: tag } }] } });
   await db.user.deleteMany({ where: { id: { in: users } } });
   await db.webhookEvent.deleteMany({ where: { id: { in: eventIds } } });
-  await db.wyntraxMembership.deleteMany({ where: { wyntraxUserId: { in: members } } });
+  await db.wyntraxEntitlement.deleteMany({ where: { membershipId: { in: members } } });
   await db.systemSetting.deleteMany({ where: { key: { in: settingsKeys } } });
   for (const row of oldSettings) await db.systemSetting.create({ data: { ...row, value: row.value === null ? Prisma.JsonNull : row.value as Prisma.InputJsonValue } });
   await db.$disconnect();
@@ -145,7 +145,7 @@ describe('atomic seats and restricted manual grants (services; HTTP administrati
     await db.linkedWallet.create({ data: { userId: id, chain: 'solana', address: address(), verifiedAt: now } });
     await grant(id, admin);
     const links = await db.linkedWallet.findMany({ where: { userId: id } });
-    const e = event(); e.data.wallets = [{ chain: 'solana', address: links[0]!.address }];
+    const e = event(); e.data.wallet = links[0]!.address;
     await applyWyntraxEvent(db, e, proof.hash(JSON.stringify(e)), now);
     for (const link of links) await unlinkWallet(db, id, link.id, now);
     expect((await db.accessGrant.findUniqueOrThrow({ where: { id: row.id } })).status).toBe('ACTIVE');
@@ -180,22 +180,22 @@ describe('atomic seats and restricted manual grants (services; HTTP administrati
 });
 
 describe('transactional membership ordering/idempotency', () => {
-  it('duplicate, stale and equal-version-different-ID never refresh state; newer NONE revokes', async () => {
+  it('duplicate, stale and equal-seq-different-ID never refresh state; newer revocation persists a tombstone', async () => {
     const e = event(3), digest = proof.hash(JSON.stringify(e));
     expect(await applyWyntraxEvent(db, e, digest, now)).toBe('applied');
     expect(await applyWyntraxEvent(db, e, digest, now)).toBe('duplicate');
-    for (const version of [2, 3]) { const lower = event(version, e.data.wyntraxUserId); lower.data.tier = 'ELITE'; expect(await applyWyntraxEvent(db, lower, proof.hash(JSON.stringify(lower)), now)).toBe('stale'); }
-    expect((await db.wyntraxMembership.findUniqueOrThrow({ where: { wyntraxUserId: e.data.wyntraxUserId } })).tier).toBe('PRO');
-    const revoke = event(4, e.data.wyntraxUserId); revoke.data.tier = 'NONE'; revoke.data.validUntil = null; revoke.data.wallets = [];
+    for (const sequence of [2, 3]) { const lower = event(sequence, e.data.membershipId); lower.data.key = 'ELITE'; expect(await applyWyntraxEvent(db, lower, proof.hash(JSON.stringify(lower)), now)).toBe('stale'); }
+    expect((await db.wyntraxEntitlement.findFirstOrThrow({ where: { membershipId: e.data.membershipId } })).key).toBe('PRO');
+    const revoke = event(4, e.data.membershipId); revoke.type = 'membership.revoked'; revoke.data.validUntil = null;
     expect(await applyWyntraxEvent(db, revoke, proof.hash(JSON.stringify(revoke)), now)).toBe('applied');
-    expect(await db.wyntraxMembershipWallet.count({ where: { wyntraxUserId: e.data.wyntraxUserId } })).toBe(0);
+    expect((await db.wyntraxEntitlement.findFirstOrThrow({ where: { membershipId: e.data.membershipId } })).status).toBe('REVOKED');
     expect(await applyWyntraxEvent(db, e, digest, now)).toBe('duplicate');
   });
-  it('concurrent first-insert versions end at the greatest version, including complete wallet replacement', async () => {
-    const id = `${tag}-race`, events = [5, 1, 4, 2, 3].map(v => { const e = event(v, id); e.data.wallets = [{ chain: 'solana', address: address() }]; return e; });
+  it('concurrent first-insert sequences end at the greatest seq for the same membership/wallet', async () => {
+    const id = `${tag}-race`, events = [5, 1, 4, 2, 3].map(v => event(v, id));
     await Promise.all(events.map(e => applyWyntraxEvent(db, e, proof.hash(JSON.stringify(e)), now)));
-    const row = await db.wyntraxMembership.findUniqueOrThrow({ where: { wyntraxUserId: id }, include: { wallets: true } });
-    expect(row.version).toBe(5n); expect(row.wallets.map(w => w.address)).toEqual([events[0]!.data.wallets[0].address]);
+    const row = await db.wyntraxEntitlement.findFirstOrThrow({ where: { membershipId: id } });
+    expect(row.seq).toBe(5n); expect(row.address).toEqual(events[0]!.data.wallet);
     const e = event(6, id);
     expect((await Promise.all(Array.from({ length: 5 }, () => applyWyntraxEvent(db, e, proof.hash(JSON.stringify(e)), now)))).sort()).toEqual(['applied', 'duplicate', 'duplicate', 'duplicate', 'duplicate']);
   });
@@ -203,14 +203,14 @@ describe('transactional membership ordering/idempotency', () => {
     const a = event(), b = event(); b.id = a.id;
     const result = await Promise.all([a, b].map(e => applyWyntraxEvent(db, e, proof.hash(JSON.stringify(e)), now)));
     expect(result.sort()).toEqual(['applied', 'duplicate']);
-    expect(await db.wyntraxMembership.count({ where: { wyntraxUserId: { in: [a.data.wyntraxUserId, b.data.wyntraxUserId] } } })).toBe(1);
+    expect(await db.wyntraxEntitlement.count({ where: { membershipId: { in: [a.data.membershipId, b.data.membershipId] } } })).toBe(1);
   });
   it('a failed audit rolls back receipt and membership so redelivery can succeed', async () => {
     const e = event();
     const broken = { $transaction: (work: (tx: unknown) => unknown, options: unknown) => db.$transaction(tx => work(new Proxy(tx, { get(target, property) { if (property === 'auditLog') return { create: () => { throw Error('injected failure'); } }; return Reflect.get(target, property); } })) as never, options as never) } as unknown as PrismaClient;
     await expect(applyWyntraxEvent(broken, e, proof.hash(JSON.stringify(e)), now)).rejects.toThrow('injected failure');
     expect(await db.webhookEvent.findUnique({ where: { id: e.id } })).toBeNull();
-    expect(await db.wyntraxMembership.findUnique({ where: { wyntraxUserId: e.data.wyntraxUserId } })).toBeNull();
+    expect(await db.wyntraxEntitlement.findFirst({ where: { membershipId: e.data.membershipId } })).toBeNull();
     expect(await applyWyntraxEvent(db, e, proof.hash(JSON.stringify(e)), now)).toBe('applied');
   });
 });
@@ -233,7 +233,7 @@ describe('non-escalation: guarded capabilities plus real database snapshots', ()
     });
     const before = await protectedState();
     const forbidden = vi.fn((name: string): never => { throw Error(`Forbidden entitlement capability: ${name}`); });
-    const writable = new Set(['linkedWallet', 'walletLinkChallenge', 'accessGrant', 'wyntraxMembership', 'wyntraxMembershipWallet', 'webhookEvent', 'auditLog']);
+    const writable = new Set(['linkedWallet', 'walletLinkChallenge', 'accessGrant', 'wyntraxEntitlement', 'webhookEvent', 'auditLog']);
     const guarded = { $transaction: (work: (tx: Prisma.TransactionClient) => Promise<unknown>, options: unknown) => db.$transaction(async tx => work(new Proxy(tx, {
       get(target, property) {
         const key = String(property);
@@ -258,7 +258,8 @@ describe('non-escalation: guarded capabilities plus real database snapshots', ()
       const manual = await grantEarlyAccess(guarded, id, { tier: 'EARLY_ACCESS', validUntil: later, reason: 'manual' }, admin, now);
       const member = `${tag}-isolation`;
       for (const [i, tier] of ['MEMBER', 'PRO', 'ELITE', 'NONE'].entries()) {
-        const e = event(i + 1, member); e.data.tier = tier; e.data.wallets = [{ chain: 'solana', address: link.address }];
+        const e = event(i + 1, member); e.data.key = tier === 'NONE' ? 'ELITE' : tier; e.data.wallet = link.address;
+        if (tier === 'NONE') { e.type = 'membership.revoked'; e.data.validUntil = null; }
         await applyWyntraxEvent(guarded, e, proof.hash(JSON.stringify(e)), now);
         await applyWyntraxEvent(guarded, e, proof.hash(JSON.stringify(e)), now);
       }

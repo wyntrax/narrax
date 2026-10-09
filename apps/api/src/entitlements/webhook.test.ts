@@ -15,7 +15,7 @@ const now = new Date(Number(VECTOR_TIME) * 1000);
 let seq = 0;
 const ids: string[] = [], members: string[] = [];
 const signBody = (body: string) => 'v1=' + createHmac('sha256', VECTOR_SECRET).update(VECTOR_TIME + '.').update(body).digest('hex');
-const payload = () => { const e = JSON.parse(VECTOR_BODY); e.id = `${tag}-${++seq}`; e.data.wyntraxUserId = `${tag}-member-${seq}`; ids.push(e.id); members.push(e.data.wyntraxUserId); return e; };
+const payload = () => { const e = JSON.parse(VECTOR_BODY); e.id = `${tag}-${++seq}`; e.data.membershipId = `${tag}-member-${seq}`; ids.push(e.id); members.push(e.data.membershipId); return e; };
 async function appFor(overrides: Partial<WyntraxDeps> = {}) {
   const app = Fastify({ logger: false });
   await registerHttpHardening(app);
@@ -28,8 +28,8 @@ beforeAll(async () => { app = await appFor(); });
 afterAll(async () => {
   await app.close();
   await db.webhookEvent.deleteMany({ where: { id: { in: ids } } });
-  await db.wyntraxMembership.deleteMany({ where: { wyntraxUserId: { in: members } } });
-  await db.auditLog.deleteMany({ where: { OR: [{ detail: { path: ['wyntraxUserId'], string_starts_with: tag } }, { detail: { path: ['eventId'], string_starts_with: tag } }] } });
+  await db.wyntraxEntitlement.deleteMany({ where: { membershipId: { in: members } } });
+  await db.auditLog.deleteMany({ where: { OR: [{ detail: { path: ['membershipId'], string_starts_with: tag } }, { detail: { path: ['eventId'], string_starts_with: tag } }] } });
   await db.$disconnect();
 });
 const inject = (body: string, id: string, overrides: Record<string, string> = {}, server = app, remoteAddress = `127.0.0.${++seq % 200 + 1}`) => server.inject({ method: 'POST', url: '/v1/integrations/wyntrax/events', remoteAddress, payload: body,

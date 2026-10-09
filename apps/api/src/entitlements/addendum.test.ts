@@ -27,8 +27,8 @@ async function actor() {
   return { id: u.id, headers: { authorization: `Bearer ${token}` } };
 }
 function event(address: string, version = 1, member = `${tag}-member-${++seq}`) {
-  const e = JSON.parse(VECTOR_BODY); e.id = `${tag}-event-${++seq}`; e.version = version; e.data.wyntraxUserId = member;
-  e.data.wallets = [{ chain: 'solana', address }]; e.data.validUntil = new Date(+now + 86400000).toISOString();
+  const e = JSON.parse(VECTOR_BODY); e.id = `${tag}-event-${++seq}`; e.data.seq = version; e.data.membershipId = member;
+  e.data.wallet = address; e.data.validUntil = new Date(+now + 86400000).toISOString();
   events.push(e.id); members.push(member); return e;
 }
 const signed = (body: string, timestamp = String(Math.floor(+now / 1000))) => ({ 'content-type': 'application/json', 'x-wyntrax-timestamp': timestamp, 'x-wyntrax-signature': 'v1=' + createHmac('sha256', VECTOR_SECRET).update(timestamp + '.').update(body).digest('hex') });
@@ -40,7 +40,7 @@ async function challenge(u: Awaited<ReturnType<typeof actor>>, address: string) 
 const verify = (u: Awaited<ReturnType<typeof actor>>, c: { challengeId: string; message: string }, signature: string) => app.inject({ method: 'POST', url: '/v1/me/linked-wallets/verify', remoteAddress: `198.51.100.${++seq % 200 + 1}`, headers: u.headers, payload: { ...c, signature } });
 const signature = (k: ReturnType<typeof key>, message: string) => bs58.encode(ed25519.sign(Buffer.from(message), k.secret)); // test-only, explicitly approved at B
 async function tier(userId: string) {
-  return resolveEntitlements({ userId, linkedWallets: await db.linkedWallet.findMany({ where: { userId } }), grants: [], memberships: await db.wyntraxMembership.findMany({ where: { wyntraxUserId: { in: members } }, include: { wallets: true } }), earlyAccessEnabled: false }, now).effectiveTier;
+  return resolveEntitlements({ userId, linkedWallets: await db.linkedWallet.findMany({ where: { userId } }), grants: [], memberships: await db.wyntraxEntitlement.findMany({ where: { membershipId: { in: members } } }), earlyAccessEnabled: false }, now).effectiveTier;
 }
 beforeAll(async () => {
   original = await db.systemSetting.findUnique({ where: { key: 'entitlements.wallet_link_domain' } });
@@ -49,10 +49,10 @@ beforeAll(async () => {
 }, 20000);
 afterAll(async () => {
   await app.close();
-  await db.auditLog.deleteMany({ where: { OR: [{ userId: { in: users } }, { detail: { path: ['wyntraxUserId'], string_starts_with: tag } }, { detail: { path: ['eventId'], string_starts_with: tag } }] } });
+  await db.auditLog.deleteMany({ where: { OR: [{ userId: { in: users } }, { detail: { path: ['membershipId'], string_starts_with: tag } }, { detail: { path: ['eventId'], string_starts_with: tag } }] } });
   await db.user.deleteMany({ where: { id: { in: users } } });
   await db.webhookEvent.deleteMany({ where: { id: { in: events } } });
-  await db.wyntraxMembership.deleteMany({ where: { wyntraxUserId: { in: members } } });
+  await db.wyntraxEntitlement.deleteMany({ where: { membershipId: { in: members } } });
   await db.systemSetting.delete({ where: { key: 'entitlements.wallet_link_domain' } });
   if (original) await db.systemSetting.create({ data: { ...original, value: original.value === null ? Prisma.JsonNull : original.value as Prisma.InputJsonValue } });
   await db.$disconnect();
@@ -64,7 +64,7 @@ describe('Checkpoint B addendum: real signatures and persistence', () => {
     expect((await post(event(k.address))).json()).toEqual({ ok: true, status: 'applied' });
     expect(await tier(u.id)).toBe('PRO');
     expect((await verify(u, c, sig)).statusCode).toBe(409);
-    const logs = JSON.stringify(await db.auditLog.findMany({ where: { OR: [{ userId: u.id }, { detail: { path: ['wyntraxUserId'], string_starts_with: tag } }] } }));
+    const logs = JSON.stringify(await db.auditLog.findMany({ where: { OR: [{ userId: u.id }, { detail: { path: ['membershipId'], string_starts_with: tag } }] } }));
     for (const sensitive of [VECTOR_SECRET, sig, /^Nonce: (.+)$/m.exec(c.message)![1]!, c.message]) expect(logs).not.toContain(sensitive);
   });
   it('rejects another key, modified message, wrong user/domain/address and an expired genuine proof', async () => {
@@ -92,30 +92,30 @@ describe('Checkpoint B addendum: real signatures and persistence', () => {
     expect((await app.inject({ method: 'DELETE', url: `/v1/me/linked-wallets/${link.json().id}`, headers: u.headers })).statusCode).toBe(200);
     expect(await tier(u.id)).toBe('NONE');
   });
-  it('parallel versions always end at the higher version and committed versions never decrease', async () => {
-    const k = key(), high = event(k.address, 8), low = event(k.address, 7, high.data.wyntraxUserId);
+  it('parallel sequences always end at the higher seq and committed sequences never decrease', async () => {
+    const k = key(), high = event(k.address, 8), low = event(k.address, 7, high.data.membershipId);
     const trace: bigint[] = [];
     const dbTrace = { $transaction: (work: any, opts: any) => db.$transaction(async tx => work(new Proxy(tx, { get(t, p) {
-      if (p === 'wyntraxMembership') return new Proxy(t.wyntraxMembership, { get(d, op) { if (op === 'upsert') return async (args: any) => { const row = await d.upsert(args); trace.push(row.version); return row; }; return Reflect.get(d, op); } });
+      if (p === 'wyntraxEntitlement') return new Proxy(t.wyntraxEntitlement, { get(d, op) { if (op === 'upsert') return async (args: any) => { const row = await d.upsert(args); trace.push(row.seq); return row; }; return Reflect.get(d, op); } });
       return Reflect.get(t, p);
     } })), opts) } as typeof db;
     await Promise.all([low, high].map(e => applyWyntraxEvent(dbTrace, e, hash(JSON.stringify(e)), now)));
-    expect((await db.wyntraxMembership.findUniqueOrThrow({ where: { wyntraxUserId: high.data.wyntraxUserId } })).version).toBe(8n);
+    expect((await db.wyntraxEntitlement.findFirstOrThrow({ where: { membershipId: high.data.membershipId } })).seq).toBe(8n);
     expect(trace.every((v, i) => i === 0 || v > trace[i - 1]!)).toBe(true);
     expect(await applyWyntraxEvent(db, low, hash(JSON.stringify(low)), now)).toBe('duplicate');
-    expect((await db.wyntraxMembership.findUniqueOrThrow({ where: { wyntraxUserId: high.data.wyntraxUserId } })).version).toBe(8n);
+    expect((await db.wyntraxEntitlement.findFirstOrThrow({ where: { membershipId: high.data.membershipId } })).seq).toBe(8n);
   });
   it('invalid wire states return generic 400 and make no receipt, membership or audit writes; address case is exact', async () => {
     const k = key();
-    for (const change of [(e: any) => { e.data.tier = 'SUPER'; }, (e: any) => { delete e.data.validUntil; }, (e: any) => { e.data.wallets = Array(11).fill(e.data.wallets[0]); }, (e: any) => { e.data.wallets[0].chain = 'evm'; }, (e: any) => { e.data.wallets[0].address = '0'.repeat(32); }]) {
+    for (const change of [(e: any) => { e.data.key = 'SUPER'; }, (e: any) => { delete e.data.validUntil; }, (e: any) => { e.data.wallets = []; }, (e: any) => { e.data.chain = 'evm'; }, (e: any) => { e.data.wallet = '0'.repeat(32); }]) {
       const e = event(k.address); change(e); const r = await post(e);
       expect(r.statusCode).toBe(400); expect(r.json()).toEqual({ error: 'INVALID_INPUT', requestId: expect.any(String) });
       expect(await db.webhookEvent.findUnique({ where: { id: e.id } })).toBeNull();
-      expect(await db.wyntraxMembership.findUnique({ where: { wyntraxUserId: e.data.wyntraxUserId } })).toBeNull();
-      expect(await db.auditLog.count({ where: { detail: { path: ['wyntraxUserId'], equals: e.data.wyntraxUserId } } })).toBe(0);
+      expect(await db.wyntraxEntitlement.findFirst({ where: { membershipId: e.data.membershipId } })).toBeNull();
+      expect(await db.auditLog.count({ where: { detail: { path: ['membershipId'], equals: e.data.membershipId } } })).toBe(0);
     }
     const e = event(k.address); await post(e);
-    expect((await db.wyntraxMembershipWallet.findFirstOrThrow({ where: { wyntraxUserId: e.data.wyntraxUserId } })).address).toBe(k.address);
+    expect((await db.wyntraxEntitlement.findFirstOrThrow({ where: { membershipId: e.data.membershipId } })).address).toBe(k.address);
   });
   it('rejects a chunked oversized body before end-of-stream and invalid HMAC before ANY database transaction', async () => {
     const writes = vi.fn(async () => { throw Error('must not write'); });

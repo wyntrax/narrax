@@ -5,7 +5,7 @@ import { createPrisma, Prisma } from '@narra/database';
 import { buildApp } from '../app';
 import { GATED_ROUTES } from './gating';
 import { FEATURE_TIERS } from '@narra/shared';
-import { applyMembershipState } from './membershipStore';
+import { applyWyntraxEvent } from './membershipStore';
 import { entitlementTrace, featureDecision } from './access';
 import { updateLocalSettings } from './settings';
 import { researchEgress } from './egress';
@@ -22,7 +22,7 @@ let at = new Date('2026-10-08T00:00:00Z'), version = 0, ownOpp: string, sharedOp
 const get = (url: string, who = 'user') => app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${who}` }, remoteAddress: `192.0.2.${++requestNo % 200 + 1}` });
 let requestNo = 0;
 const settings = (values: Record<string, unknown>) => updateLocalSettings(db, admin, values, 'Gate test');
-const membership = (tier: 'NONE' | 'PRO' | 'ELITE' = 'PRO', validUntil = new Date(+at + 86400000)) => applyMembershipState(db, { wyntraxUserId: tag, version: ++version, tier, validUntil, wallets: [{ chain: 'solana', address }], balanceSnapshotAt: at, sourceUpdatedAt: at }, at);
+const membership = (tier: 'NONE' | 'PRO' | 'ELITE' = 'PRO', validUntil = new Date(+at + 86400000)) => applyWyntraxEvent(db, { id: `${tag}-${++version}`, type: tier === 'NONE' ? 'membership.revoked' : 'membership.granted', occurredAt: at.toISOString(), data: { membershipId: tag, seq: version, key: tier === 'NONE' ? 'PRO' : tier, validUntil: tier === 'NONE' ? null : validUntil.toISOString(), chain: 'solana', wallet: address, checkedAt: at.toISOString() } }, 'fixture', at);
 beforeAll(async () => {
   saved = await db.systemSetting.findMany({ where: { key: { in: keys } } });
   const ids = await Promise.all(['user', 'admin', 'other'].map(async who => (await db.user.create({ data: { privyUserId: `${tag}-${who}`, isAdmin: who === 'admin' } })).id));
@@ -42,9 +42,10 @@ beforeAll(async () => {
 }, 20000);
 beforeEach(async () => { await settings({ 'entitlements.enforced': true, 'entitlements.shadow_log': false, 'entitlements.features': {}, 'early_access.enabled': false }); await membership('NONE'); });
 afterAll(async () => {
-  await app.close(); await db.auditLog.deleteMany({ where: { OR: [{ userId: { in: [user, admin, other] } }, { detail: { path: ['wyntraxUserId'], equals: tag } }] } });
+  await app.close(); await db.auditLog.deleteMany({ where: { OR: [{ userId: { in: [user, admin, other] } }, { detail: { path: ['membershipId'], equals: tag } }] } });
   await db.user.deleteMany({ where: { id: { in: [user, admin, other] } } }); await db.token.deleteMany({ where: { name: tag } }); await db.trackedWallet.deleteMany({ where: { address } });
-  await db.wyntraxMembership.deleteMany({ where: { wyntraxUserId: tag } });
+  await db.wyntraxEntitlement.deleteMany({ where: { membershipId: tag } });
+  await db.webhookEvent.deleteMany({ where: { membershipId: tag } });
   await db.systemSetting.deleteMany({ where: { key: { in: keys } } }); for (const row of saved) await db.systemSetting.create({ data: { ...row, value: row.value === null ? Prisma.JsonNull : row.value as Prisma.InputJsonValue } }); await db.$disconnect();
 });
 describe('enforced research boundaries on scratch PostgreSQL', () => {
@@ -52,7 +53,7 @@ describe('enforced research boundaries on scratch PostgreSQL', () => {
     ['GET', '/v1/me/entitlements'], ['POST', '/v1/me/early-access/join'], ['DELETE', '/v1/me/early-access'],
     ['GET', '/v1/admin/entitlements/settings'], ['PUT', '/v1/admin/entitlements/settings'], ['GET', '/v1/admin/users/:userId/entitlements'],
     ['POST', '/v1/admin/users/:userId/entitlements/grants'], ['POST', '/v1/admin/users/:userId/entitlements/grants/:id/revoke'],
-    ['DELETE', '/v1/admin/users/:userId/linked-wallets/:id'], ['POST', '/v1/admin/entitlements/reconcile'], ['GET', '/v1/admin/early-access/stats'],
+    ['DELETE', '/v1/admin/users/:userId/linked-wallets/:id'], ['GET', '/v1/admin/early-access/stats'],
   ])('%s %s is entitlement-independent at NONE with enforcement ON', async (method, path) => {
     const url = path!.replace(':userId', user).replace(':id', 'missing');
     const r = await app.inject({ method: method as 'GET' | 'POST' | 'PUT' | 'DELETE', url, headers: { authorization: `Bearer ${path!.includes('/admin/') ? 'admin' : 'user'}` }, remoteAddress: `192.0.2.${++requestNo % 200 + 1}`, ...(method === 'POST' || method === 'PUT' ? { payload: {} } : {}) });

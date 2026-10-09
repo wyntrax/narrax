@@ -19,7 +19,7 @@ describe('Wyntrax authentication', () => {
   const now = new Date(Number(VECTOR_TIME) * 1000);
   const headers = { timestamp: VECTOR_TIME, signature: VECTOR_SIGNATURE };
   const check = (h = headers, secret = VECTOR_SECRET, raw = VECTOR_BODY, at = now, previousSecret?: string) => authenticateWyntrax(Buffer.from(raw), h, { secret, previousSecret }, at);
-  it('reproduces the exact 326-byte contract vector', () => { expect(Buffer.byteLength(VECTOR_BODY)).toBe(326); expect(check()).toBe(true); });
+  it('reproduces the exact 300-byte contract vector', () => { expect(Buffer.byteLength(VECTOR_BODY)).toBe(300); expect(check()).toBe(true); });
   it('accepts previous secret only when primary is configured', () => { expect(check(headers, 'rotated', VECTOR_BODY, now, VECTOR_SECRET)).toBe(true); expect(check(headers, '', VECTOR_BODY, now, VECTOR_SECRET)).toBe(false); });
   it('rejects wrong secret and tampering (including whitespace)', () => { expect(check(headers, 'wrong')).toBe(false); expect(check(headers, VECTOR_SECRET, VECTOR_BODY + ' ')).toBe(false); });
   it.each([-301, 301])('rejects clock offset %s seconds', seconds => expect(check(headers, VECTOR_SECRET, VECTOR_BODY, new Date(+now + seconds * 1000))).toBe(false));
@@ -31,13 +31,13 @@ describe('Wyntrax authentication', () => {
 });
 describe('wire payload schema', () => {
   const event = () => JSON.parse(VECTOR_BODY);
-  it('preserves case and accepts expired states and NONE without expiry', () => {
-    expect(WyntraxEvent.parse(event()).data.wallets[0]!.address).toBe('So11111111111111111111111111111111111111112');
+  it('preserves case and accepts expired grants and revocations with null expiry', () => {
+    expect(WyntraxEvent.parse(event()).data.wallet).toBe('So11111111111111111111111111111111111111112');
     const e = event(); e.data.validUntil = '2020-01-01T00:00:00Z'; expect(WyntraxEvent.safeParse(e).success).toBe(true);
-    e.data.tier = 'NONE'; delete e.data.validUntil; expect(WyntraxEvent.safeParse(e).success).toBe(true);
+    e.type = 'membership.revoked'; e.data.validUntil = null; expect(WyntraxEvent.safeParse(e).success).toBe(true);
   });
-  it.each(['UNKNOWN', 'EARLY_ACCESS', 'pro'])('rejects tier %s', tier => { const e = event(); e.data.tier = tier; expect(WyntraxEvent.safeParse(e).success).toBe(false); });
-  it('rejects missing/null expiry for paid tiers, excess wallets, wrong chain and invalid base58', () => {
-    for (const change of [(e: any) => { delete e.data.validUntil; }, (e: any) => { e.data.validUntil = null; }, (e: any) => { e.data.wallets = Array(11).fill(e.data.wallets[0]); }, (e: any) => { e.data.wallets[0].chain = 'evm'; }, (e: any) => { e.data.wallets[0].address = '0'.repeat(32); }, (e: any) => { e.data.wallets[0].address = '1'.repeat(33); }, (e: any) => { e.version = 1.5; }]) { const e = event(); change(e); expect(WyntraxEvent.safeParse(e).success).toBe(false); }
+  it.each(['NONE', 'UNKNOWN', 'EARLY_ACCESS', 'pro'])('rejects key %s', key => { const e = event(); e.data.key = key; expect(WyntraxEvent.safeParse(e).success).toBe(false); });
+  it('rejects missing/null grant expiry, obsolete wallet lists, wrong chain, invalid base58 and seq', () => {
+    for (const change of [(e: any) => { delete e.data.validUntil; }, (e: any) => { e.data.validUntil = null; }, (e: any) => { e.data.wallets = []; }, (e: any) => { e.data.chain = 'evm'; }, (e: any) => { e.data.wallet = '0'.repeat(32); }, (e: any) => { e.data.wallet = '1'.repeat(33); }, (e: any) => { e.data.seq = 1.5; }, (e: any) => { e.data.seq = 0; }, (e: any) => { e.data.seq = Number.MAX_SAFE_INTEGER + 1; }]) { const e = event(); change(e); expect(WyntraxEvent.safeParse(e).success).toBe(false); }
   });
 });
