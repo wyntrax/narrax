@@ -1,5 +1,13 @@
 # NARRA: status, gaps and continuation guide
 
+## Membership webhook continuation (2026-10-09)
+
+Wyntrax reports independent token-gated memberships by signed webhook. Narra accepts MEMBER/PRO/ELITE keys for Solana and resolves the highest active, unexpired key across verified linked wallets. See `docs/ENTITLEMENTS.md` for setup, migration and continuous eligibility age.
+
+Next: copy the creator's new signing secret into receiver configuration, schedule standalone expiry cleanup, and verify a real holder's grant, renewal and revocation through the deployment HTTPS endpoint. Local tests use fixtures for holdings and do not verify live deployment delivery.
+
+Current cleanup verification is recorded in `docs/MEMBERSHIP_WEBHOOK_CLEANUP.md` when complete. The entitlement boundary receives configuration from entrypoints and does not read deployment secrets itself.
+
 This file is for whoever (or whatever assistant) continues the build. It says what exists, what has been verified, what is still missing, and gives ready-to-paste prompts for the next sessions.
 
 "NARRA" is a placeholder brand name, set by `PROJECT_NAME`.

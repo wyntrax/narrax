@@ -12,7 +12,7 @@ const target = new URL(targetArg >= 0 ? args[targetArg + 1] : 'http://localhost:
 if (target.hostname !== 'localhost' || target.port !== '4010' || target.protocol !== 'http:' || target.username || target.password || target.pathname !== '/' || target.search || target.hash) throw Error('Only http://localhost:4010 is permitted');
 if (args.includes('--offline')) {
   if (sign(body, fixedTime, publicSecret) !== fixture('VECTOR_SIGNATURE')) throw Error('Fixed vector mismatch');
-  console.log('PASS offline: exact 326-byte CONTRACT vector signature');
+   console.log(`PASS offline: exact ${Buffer.byteLength(body)}-byte membership webhook signature`);
 } else {
   const env = readFileSync(resolve(root, '.env'), 'utf8');
   const secret = /^WYNTRAX_WEBHOOK_SECRET=["']?([^\r\n"']+)["']?\r?$/m.exec(env)?.[1];
@@ -31,9 +31,11 @@ if (args.includes('--offline')) {
   await send('old timestamp', body, 401, String(Math.floor(Date.now() / 1000) - 301));
   if (args.includes('--now')) {
     const duplicate = await send('duplicate event id', body, 200); if (duplicate.status !== 'duplicate') process.exitCode = 1;
-    const stale = JSON.parse(body); stale.id = `contract-stale-${randomUUID()}`; stale.version = 2;
-    const result = await send('stale version', JSON.stringify(stale), 200); if (result.status !== 'stale') process.exitCode = 1;
-    const unknown = JSON.parse(body); unknown.id = `contract-invalid-${randomUUID()}`; unknown.data.tier = 'UNKNOWN';
-    await send('unknown tier', JSON.stringify(unknown), 400);
+    const stale = JSON.parse(body); stale.id = `contract-stale-${randomUUID()}`; stale.data.seq = 2;
+    const result = await send('stale seq', JSON.stringify(stale), 200); if (result.status !== 'stale') process.exitCode = 1;
+    const unknown = JSON.parse(body); unknown.id = `contract-invalid-${randomUUID()}`; unknown.data.key = 'UNKNOWN';
+    await send('unknown key', JSON.stringify(unknown), 400);
+    const test = JSON.parse(body); test.id = `contract-test-${randomUUID()}`; test.type = 'membership.test'; test.data.validUntil = null;
+    if ((await send('synthetic test', JSON.stringify(test), 200)).status !== 'test') process.exitCode = 1;
   } else console.log('Use --now for authenticated duplicate/stale/payload checks.');
 }

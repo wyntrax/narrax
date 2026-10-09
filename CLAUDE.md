@@ -141,7 +141,11 @@ Backlog order is in `docs/CONTINUATION.md` section 5. **B5 is staged: `docs/SECU
 
 ## Entitlements checkpoint
 
-See `docs/ENTITLEMENTS.md`. Stages 1–5 implement research entitlements, wallet proof verification, Wyntrax ingestion, research gating and reconciliation. Entitlement operations never change mode, trading permissions, execution controls or risk. This branch verifies only against localhost:5432/narra_ent and Redis /5, with API port 4010; use the guarded `apps/api/scripts/scratch.cjs` runner. Existing rules above remain in force.
+See `docs/ENTITLEMENTS.md`. Research entitlements use wallet proof, signed membership-level Wyntrax webhooks and local expiry enforcement. Each membership/chain/address has an independent sequence and key; resolution takes the highest eligible key. Entitlement operations never change mode, trading permissions, execution controls or risk. Verify against localhost:5432/narra_ent and Redis /5, with API port 4010, using `apps/api/scripts/scratch.cjs`.
 
 ### Entitlements Checkpoint C
 Checkpoint C was approved with conditions; review evidence is archived outside the repo at `C:\dev\narra-entitlements-review`. Enforcement defaults OFF; age controls default 0. Test-only Ed25519 challenge signing was explicitly approved to verify the real lifecycle; production remains verification-only. Preserve own-data/safety access and trading non-escalation. Stop after the requested cleanup/readiness verification; no push or merge.
+
+### Membership webhooks (2026-10-09)
+
+The owner confirmed there is no production entitlement data. Migration `0013_membership_webhooks` replaces aggregate subjects with independent wallet grants and keeps earlier applied migrations immutable. HMAC still authenticates raw bytes before JSON parsing; receipt IDs dedupe globally and only higher per-grant sequences apply. Test events record receipts without changing entitlements. Persist `proSince`/`eliteSince` to preserve continuous eligibility across renewals and overlapping memberships on the same wallet; age checks also require an old-enough verified link. `scripts/entitlements-expire.ts` is scheduled separately every minute. Setup and verification are in `docs/ENTITLEMENTS.md`.

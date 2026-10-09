@@ -2,6 +2,12 @@
 
 AI narrative and smart-money intelligence agent for Solana.
 
+## Wyntrax membership webhooks
+
+Configure each Solana membership on Wyntrax with this API's public HTTPS `/v1/integrations/wyntrax/events` URL and a MEMBER, PRO or ELITE integration key. Copy the creator signing secret into `WYNTRAX_WEBHOOK_SECRET`; `WYNTRAX_WEBHOOK_SECRET_PREVIOUS` supports rotation. Narra requires wallet-link proof and resolves the highest active, unexpired key across independent membership grants.
+
+Schedule `npm run entitlements:expire` every minute for local grant/challenge cleanup, independently of the pipeline. See [docs/ENTITLEMENTS.md](docs/ENTITLEMENTS.md) for the event contract and migration.
+
 **Start with [docs/CONTINUATION.md](docs/CONTINUATION.md):** what exists, what is verified, what is missing, and ready-to-paste prompts for continuing the backend and building the frontend. `design/prototype/narra-prototype.html` is the approved UI prototype (mock data).
 
 > **Working on this repo with Claude Code or another assistant?** Read [`CLAUDE.md`](CLAUDE.md) first (rules, architecture, gotchas, state), then [`docs/CLAUDE_CODE_PROMPT.md`](docs/CLAUDE_CODE_PROMPT.md) for ready-to-paste session prompts, and [`docs/CONTINUATION.md`](docs/CONTINUATION.md) for the full status and backlog.
