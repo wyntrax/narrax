@@ -1064,31 +1064,21 @@ model WalletLinkChallenge {
   @@index([expiresAt])
 }
 
-model WyntraxMembership {
-  proSince          DateTime?
-  eliteSince        DateTime?
-  wyntraxUserId     String @id
-  tier             WyntraxTier
-  version          BigInt
-  validUntil       DateTime?
-  balanceSnapshotAt DateTime?
-  sourceUpdatedAt  DateTime
-  receivedAt       DateTime
-  lastEventId      String?
-  lastTransport    String
-  wallets          WyntraxMembershipWallet[]
-  @@index([validUntil])
-  @@index([sourceUpdatedAt])
-}
-
-model WyntraxMembershipWallet {
-  id            String @id @default(cuid())
-  wyntraxUserId String
-  membership    WyntraxMembership @relation(fields: [wyntraxUserId], references: [wyntraxUserId], onDelete: Cascade)
-  chain         EntitlementChain
-  address       String
-  @@unique([wyntraxUserId, chain, address])
+model WyntraxEntitlement {
+  membershipId String
+  chain        EntitlementChain
+  address      String
+  key          WyntraxTier
+  seq          BigInt
+  validUntil   DateTime?
+  status       AccessGrantStatus
+  lastEventId  String
+  receivedAt   DateTime
+  proSince     DateTime?
+  eliteSince   DateTime?
+  @@id([membershipId, chain, address])
   @@index([chain, address])
+  @@index([validUntil])
 }
 
 model AccessGrant {
@@ -1110,12 +1100,14 @@ model AccessGrant {
 
 model WebhookEvent {
   id            String @id
-  wyntraxUserId String
-  version       BigInt
+  membershipId  String
+  chain         EntitlementChain
+  address       String
+  seq           BigInt
   bodyHash      String
   occurredAt    DateTime
   receivedAt    DateTime
   outcome       String
-  @@index([wyntraxUserId, version])
+  @@index([membershipId, chain, address, seq])
   @@index([receivedAt])
 }

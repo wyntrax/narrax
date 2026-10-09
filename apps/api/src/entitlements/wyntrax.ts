@@ -1,16 +1,16 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { WalletInput } from './common';
+import { WalletAddress } from './common';
 
 export const WyntraxData = z.object({
-  wyntraxUserId: z.string().min(1).max(16384), wallets: z.array(WalletInput).max(10),
-  tier: z.enum(['NONE', 'MEMBER', 'PRO', 'ELITE']), validUntil: z.string().datetime({ offset: true }).nullable().optional(),
-  balanceSnapshotAt: z.string().datetime({ offset: true }),
-}).strict().refine(d => d.tier === 'NONE' || d.validUntil != null, { path: ['validUntil'] });
-export const WyntraxEvent = z.object({
-  id: z.string().min(1).max(16384), type: z.literal('membership.updated'),
-  occurredAt: z.string().datetime({ offset: true }), version: z.number().int().safe(), data: WyntraxData,
+  membershipId: z.string().min(1).max(256), key: z.enum(['MEMBER', 'PRO', 'ELITE']),
+  chain: z.literal('solana'), wallet: WalletAddress, seq: z.number().int().safe().positive(),
+  validUntil: z.string().datetime({ offset: true }).nullable(), checkedAt: z.string().datetime({ offset: true }),
 }).strict();
+export const WyntraxEvent = z.object({
+  id: z.string().min(1).max(256), type: z.enum(['membership.granted', 'membership.revoked', 'membership.test']),
+  occurredAt: z.string().datetime({ offset: true }), data: WyntraxData,
+}).strict().refine(e => e.type === 'membership.granted' ? e.data.validUntil !== null : e.data.validUntil === null, { path: ['data', 'validUntil'] });
 export type WyntraxEvent = z.infer<typeof WyntraxEvent>;
 export function authenticateWyntrax(raw: Buffer, headers: { timestamp?: unknown; signature?: unknown }, secrets: { secret?: string; previousSecret?: string }, now: Date): boolean {
   const { timestamp, signature } = headers;

@@ -2,47 +2,39 @@ import type { PrismaClient } from '@narra/database';
 import { audit, lock, TX_OPTIONS } from './common';
 import { WyntraxEvent } from './wyntrax';
 
-export interface IncomingMembership {
-  wyntraxUserId: string; version: number; tier: 'NONE' | 'MEMBER' | 'PRO' | 'ELITE';
-  wallets: { chain: 'solana'; address: string }[]; validUntil: Date | null;
-  balanceSnapshotAt: Date | null; sourceUpdatedAt: Date;
-}
-/** Shared transaction boundary for authenticated webhook and (Stage 5) validated partner states. */
-export async function applyMembershipState(db: PrismaClient, state: IncomingMembership, now: Date, receipt?: { id: string; bodyHash: string; occurredAt: Date }) {
+export async function applyWyntraxEvent(db: PrismaClient, input: unknown, bodyHash: string, now: Date) {
+  const event = WyntraxEvent.parse(input), d = event.data;
+  const identity = { membershipId: d.membershipId, chain: d.chain, address: d.wallet };
   return db.$transaction(async tx => {
-    // Event lock first ensures even an ID reused across members cannot race the global unique key.
-    if (receipt) await lock(tx, `event:${receipt.id}`);
-    await lock(tx, `member:${state.wyntraxUserId}`);
+    await lock(tx, `event:${event.id}`);
+    const receipt = await tx.webhookEvent.findUnique({ where: { id: event.id } });
     if (receipt) {
-      const prior = await tx.webhookEvent.findUnique({ where: { id: receipt.id } });
-      if (prior) {
-        if (prior.bodyHash !== receipt.bodyHash) await audit(tx, null, 'entitlements.event_collision', { eventId: receipt.id });
-        return 'duplicate' as const;
+      if (receipt.bodyHash !== bodyHash) await audit(tx, null, 'entitlements.event_collision', { eventId: event.id });
+      return 'duplicate' as const;
+    }
+    // Serialize across memberships for a wallet, including the shared continuity calculation.
+    await lock(tx, `wallet:${d.chain}:${d.wallet}`);
+    let outcome: 'test' | 'stale' | 'applied' = 'test';
+    if (event.type !== 'membership.test') {
+      const previous = await tx.wyntraxEntitlement.findUnique({ where: { membershipId_chain_address: identity } });
+      outcome = previous && BigInt(d.seq) <= previous.seq ? 'stale' : 'applied';
+      if (outcome === 'applied') {
+        const validUntil = d.validUntil ? new Date(d.validUntil) : null;
+        const active = event.type === 'membership.granted' && !!validUntil && validUntil > now;
+        const peers = active ? await tx.wyntraxEntitlement.findMany({ where: { chain: d.chain, address: d.wallet, status: 'ACTIVE', validUntil: { gt: now } } }) : [];
+        const since = (elite: boolean) => {
+          if (!active || (elite ? d.key !== 'ELITE' : !['PRO', 'ELITE'].includes(d.key))) return null;
+          const dates = peers.filter(p => elite ? p.key === 'ELITE' : ['PRO', 'ELITE'].includes(p.key)).map(p => elite ? p.eliteSince : p.proSince).filter((v): v is Date => v !== null);
+          return new Date(Math.min(+now, ...dates.map(Number)));
+        };
+        const value = { ...identity, key: d.key, seq: BigInt(d.seq), validUntil,
+          status: event.type === 'membership.revoked' ? 'REVOKED' as const : active ? 'ACTIVE' as const : 'EXPIRED' as const,
+          lastEventId: event.id, receivedAt: now, proSince: since(false), eliteSince: since(true) };
+        await tx.wyntraxEntitlement.upsert({ where: { membershipId_chain_address: identity }, create: value, update: value });
       }
     }
-    const previous = await tx.wyntraxMembership.findUnique({ where: { wyntraxUserId: state.wyntraxUserId }, include: { wallets: true } });
-    const status = previous && BigInt(state.version) <= previous.version ? 'stale' as const : 'applied' as const;
-    if (status === 'applied') {
-      const { wallets, ...data } = state;
-      const walletKeys = (ws: typeof wallets) => [...new Set(ws.map(w => `${w.chain}:${w.address}`))].sort().join(',');
-      const continuous = !!previous?.validUntil && previous.validUntil > now && walletKeys(previous.wallets as typeof wallets) === walletKeys(wallets);
-      const paid = ['PRO', 'ELITE'].includes(state.tier) && !!state.validUntil && state.validUntil > now;
-      const proSince = paid ? (continuous && ['PRO', 'ELITE'].includes(previous!.tier) ? previous!.proSince ?? now : now) : null;
-      const eliteSince = paid && state.tier === 'ELITE' ? (continuous && previous!.tier === 'ELITE' ? previous!.eliteSince ?? now : now) : null;
-      const value = { ...data, proSince, eliteSince, version: BigInt(state.version), receivedAt: now, lastEventId: receipt?.id ?? null, lastTransport: receipt ? 'WEBHOOK' : 'RECONCILE' };
-      await tx.wyntraxMembership.upsert({ where: { wyntraxUserId: state.wyntraxUserId }, create: value, update: value });
-      await tx.wyntraxMembershipWallet.deleteMany({ where: { wyntraxUserId: state.wyntraxUserId } });
-      await tx.wyntraxMembershipWallet.createMany({ data: wallets.map(w => ({ ...w, wyntraxUserId: state.wyntraxUserId })), skipDuplicates: true });
-    }
-    if (receipt) await tx.webhookEvent.create({ data: { ...receipt, wyntraxUserId: state.wyntraxUserId, version: BigInt(state.version), receivedAt: now, outcome: status.toUpperCase() } });
-    await audit(tx, null, `entitlements.membership_${status}`, { wyntraxUserId: state.wyntraxUserId, version: state.version, tier: state.tier, eventId: receipt?.id ?? null, transport: receipt ? 'WEBHOOK' : 'RECONCILE' });
-    return status;
+    await tx.webhookEvent.create({ data: { id: event.id, ...identity, seq: BigInt(d.seq), bodyHash, occurredAt: new Date(event.occurredAt), receivedAt: now, outcome: outcome.toUpperCase() } });
+    await audit(tx, null, `entitlements.membership_${outcome}`, { membershipId: d.membershipId, seq: d.seq, key: d.key, eventId: event.id });
+    return outcome;
   }, TX_OPTIONS);
-}
-export function applyWyntraxEvent(db: PrismaClient, input: unknown, bodyHash: string, now: Date) {
-  const event = WyntraxEvent.parse(input);
-  return applyMembershipState(db, { ...event.data, version: event.version,
-    validUntil: event.data.validUntil ? new Date(event.data.validUntil) : null,
-    balanceSnapshotAt: new Date(event.data.balanceSnapshotAt), sourceUpdatedAt: new Date(event.occurredAt) }, now,
-  { id: event.id, bodyHash, occurredAt: new Date(event.occurredAt) });
 }
