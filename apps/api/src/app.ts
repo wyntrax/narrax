@@ -64,7 +64,7 @@ export async function buildApp(opts: { webhooks?: WebhookDeps; account?: Account
   await registerWyntraxWebhook(app, opts.wyntrax);
   if (opts.account) {
     registerFeatureGates(app, opts.account.db, opts.account.now);
-    registerEntitlementRoutes(app, opts.account, opts.wyntrax?.enqueueReconcile);
+    registerEntitlementRoutes(app, opts.account);
     registerLinkedWalletRoutes(app, opts.account);
     registerAccountRoutes(app, opts.account);
     registerReadRoutes(app, opts.account);

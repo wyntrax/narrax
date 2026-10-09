@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "test": "vitest run",
+    "entitlements:expire": "tsx --env-file=.env scripts/entitlements-expire.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "dev:api": "tsx apps/api/src/server.ts",
     "dev:workers": "tsx workers/pipeline/src/main.ts",

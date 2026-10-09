@@ -2,14 +2,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { sanitizeUntrusted } from '@narra/shared';
 import { makeAuthenticate, type AccountDeps } from '../account';
-import { AccessError, audit, requireAdminActor } from './common';
+import { AccessError, requireAdminActor } from './common';
 import { entitlementTrace } from './access';
 import { localSettings, SETTING_SCHEMAS, updateLocalSettings } from './settings';
 import { grantEarlyAccess, revokeLocalGrant } from './grants';
 import { unlinkWallet } from './linking';
 const Reason = z.string().trim().min(1).max(300).transform(s => sanitizeUntrusted(s, 300).trim()).refine(s => s.length > 0);
 const Id = z.string().min(1).max(200);
-export function registerEntitlementRoutes(app: FastifyInstance, deps: AccountDeps, enqueue?: () => Promise<unknown>) {
+export function registerEntitlementRoutes(app: FastifyInstance, deps: AccountDeps) {
   const { db } = deps, now = deps.now ?? (() => new Date());
   const auth = makeAuthenticate(deps);
   const handle = (work: (r: FastifyRequest) => Promise<unknown>) => async (req: FastifyRequest, reply: FastifyReply) => {
@@ -37,12 +37,6 @@ export function registerEntitlementRoutes(app: FastifyInstance, deps: AccountDep
   }));
   app.post('/v1/admin/users/:userId/entitlements/grants/:id/revoke', opts(true, 10), handle(async r => { const p = params(r); const v = z.object({ reason: Reason }).strict().parse(r.body); await revokeLocalGrant(db, p.userId, p.id!, r.userId!, v.reason, now()); return { ok: true }; }));
   app.delete('/v1/admin/users/:userId/linked-wallets/:id', opts(true, 10), handle(async r => { const p = params(r); const v = z.object({ reason: Reason }).strict().parse(r.body); await unlinkWallet(db, p.userId, p.id!, now(), { actorId: r.userId!, reason: v.reason }); return { ok: true }; }));
-  app.post('/v1/admin/entitlements/reconcile', opts(true, 1), handle(async r => {
-    const v = z.object({ reason: Reason }).strict().parse(r.body);
-    if (!enqueue) throw new AccessError('WYNTRAX_UNAVAILABLE', 503);
-    await db.$transaction(tx => audit(tx, r.userId!, 'entitlements.reconcile_requested', { reason: v.reason }));
-    await enqueue(); return { ok: true };
-  }));
   app.get('/v1/admin/early-access/stats', opts(true), handle(async () => {
     const at = now(), settings = await localSettings(db);
     const active = { tier: 'EARLY_ACCESS' as const, status: 'ACTIVE' as const, OR: [{ validUntil: null }, { validUntil: { gt: at } }] };

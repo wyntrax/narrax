@@ -8,7 +8,6 @@ import { OpenAiCompatibleProvider } from '@narra/ai';
 import { createPrivyVerifier } from './auth';
 import { parseCorsOrigins } from './http';
 import { assertEnv } from '@narra/shared';
-import { createEntitlementQueue, requestReconcile } from '../../../workers/pipeline/src/entitlementRegistration';
 
 // First, before any connection is opened: stop with a clear list of what is wrong. Messages never contain a value.
 assertEnv('api');
@@ -19,7 +18,6 @@ const connection = createRedis();
 const streamReaderConnection = createRedis();
 const queues = createQueues(connection);
 const db = createPrisma();
-const entitlementQueue = process.env.WYNTRAX_API_BASE_URL && process.env.WYNTRAX_API_KEY ? createEntitlementQueue(connection) : null;
 const store = makeWalletEventStore(db);
 
 // Edits to tracked wallets ask the worker to sync the Helius webhook. Without Helius credentials the scheduled job is also off.
@@ -31,7 +29,7 @@ if (!chatLlm) console.log('no AI provider configured: chat is off');
 // An async function because this file runs as CommonJS under tsx, which has no top-level await.
 async function main() {
   const app = await buildApp({
-    wyntrax: { db, secret: process.env.WYNTRAX_WEBHOOK_SECRET || undefined, previousSecret: process.env.WYNTRAX_WEBHOOK_SECRET_PREVIOUS || undefined, enqueueReconcile: entitlementQueue ? () => requestReconcile(entitlementQueue) : undefined },
+    wyntrax: { db, secret: process.env.WYNTRAX_WEBHOOK_SECRET || undefined, previousSecret: process.env.WYNTRAX_WEBHOOK_SECRET_PREVIOUS || undefined },
     chatLlm,
     requestWalletSync: syncConfigured ? () => queues.requestWalletSync() : undefined,
     enqueueExecution: (job) => queues.enqueueExecution(job),
@@ -62,7 +60,6 @@ async function main() {
 
   const shutdown = async () => {
     await app.close(); // closes WebSocket clients and stops the stream reader first
-    await entitlementQueue?.close();
     await queues.close(); connection.disconnect(); streamReaderConnection.disconnect(); await db.$disconnect();
     process.exit(0);
   };

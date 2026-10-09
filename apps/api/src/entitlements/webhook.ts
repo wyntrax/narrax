@@ -4,7 +4,7 @@ import { authenticateWyntrax, WyntraxEvent } from './wyntrax';
 import { hash } from './crypto';
 import { applyWyntraxEvent } from './membershipStore';
 
-export interface WyntraxDeps { db?: PrismaClient; secret?: string; previousSecret?: string; now?: () => Date; enqueueReconcile?: () => Promise<unknown> }
+export interface WyntraxDeps { db?: PrismaClient; secret?: string; previousSecret?: string; now?: () => Date }
 export async function registerWyntraxWebhook(app: FastifyInstance, deps: WyntraxDeps = {}) {
   await app.register(async scoped => {
     scoped.setErrorHandler((error, req, reply) => {
