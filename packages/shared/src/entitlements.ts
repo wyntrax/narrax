@@ -14,8 +14,9 @@ export interface LocalGrant {
   id: string; userId: string; source: string; tier: string; status: string; validUntil: Date | null;
 }
 export interface MembershipState {
-  wyntraxUserId: string; tier: string; validUntil: Date | null; wallets: readonly AccessWallet[];
+  membershipId: string; chain: string; address: string; key: string; status: string; validUntil: Date | null;
 }
+export const entitlementId = (m: MembershipState) => JSON.stringify([m.membershipId, m.chain, m.address]);
 export interface EntitlementSnapshot {
   userId: string;
   linkedWallets: readonly (AccessWallet & { userId: string; verifiedAt: Date })[];
@@ -40,9 +41,10 @@ export function resolveEntitlements(s: EntitlementSnapshot, now: Date) {
     }
     const seen = new Set<string>();
     for (const m of s.memberships) {
-      if (seen.has(m.wyntraxUserId) || !['MEMBER', 'PRO', 'ELITE'].includes(m.tier) || !m.validUntil || !future(m.validUntil, now) || !m.wallets.some(w => w.chain === 'solana' && links.has(key(w)))) continue;
-      seen.add(m.wyntraxUserId);
-      sources.push({ source: 'WYNTRAX', id: m.wyntraxUserId, tier: m.tier as AccessTier, validUntil: m.validUntil });
+      const id = entitlementId(m);
+      if (seen.has(id) || m.status !== 'ACTIVE' || !['MEMBER', 'PRO', 'ELITE'].includes(m.key) || !m.validUntil || !future(m.validUntil, now) || m.chain !== 'solana' || !links.has(key(m))) continue;
+      seen.add(id);
+      sources.push({ source: 'WYNTRAX', id, tier: m.key as AccessTier, validUntil: m.validUntil });
     }
   }
   const effectiveTier = sources.reduce<AccessTier>((tier, s) => ACCESS_TIERS.indexOf(s.tier) > ACCESS_TIERS.indexOf(tier) ? s.tier : tier, 'NONE');
