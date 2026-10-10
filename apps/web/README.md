@@ -23,3 +23,7 @@ Production wallet-link domain must equal the **HTTPS web origin**, not the API o
 Scripts: `npm run dev:web`; `npm run build -w @narra/web`; `npm run start -w @narra/web`; `npm run lint -w @narra/web`; `npm run typecheck`; `npm run test -w @narra/web`; `npm run e2e -w @narra/web`.
 
 API credentials are obtained with Privy's `getAccessToken` for each request, never copied to application storage. Wallet proof is a message signature only. No trading or transaction UI exists in this phase.
+
+## Public availability
+
+`GET /v1/early-access/status` is the only backend addition: unauthenticated, 60 requests/minute/IP, with a 30-second per-process cache and concurrent-read coalescing. It returns only `{enabled, seatsLeft, inviteRequired}`. Disabled availability has `seatsLeft: null`; unknown never becomes zero. Counts are distinct users with active, unexpired EARLY_ACCESS-tier reservations across self-service and ADMIN sources. Existing seats survive unlink/disable/cap reduction. Join remains the atomic admission authority. Failed cache refresh returns 503, not stale data. Edge caching is disabled to avoid adding another stale window.

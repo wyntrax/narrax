@@ -22,6 +22,28 @@ export function registerEntitlementRoutes(app: FastifyInstance, deps: AccountDep
     try { await requireAdminActor(db, req.userId!); } catch { return reply.code(403).send({ error: 'FORBIDDEN', requestId: req.requestId }); }
   }] : [auth] });
   const params = (r: FastifyRequest) => z.object({ userId: Id, id: Id.optional() }).parse(r.params);
+  // Public availability only. Thirty-second per-process cache; admission still rechecks atomically.
+  type PublicStatus = { enabled: boolean; seatsLeft: number | null; inviteRequired: boolean };
+  let publicCache: { until: number; value: PublicStatus } | undefined;
+  let publicPending: Promise<PublicStatus> | undefined;
+  app.get('/v1/early-access/status', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
+    try {
+      const at = now();
+      if (!publicCache || publicCache.until <= +at) {
+        publicPending ??= db.$transaction(async tx => {
+          const settings = await localSettings(tx);
+          const occupied = settings.enabled ? (await tx.accessGrant.findMany({ where: { tier: 'EARLY_ACCESS', status: 'ACTIVE', OR: [{ validUntil: null }, { validUntil: { gt: at } }] }, distinct: ['userId'], select: { userId: true } })).length : 0;
+          return { enabled: settings.enabled, seatsLeft: settings.enabled ? Math.max(0, settings.cap - occupied) : null, inviteRequired: settings.inviteRequired };
+        }, { isolationLevel: 'RepeatableRead' }).then(value => { publicCache = { until: +now() + 30_000, value }; return value; }).finally(() => { publicPending = undefined; });
+        await publicPending;
+      }
+      // The application cache is authoritative; avoid stacking another thirty seconds at an edge.
+      reply.header('cache-control', 'no-store');
+      return publicCache!.value;
+    } catch {
+      return reply.code(503).header('cache-control', 'no-store').send({ error: 'ENTITLEMENTS_UNAVAILABLE', requestId: req.requestId });
+    }
+  });
   app.get('/v1/me/entitlements', opts(false, 60), handle(r => entitlementTrace(db, r.userId!, now())));
   app.post('/v1/me/early-access/join', opts(false, 5), handle(r => grantEarlyAccess(db, r.userId!, { tier: 'EARLY_ACCESS', validUntil: null, reason: 'Self join' }, null, now())));
   app.delete('/v1/me/early-access', opts(false, 5), handle(async r => {
