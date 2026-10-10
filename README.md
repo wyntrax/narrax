@@ -1,5 +1,9 @@
 # NARRA (placeholder name)
 
+## Web Phase 1
+
+`apps/web` is the Next.js 15 / React 19 frontend workspace. Run `npm run dev:web` on port 4010 with the API on 4000. See [web setup](apps/web/README.md) for public configuration, exact CORS and wallet-proof origin requirements, and verification. Phase 2 waits for owner approval.
+
 AI narrative and smart-money intelligence agent for Solana.
 
 ## Wyntrax membership webhooks
