@@ -13,11 +13,14 @@ let chrome;
 try{
  chrome=await launch({chromePath:chromium.executablePath(),chromeFlags:['--headless=new','--no-sandbox','--disable-dev-shm-usage']});
  const summaries=[];
- for(const [name,route] of [['landing','/'],['early-access','/early-access']]){
+  const runs=Number(process.argv[3]??5);
+  for(const [name,route] of [['landing','/'],['early-access','/early-access']])for(let run=1;run<=runs;run++){
   const result=await lighthouse(`http://localhost:4010${route}`,{port:chrome.port,output:['json','html'],logLevel:'error',onlyCategories:['performance','accessibility','best-practices','seo']});
   if(!result||result.lhr.runtimeError)throw Error(result?.lhr.runtimeError?.message??'Lighthouse returned no result');
-  await writeFile(path.join(output,`${name}.json`),result.report[0]);await writeFile(path.join(output,`${name}.html`),result.report[1]);
-  summaries.push({page:route,mode:'Lighthouse mobile defaults; local server, fixture availability API',scores:Object.fromEntries(Object.entries(result.lhr.categories).map(([key,value])=>[key,Math.round(value.score*100)])),lcpMs:result.lhr.audits['largest-contentful-paint'].numericValue,cls:result.lhr.audits['cumulative-layout-shift'].numericValue,scriptTransferBytes:result.lhr.audits['network-requests'].details.items.filter(item=>item.resourceType==='Script').reduce((sum,item)=>sum+(item.transferSize??0),0)});
+   await writeFile(path.join(output,`${name}-${run}.json`),result.report[0]);await writeFile(path.join(output,`${name}-${run}.html`),result.report[1]);
+   summaries.push({page:route,run,mode:'Lighthouse mobile defaults; local server, fixture availability API',scores:Object.fromEntries(Object.entries(result.lhr.categories).map(([key,value])=>[key,Math.round(value.score*100)])),lcpMs:result.lhr.audits['largest-contentful-paint'].numericValue,cls:result.lhr.audits['cumulative-layout-shift'].numericValue,tbtMs:result.lhr.audits['total-blocking-time'].numericValue,scriptTransferBytes:result.lhr.audits['network-requests'].details.items.filter(item=>item.resourceType==='Script').reduce((sum,item)=>sum+(item.transferSize??0),0)});
  }
- await writeFile(path.join(output,'summary.json'),JSON.stringify(summaries,null,2));console.log(JSON.stringify(summaries,null,2));
+  const median=values=>[...values].sort((a,b)=>a-b)[Math.floor(values.length/2)];
+  const medians=['/','/early-access'].map(page=>{const rows=summaries.filter(row=>row.page===page);return {page,runs:rows.length,performance:median(rows.map(row=>row.scores.performance)),lcpMs:median(rows.map(row=>row.lcpMs)),cls:median(rows.map(row=>row.cls)),tbtMs:median(rows.map(row=>row.tbtMs)),scriptTransferBytes:median(rows.map(row=>row.scriptTransferBytes))};});
+  await writeFile(path.join(output,'summary.json'),JSON.stringify({runs:summaries,medians},null,2));console.log(JSON.stringify(medians,null,2));
 }finally{if(chrome)await chrome.kill();await new Promise(resolve=>api.close(resolve));}

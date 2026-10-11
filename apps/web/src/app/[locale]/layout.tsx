@@ -8,8 +8,8 @@ import {notFound} from 'next/navigation';
 import {routing} from '@/i18n/routing';
 import {siteOrigin} from '@/config/site';
 import '../globals.css';
-const display = Rajdhani({subsets: ['latin'], weight: ['500', '600', '700'], variable: '--font-display', display: 'swap'});
-const body = Barlow({subsets: ['latin'], weight: ['400', '500', '600'], variable: '--font-body', display: 'swap'});
+const display = Rajdhani({subsets: ['latin'], weight: ['600', '700'], variable: '--font-display', display: 'swap'});
+const body = Barlow({subsets: ['latin'], weight: ['400', '600'], variable: '--font-body', display: 'swap'});
 export async function generateMetadata({params}:{params:Promise<{locale:string}>}):Promise<Metadata>{const {locale}=await params;const t=await getTranslations({locale,namespace:'access'});const origin=siteOrigin(),path=locale==='id'?'/id':'';return {metadataBase:new URL(origin),title:`NARRA — ${t('headline')}`,description:t('subcopy'),alternates:{canonical:`${origin}${path}`,languages:{en:origin,id:`${origin}/id`,'x-default':origin}},openGraph:{type:'website',siteName:'NARRA',title:t('headline'),description:t('subcopy'),locale:locale==='id'?'id_ID':'en_US',url:`${origin}${path}`},twitter:{card:'summary_large_image',title:t('headline'),description:t('subcopy')}};}
 export default async function Layout({children, params}: {children: ReactNode; params: Promise<{locale: string}>}) {
   const {locale} = await params; if (!hasLocale(routing.locales, locale)) notFound();

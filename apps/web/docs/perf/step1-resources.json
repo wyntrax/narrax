@@ -1,0 +1,556 @@
+[
+  {
+    "page": "landing",
+    "representativeRun": 3,
+    "resources": [
+      {
+        "path": "/_next/static/css/409ecaba499af35f.css",
+        "type": "Stylesheet",
+        "transferBytes": 7256,
+        "decodedBytes": 26389
+      },
+      {
+        "path": "/_next/static/chunks/webpack-a63b2c1b2e217cf5.js",
+        "type": "Script",
+        "transferBytes": 4744,
+        "decodedBytes": 7493
+      },
+      {
+        "path": "/_next/static/chunks/87c73c54-dd8d81ac9604067c.js",
+        "type": "Script",
+        "transferBytes": 54949,
+        "decodedBytes": 173023
+      },
+      {
+        "path": "/_next/static/chunks/18-c858b3a70433e430.js",
+        "type": "Script",
+        "transferBytes": 47178,
+        "decodedBytes": 174011
+      },
+      {
+        "path": "/_next/static/chunks/main-app-71cc31a16951437b.js",
+        "type": "Script",
+        "transferBytes": 1065,
+        "decodedBytes": 570
+      },
+      {
+        "path": "/_next/static/chunks/5741-564e74a7d7e7485b.js",
+        "type": "Script",
+        "transferBytes": 12620,
+        "decodedBytes": 39911
+      },
+      {
+        "path": "/_next/static/chunks/2897-0bffdefffcb6ff95.js",
+        "type": "Script",
+        "transferBytes": 8973,
+        "decodedBytes": 24244
+      },
+      {
+        "path": "/_next/static/chunks/634-c6acbe0aeda7254f.js",
+        "type": "Script",
+        "transferBytes": 5411,
+        "decodedBytes": 12390
+      },
+      {
+        "path": "/_next/static/chunks/3397-b13f04938786aa75.js",
+        "type": "Script",
+        "transferBytes": 19342,
+        "decodedBytes": 58902
+      },
+      {
+        "path": "/_next/static/chunks/app/%5Blocale%5D/(marketing)/page-14c8a7e9ce2f87b1.js",
+        "type": "Script",
+        "transferBytes": 3555,
+        "decodedBytes": 8598
+      },
+      {
+        "path": "/_next/static/chunks/app/%5Blocale%5D/(marketing)/layout-597b75949498f3a6.js",
+        "type": "Script",
+        "transferBytes": 2938,
+        "decodedBytes": 5462
+      },
+      {
+        "path": "/_next/static/chunks/app/%5Blocale%5D/error-007dd5c836f45515.js",
+        "type": "Script",
+        "transferBytes": 1406,
+        "decodedBytes": 1671
+      },
+      {
+        "path": "/_next/static/media/61d96c4884191721-s.p.woff2",
+        "type": "Font",
+        "transferBytes": 16104,
+        "decodedBytes": 15656
+      },
+      {
+        "path": "/_next/static/media/6e1768769e6f59a2-s.p.woff2",
+        "type": "Font",
+        "transferBytes": 9847,
+        "decodedBytes": 9400
+      },
+      {
+        "path": "/_next/static/media/60c9b95e8d9e49be-s.p.woff2",
+        "type": "Font",
+        "transferBytes": 16280,
+        "decodedBytes": 15832
+      },
+      {
+        "path": "/_next/static/media/ab2e3a11646b0499-s.p.woff2",
+        "type": "Font",
+        "transferBytes": 9751,
+        "decodedBytes": 9304
+      },
+      {
+        "path": "/_next/static/chunks/4257.ad06bf4831f41e4a.js",
+        "type": "Script",
+        "transferBytes": 1457,
+        "decodedBytes": 1686
+      }
+    ],
+    "lcp": {
+      "type": "list",
+      "items": [
+        {
+          "type": "table",
+          "headings": [
+            {
+              "key": "label",
+              "valueType": "text",
+              "label": "Subpart"
+            },
+            {
+              "key": "duration",
+              "valueType": "ms",
+              "label": "Duration"
+            }
+          ],
+          "items": [
+            {
+              "subpart": "timeToFirstByte",
+              "label": "Time to first byte",
+              "duration": 45.772
+            },
+            {
+              "subpart": "elementRenderDelay",
+              "label": "Element render delay",
+              "duration": 608.305
+            }
+          ]
+        },
+        {
+          "type": "node",
+          "lhId": "page-0-H1",
+          "path": "1,HTML,1,BODY,3,DIV,1,MAIN,0,SECTION,2,DIV,1,H1",
+          "selector": "main#main > section.hero > div.hero-copy > h1",
+          "boundingRect": {
+            "top": 200,
+            "bottom": 461,
+            "left": 18,
+            "right": 394,
+            "width": 376,
+            "height": 261
+          },
+          "snippet": "<h1>",
+          "nodeLabel": "See the narrative\nbefore the crowd does."
+        }
+      ]
+    },
+    "blocking": {
+      "type": "table",
+      "headings": [
+        {
+          "key": "url",
+          "valueType": "url",
+          "label": "URL"
+        },
+        {
+          "key": "totalBytes",
+          "valueType": "bytes",
+          "label": "Transfer Size"
+        },
+        {
+          "key": "wastedMs",
+          "valueType": "timespanMs",
+          "label": "Duration"
+        }
+      ],
+      "items": [
+        {
+          "url": "http://localhost:4010/_next/static/css/409ecaba499af35f.css",
+          "totalBytes": 7256,
+          "wastedMs": 184
+        }
+      ]
+    },
+    "fonts": {
+      "type": "table",
+      "headings": [
+        {
+          "key": "url",
+          "valueType": "url",
+          "label": "URL"
+        },
+        {
+          "key": "wastedMs",
+          "valueType": "ms",
+          "label": "Est Savings"
+        }
+      ],
+      "items": [],
+      "skipSumming": [
+        "wastedMs"
+      ]
+    },
+    "execution": {
+      "type": "table",
+      "headings": [
+        {
+          "key": "url",
+          "valueType": "url",
+          "label": "URL"
+        },
+        {
+          "key": "total",
+          "granularity": 1,
+          "valueType": "ms",
+          "label": "Total CPU Time"
+        },
+        {
+          "key": "scripting",
+          "granularity": 1,
+          "valueType": "ms",
+          "label": "Script Evaluation"
+        },
+        {
+          "key": "scriptParseCompile",
+          "granularity": 1,
+          "valueType": "ms",
+          "label": "Script Parse"
+        }
+      ],
+      "items": [
+        {
+          "url": "http://localhost:4010/_next/static/chunks/4257.ad06bf4831f41e4a.js",
+          "total": 1121.6440000000002,
+          "scripting": 546.108,
+          "scriptParseCompile": 1.98
+        },
+        {
+          "url": "http://localhost:4010/",
+          "total": 1028.28,
+          "scripting": 29.195999999999973,
+          "scriptParseCompile": 38.788
+        },
+        {
+          "url": "http://localhost:4010/_next/static/chunks/18-c858b3a70433e430.js",
+          "total": 536.4079999999998,
+          "scripting": 454.43599999999986,
+          "scriptParseCompile": 34.931999999999995
+        },
+        {
+          "url": "Unattributable",
+          "total": 439.72800000000115,
+          "scripting": 24.848000000000003,
+          "scriptParseCompile": 0
+        },
+        {
+          "url": "http://localhost:4010/_next/static/chunks/87c73c54-dd8d81ac9604067c.js",
+          "total": 378.9000000000001,
+          "scripting": 334.4680000000001,
+          "scriptParseCompile": 24.98
+        },
+        {
+          "url": "http://localhost:4010/_next/static/chunks/3397-b13f04938786aa75.js",
+          "total": 142.61200000000002,
+          "scripting": 112.55200000000002,
+          "scriptParseCompile": 20.075999999999997
+        }
+      ],
+      "summary": {
+        "wastedMs": 1622.3639999999998
+      },
+      "sortedBy": [
+        "total"
+      ]
+    }
+  },
+  {
+    "page": "early-access",
+    "representativeRun": 3,
+    "resources": [
+      {
+        "path": "/_next/static/css/409ecaba499af35f.css",
+        "type": "Stylesheet",
+        "transferBytes": 7256,
+        "decodedBytes": 26389
+      },
+      {
+        "path": "/_next/static/chunks/webpack-a63b2c1b2e217cf5.js",
+        "type": "Script",
+        "transferBytes": 4744,
+        "decodedBytes": 7493
+      },
+      {
+        "path": "/_next/static/chunks/87c73c54-dd8d81ac9604067c.js",
+        "type": "Script",
+        "transferBytes": 54949,
+        "decodedBytes": 173023
+      },
+      {
+        "path": "/_next/static/chunks/18-c858b3a70433e430.js",
+        "type": "Script",
+        "transferBytes": 47178,
+        "decodedBytes": 174011
+      },
+      {
+        "path": "/_next/static/chunks/main-app-71cc31a16951437b.js",
+        "type": "Script",
+        "transferBytes": 1065,
+        "decodedBytes": 570
+      },
+      {
+        "path": "/_next/static/chunks/5741-564e74a7d7e7485b.js",
+        "type": "Script",
+        "transferBytes": 12620,
+        "decodedBytes": 39911
+      },
+      {
+        "path": "/_next/static/chunks/2897-0bffdefffcb6ff95.js",
+        "type": "Script",
+        "transferBytes": 8973,
+        "decodedBytes": 24244
+      },
+      {
+        "path": "/_next/static/chunks/634-c6acbe0aeda7254f.js",
+        "type": "Script",
+        "transferBytes": 5411,
+        "decodedBytes": 12390
+      },
+      {
+        "path": "/_next/static/chunks/3397-b13f04938786aa75.js",
+        "type": "Script",
+        "transferBytes": 19342,
+        "decodedBytes": 58902
+      },
+      {
+        "path": "/_next/static/chunks/app/%5Blocale%5D/(marketing)/page-14c8a7e9ce2f87b1.js",
+        "type": "Script",
+        "transferBytes": 3555,
+        "decodedBytes": 8598
+      },
+      {
+        "path": "/_next/static/chunks/388-c7ebb53b9da2eeaa.js",
+        "type": "Script",
+        "transferBytes": 25658,
+        "decodedBytes": 96074
+      },
+      {
+        "path": "/_next/static/chunks/311-639a3676f2fd5255.js",
+        "type": "Script",
+        "transferBytes": 5804,
+        "decodedBytes": 12943
+      },
+      {
+        "path": "/_next/static/chunks/app/%5Blocale%5D/(marketing)/early-access/page-d9240012ab033752.js",
+        "type": "Script",
+        "transferBytes": 7123,
+        "decodedBytes": 18150
+      },
+      {
+        "path": "/_next/static/chunks/app/%5Blocale%5D/(marketing)/layout-597b75949498f3a6.js",
+        "type": "Script",
+        "transferBytes": 2938,
+        "decodedBytes": 5462
+      },
+      {
+        "path": "/_next/static/chunks/app/%5Blocale%5D/error-007dd5c836f45515.js",
+        "type": "Script",
+        "transferBytes": 1406,
+        "decodedBytes": 1671
+      },
+      {
+        "path": "/_next/static/media/61d96c4884191721-s.p.woff2",
+        "type": "Font",
+        "transferBytes": 16104,
+        "decodedBytes": 15656
+      },
+      {
+        "path": "/_next/static/media/ab2e3a11646b0499-s.p.woff2",
+        "type": "Font",
+        "transferBytes": 9751,
+        "decodedBytes": 9304
+      },
+      {
+        "path": "/_next/static/media/6e1768769e6f59a2-s.p.woff2",
+        "type": "Font",
+        "transferBytes": 9847,
+        "decodedBytes": 9400
+      }
+    ],
+    "lcp": {
+      "type": "list",
+      "items": [
+        {
+          "type": "table",
+          "headings": [
+            {
+              "key": "label",
+              "valueType": "text",
+              "label": "Subpart"
+            },
+            {
+              "key": "duration",
+              "valueType": "ms",
+              "label": "Duration"
+            }
+          ],
+          "items": [
+            {
+              "subpart": "timeToFirstByte",
+              "label": "Time to first byte",
+              "duration": 25.553
+            },
+            {
+              "subpart": "elementRenderDelay",
+              "label": "Element render delay",
+              "duration": 213.545
+            }
+          ]
+        },
+        {
+          "type": "node",
+          "lhId": "page-0-H1",
+          "path": "1,HTML,1,BODY,3,DIV,1,MAIN,0,DIV,0,H1",
+          "selector": "div.marketing > main#main > div.access-heading > h1",
+          "boundingRect": {
+            "top": 145,
+            "bottom": 282,
+            "left": 18,
+            "right": 394,
+            "width": 376,
+            "height": 137
+          },
+          "snippet": "<h1>",
+          "nodeLabel": "See the narrative before the crowd does."
+        }
+      ]
+    },
+    "blocking": {
+      "type": "table",
+      "headings": [
+        {
+          "key": "url",
+          "valueType": "url",
+          "label": "URL"
+        },
+        {
+          "key": "totalBytes",
+          "valueType": "bytes",
+          "label": "Transfer Size"
+        },
+        {
+          "key": "wastedMs",
+          "valueType": "timespanMs",
+          "label": "Duration"
+        }
+      ],
+      "items": [
+        {
+          "url": "http://localhost:4010/_next/static/css/409ecaba499af35f.css",
+          "totalBytes": 7256,
+          "wastedMs": 161
+        }
+      ]
+    },
+    "fonts": {
+      "type": "table",
+      "headings": [
+        {
+          "key": "url",
+          "valueType": "url",
+          "label": "URL"
+        },
+        {
+          "key": "wastedMs",
+          "valueType": "ms",
+          "label": "Est Savings"
+        }
+      ],
+      "items": [],
+      "skipSumming": [
+        "wastedMs"
+      ]
+    },
+    "execution": {
+      "type": "table",
+      "headings": [
+        {
+          "key": "url",
+          "valueType": "url",
+          "label": "URL"
+        },
+        {
+          "key": "total",
+          "granularity": 1,
+          "valueType": "ms",
+          "label": "Total CPU Time"
+        },
+        {
+          "key": "scripting",
+          "granularity": 1,
+          "valueType": "ms",
+          "label": "Script Evaluation"
+        },
+        {
+          "key": "scriptParseCompile",
+          "granularity": 1,
+          "valueType": "ms",
+          "label": "Script Parse"
+        }
+      ],
+      "items": [
+        {
+          "url": "http://localhost:4010/early-access",
+          "total": 624.5880000000001,
+          "scripting": 21.659999999999997,
+          "scriptParseCompile": 20.25999999999999
+        },
+        {
+          "url": "http://localhost:4010/_next/static/chunks/87c73c54-dd8d81ac9604067c.js",
+          "total": 371.72400000000016,
+          "scripting": 323.7680000000002,
+          "scriptParseCompile": 32.711999999999996
+        },
+        {
+          "url": "http://localhost:4010/_next/static/chunks/18-c858b3a70433e430.js",
+          "total": 365.52400000000034,
+          "scripting": 308.32400000000035,
+          "scriptParseCompile": 36.147999999999996
+        },
+        {
+          "url": "Unattributable",
+          "total": 222.26400000000027,
+          "scripting": 27.047999999999995,
+          "scriptParseCompile": 0
+        },
+        {
+          "url": "http://localhost:4010/_next/static/chunks/3397-b13f04938786aa75.js",
+          "total": 113.848,
+          "scripting": 86.832,
+          "scriptParseCompile": 20.84
+        },
+        {
+          "url": "http://localhost:4010/_next/static/chunks/388-c7ebb53b9da2eeaa.js",
+          "total": 74.98800000000001,
+          "scripting": 58.43200000000002,
+          "scriptParseCompile": 10.288
+        }
+      ],
+      "summary": {
+        "wastedMs": 946.3120000000006
+      },
+      "sortedBy": [
+        "total"
+      ]
+    }
+  }
+]
