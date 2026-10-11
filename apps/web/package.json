@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/next-env-free.cjs dev -p 4010",
-    "build": "node scripts/next-env-free.cjs build",
+    "build": "node scripts/next-env-free.cjs build && node scripts/check-production-auth.cjs",
     "start": "node scripts/next-env-free.cjs start -p 4010",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

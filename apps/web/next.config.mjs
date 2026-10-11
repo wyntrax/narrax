@@ -1,5 +1,8 @@
 import createNextIntlPlugin from 'next-intl/plugin';
 import path from 'node:path';
+if (process.env.NODE_ENV === 'production' && Object.hasOwn(process.env, 'NARRA_WEB_TEST_AUTH')) {
+  throw new Error('NARRA_WEB_TEST_AUTH is forbidden in production; unset it before building or starting.');
+}
 const testAuth = process.env.NARRA_WEB_TEST_AUTH === '1';
 /** @type {import('next').NextConfig} */
 const config = {
