@@ -8,6 +8,7 @@ for(const path of ['/','/early-access'])for(const theme of ['dark','light'])test
  await page.route('http://localhost:4000/v1/early-access/status',route=>route.fulfill({headers:{'access-control-allow-origin':'http://localhost:4010'},json:{enabled:true,seatsLeft:12,inviteRequired:false}}));
  await page.setViewportSize({width:390,height:844});await page.context().addCookies([{name:'NARRA_THEME',value:theme,url:'http://localhost:4010'}]);
  const response=await page.goto(path),csp=response?.headers()['content-security-policy']??'';
+ expect((await page.request.get('/favicon.ico')).status()).toBe(200);
  expect(csp).toMatch(/script-src[^;]*'nonce-[^']+'/);expect(csp.split(';').find(value=>value.trim().startsWith('script-src'))).not.toMatch(/unsafe-inline|unsafe-eval/);
  await expect(page.getByRole('heading',{level:1})).toBeVisible();if(path==='/early-access'){await expect(page.getByRole('heading',{name:'Privy not configured'})).toBeVisible();await expect(page.getByText('12 places available')).toBeVisible();}
  expect(await page.locator('script:not([src])').evaluateAll(nodes=>nodes.every(node=>!!(node as HTMLScriptElement).nonce))).toBe(true);
