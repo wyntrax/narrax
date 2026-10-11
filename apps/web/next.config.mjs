@@ -1,8 +1,18 @@
 import createNextIntlPlugin from 'next-intl/plugin';
+import path from 'node:path';
+const testAuth = process.env.NARRA_WEB_TEST_AUTH === '1';
 /** @type {import('next').NextConfig} */
 const config = {
   transpilePackages: ['@narra/shared'],
   poweredByHeader: false,
+  distDir: testAuth ? '.next-e2e' : '.next',
+  webpack(config) {
+    if (testAuth) {
+      config.resolve.alias['@/components/auth/privy'] = path.resolve('e2e/auth-fixture.tsx');
+      config.resolve.alias[path.resolve('src/components/auth/privy.tsx')] = path.resolve('e2e/auth-fixture.tsx');
+    }
+    return config;
+  },
   async headers() { return [{source: '/:path*', headers: [
     {key: 'X-Content-Type-Options', value: 'nosniff'}, {key: 'X-Frame-Options', value: 'DENY'},
     {key: 'Referrer-Policy', value: 'no-referrer'}, {key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()'}

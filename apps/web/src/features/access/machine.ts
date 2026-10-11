@@ -1,8 +1,8 @@
 import type {Challenge, Entitlements, PublicStatus} from '@/lib/schemas';
 export const STATES = ['signedOut','checking','noWallet','connecting','challenge','signing','verifying','linked','joining','active','disabled','full','inviteOnly','waitingSync','syncExpired','unlinking','leaving','error'] as const;
 export type StateName = typeof STATES[number];
-export interface AccessState {name: StateName; data?: Entitlements; status?: PublicStatus; challenge?: Challenge; address?: string; error?: string; retryAt?: number}
-export type Event = {type:'SIGN_OUT'} | {type:'CHECK'} | {type:'LOADED'; data:Entitlements; status?:PublicStatus} | {type:'PUBLIC'; status:PublicStatus} | {type:'CONNECT'} | {type:'CHALLENGE'; challenge:Challenge; address:string} | {type:'SIGN'} | {type:'SIGNED'} | {type:'VERIFIED'; data:Entitlements; wait:boolean} | {type:'JOIN'} | {type:'JOINED'; data:Entitlements} | {type:'WAIT'} | {type:'SYNC'; data:Entitlements} | {type:'SYNC_TIMEOUT'} | {type:'UNLINK'} | {type:'LEAVE'} | {type:'FAIL'; error:string; retryAt?:number};
+export interface AccessState {name: StateName; data?: Entitlements; status?: PublicStatus; challenge?: Challenge; address?: string; error?: string; retryAt?: number; requiredTier?:string}
+export type Event = {type:'SIGN_OUT'} | {type:'CHECK'} | {type:'LOADED'; data:Entitlements; status?:PublicStatus} | {type:'PUBLIC'; status:PublicStatus} | {type:'CONNECT'} | {type:'CHALLENGE'; challenge:Challenge; address:string} | {type:'SIGN'} | {type:'SIGNED'} | {type:'VERIFIED'; data:Entitlements; wait:boolean} | {type:'JOIN'} | {type:'JOINED'; data:Entitlements} | {type:'WAIT'} | {type:'SYNC'; data:Entitlements} | {type:'SYNC_TIMEOUT'} | {type:'UNLINK'} | {type:'LEAVE'} | {type:'FAIL'; error:string; retryAt?:number;requiredTier?:string};
 export const TRANSITIONS: Record<Event['type'], readonly StateName[]> = {
  SIGN_OUT:STATES, PUBLIC:STATES, CHECK:STATES, FAIL:STATES,
  LOADED:['checking','unlinking','leaving'], CONNECT:['noWallet','linked','active','disabled','full','inviteOnly','syncExpired','error'],
@@ -37,7 +37,7 @@ export function transition(state:AccessState,event:Event):AccessState {
  case 'SYNC_TIMEOUT':return {...state,name:'syncExpired'};
  case 'UNLINK':return {...state,name:'unlinking',challenge:undefined};
  case 'LEAVE':return {...state,name:'leaving'};
- case 'FAIL':return {...state,challenge:undefined,name:event.error==='EARLY_ACCESS_DISABLED'?'disabled':event.error==='EARLY_ACCESS_FULL'?'full':event.error==='INVITES_UNAVAILABLE'?'inviteOnly':'error',error:event.error,retryAt:event.retryAt};
+ case 'FAIL':return {...state,challenge:undefined,name:event.error==='EARLY_ACCESS_DISABLED'?'disabled':event.error==='EARLY_ACCESS_FULL'?'full':event.error==='INVITES_UNAVAILABLE'?'inviteOnly':'error',error:event.error,retryAt:event.retryAt,requiredTier:event.requiredTier};
  }
 }
 export const busyStates:readonly StateName[]=['checking','connecting','signing','verifying','joining','unlinking','leaving'];

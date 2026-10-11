@@ -14,9 +14,8 @@ if (args.includes('--offline')) {
   if (sign(body, fixedTime, publicSecret) !== fixture('VECTOR_SIGNATURE')) throw Error('Fixed vector mismatch');
    console.log(`PASS offline: exact ${Buffer.byteLength(body)}-byte membership webhook signature`);
 } else {
-  const env = readFileSync(resolve(root, '.env'), 'utf8');
-  const secret = /^WYNTRAX_WEBHOOK_SECRET=["']?([^\r\n"']+)["']?\r?$/m.exec(env)?.[1];
-  if (secret !== publicSecret) throw Error('Local .env must contain the literal contract test secret');
+  const secret = process.env.WYNTRAX_WEBHOOK_SECRET;
+  if (secret !== publicSecret) throw Error('WYNTRAX_WEBHOOK_SECRET must contain the literal contract test secret');
   const time = args.includes('--now') ? String(Math.floor(Date.now() / 1000)) : fixedTime;
   console.log('DATABASE_URL host=localhost:5432 db=narra_ent; target localhost:4010 (server must use scratch configuration).');
   const send = async (label, raw, expected, timestamp = time, signature = sign(raw, timestamp, secret)) => {

@@ -17,8 +17,8 @@ export function AccessView({state,actions,wallets=[],membership,setMembership}: 
  return <><Stepper step={stepFor(state)}/><Card className="access-card"><div className="status-icon" aria-hidden>{busy?<span className="spinner"/>:name==='active'?<Check/>:name==='error'?<AlertCircle/>:name==='waitingSync'?<Clock/>:<ShieldCheck/>}</div>
  <div aria-live="polite" aria-atomic="true"><h2>{name==='checking'?c('checking'):t(`states.${name}.title`)}</h2><p className="status-description">{t(`states.${name}.body`)}</p></div>
  {state.name==='checking'&&<Skeleton/>}
- {state.error&&<div role="alert" className="error-note">{errors(errorKey(new ApiError(state.error)))}{state.retryAt&&<p>{t('rateWait')}</p>}</div>}
- {state.name==='signedOut'&&<Button onClick={actions.login}>{a('signIn')} ↗</Button>}
+ {state.error&&<div role="alert" className="error-note">{errors(errorKey(new ApiError(state.error)))}{state.requiredTier&&<Badge>{state.requiredTier.replace('_',' ')}</Badge>}{state.retryAt&&<p>{t('rateWait')}</p>}</div>}
+ {state.name==='signedOut'&&<Button onClick={actions.login}>{a('signIn')}<span aria-hidden>↗</span></Button>}
  {state.name==='signedOut'&&name!=='signedOut'&&<p className="small-note">{t('existingMember')}</p>}
  {['noWallet','linked','syncExpired','disabled','full','inviteOnly'].includes(state.name)&&<><p className="wallet-explanation">{t('sameWallet')}</p><div className="actions centered"><Button onClick={actions.connect} variant={state.data?.links.length?'ghost':'primary'}>{t('connect')}</Button><Button variant="ghost" onClick={actions.createWallet}>{t('embedded')}</Button></div></>}
  {state.name==='connecting'&&<><p className="wallet-explanation">{t('sameWallet')}</p><div className="wallet-options">{wallets.map(w=><Button variant="ghost" key={w.address} onClick={()=>actions.select(w.address)}><Wallet size={16}/><span>{w.name}<small>{w.address.slice(0,6)}…{w.address.slice(-6)}</small></span></Button>)}</div><Button variant="ghost" onClick={actions.retry}>{c('cancel')}</Button></>}
