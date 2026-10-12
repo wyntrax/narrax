@@ -16,6 +16,6 @@ it('the production scan fails on fixture code and accepts a clean bundle',()=>{
  try {
   expect(run).toThrow();writeFileSync(path.join(dir,'BUILD_ID'),'test-build');
   writeFileSync(path.join(dir,'page.js'),'console.log("production")');expect(run).not.toThrow();
-  for(const marker of ['auth-fixture','fixture-public-test-token','__fixture-signature']) {writeFileSync(path.join(dir,'page.js'),marker);expect(run).toThrow(/Fixture auth leaked/);}
+  for(const marker of ['auth-fixture','fixture-public-test-token','__fixture-signature','__designState','design-gallery']) {writeFileSync(path.join(dir,'page.js'),marker);expect(run).toThrow(/Fixture auth leaked/);}
  } finally {rmSync(dir,{recursive:true,force:true});}
 });

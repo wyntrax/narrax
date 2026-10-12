@@ -70,4 +70,21 @@ Source images opened at native resolution before design: `design/reference/early
 
 ## D2 gap analysis
 
-Capture matrix and severity findings follow in the D2 commit, before visual changes.
+**114/114 captures passed** before visual changes (after Step-1 performance fixes), one Playwright worker, routes warmed. Original PNGs: `C:\dev\narra-entitlements-review\web-design\before\{state}-{theme}-{width}.png`. States are the exact 18 `STATES` identifiers plus `landing`; themes dark/light; widths 1440/834/390, height 1000, full page, reduced motion. The gallery renders the real AccessView with deterministic visual fixtures via the existing dev-only auth alias; it does not simulate backend success or replace functional-flow tests. The production scanner also rejects gallery markers.
+
+| Severity | Observed pre-design gap | Planned resolution |
+|---|---|---|
+| High | Access is a conventional tall marketing page, with a large footer and no planetary atmosphere | Centered access composition, cool radial glow, original horizon/stars, compact safety footer |
+| High | Access heading is condensed/bold with no serif emphasis | Light body-family heading and Instrument Serif italic emphasis, approved string unchanged |
+| High | Landing hero is left aligned; fine constellation sits behind rather than as centerpiece | Uppercase wide heading, original central globe, two flank blocks, decorative lower signature |
+| High | No bracketed nav/grid/mono vocabulary | Unified mono labels, hairline masked grid, real anchor nav and mobile dialog |
+| High | Status card heights vary strongly by state | Fixed/reserved card anatomy with accessible internal overflow for long proofs/actions |
+| Medium | Primary access button says Sign in rather than requested Continue | Bilingual Continue; preserve login callback and update exact-label tests deliberately |
+| Medium | 834 has desktop links and sparse hero, 390 header wraps into two rows and headline is narrow | Intentional tablet/mobile stacking; accessible mobile nav; 2–3 hero headline lines |
+| Medium | Small badges, stepper, footer and preview labels are below requested 14 px | Marketing-only size overrides; maintain contrast in both themes |
+| Medium | Light access is flat white/gray without atmospheric depth | Light-compatible ice glow, clear glass boundaries and dark meaningful text |
+| Medium | No original rotating 3D wireframe/orbit forms, no bottom barcode | Original software projection with static SVG fallback and CSS signature |
+| Low | Existing sections use lime-heavy labels and rounded pills unrelated to the reference grid | Shared mono labels, cyan atmosphere, restrained lime actions/highlights |
+| Intentional | No template email field, brand names, face, gold palette or governance text | Remain omitted per hard rules; replaced by Narra branding, approved copy and wallet-access card |
+
+Representative screenshots inspected at full resolution: `signedOut-dark-1440.png`, `signedOut-light-390.png`, `landing-dark-834.png`; all 114 state/viewport artifacts are preserved for final before/after comparison. Capture script visits the lazy preview and returns to the top before screenshotting, avoiding the old sticky-header capture offset.

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- Standalone Node build check. */
 const fs = require('node:fs');
 const path = require('node:path');
-const markers = /auth-fixture|fixture-public-test-token|__fixture-signature|Phantom \(test fixture\)|fixture signature approved/;
+const markers = /auth-fixture|design-gallery|__designState|fixture-public-test-token|__fixture-signature|Phantom \(test fixture\)|fixture signature approved/;
 function checkProductionAuth(directory) {
   if (!fs.existsSync(path.join(directory, 'BUILD_ID'))) throw Error('Production BUILD_ID missing');
   let scanned = 0;
