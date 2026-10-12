@@ -114,3 +114,11 @@ Additional bilingual copy (all new `design` keys; existing approved messages unc
 | telegram | Narra on Telegram | Narra di Telegram |
 
 Flank statements reuse `landing.howBody` and `access.subcopy`; primary/secondary buttons reuse approved action strings. The old hardcoded decorative “01 — NARRATIVE INTELLIGENCE” index is replaced by aria-hidden NARRA/barcode. Section content remains approved/shared-policy driven. Desktop/tablet/mobile captures inspected; web typecheck passed.
+
+## D5 enhancements
+
+After matching the compositions: lazy-loaded presentation effects animate card state changes (180 ms opacity/translate) and success icon (320 ms scale/opacity) without remounting controls, moving focus, changing state transitions or initiating any action. Fine-pointer-only CTA magnet and card spotlight use transform/opacity; touch receives static controls. Stepper numbers become check icons with a scale/opacity entrance and a polite textual step announcement. Original inline-SVG wallet/error illustrations replace generic empty/error icons. Skeleton shimmer translates a gradient layer. Native theme View Transitions crossfade opacity when supported; instant fallback otherwise. The hero poster is always visible, with the lazy canvas entering over it; H1 is never hidden for animation. Existing native observer reveals remain once-only. Sample tab rank rows enter with slight stagger; hover chart crosshair is decorative and tab/row controls remain keyboard accessible. No live rank/counter is invented.
+
+Reduced-motion disables movement and retains every label, action, poster and progress meaning. No heavy animation dependency was reintroduced. Enhancements are measured as a combined design batch, not individual causal A/B tests; byte and Lighthouse impact are recorded in the final performance section. **44 targeted tests and four mobile axe checks passed** (zero violations); lint clean.
+
+Only D5 new copy: `design.stepAnnouncement` = **Step {current} of 3: {label}** / **Langkah {current} dari 3: {label}**. This is screen-reader text; all previous approved messages are unchanged. The only changed existing visible label remains signed-out Continue.

@@ -1,6 +1,6 @@
 'use client';
 import {useLocale,useTranslations} from 'next-intl';
-import {ShieldCheck,Wallet,Check,Clock,AlertCircle} from 'lucide-react';
+import {ShieldCheck,Wallet,Check,Clock} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {Badge,Card,ConfirmDialog,Skeleton,Stepper} from '@/components/ui/primitives';
 import {Link} from '@/i18n/navigation';
@@ -14,7 +14,7 @@ export function AccessView({state,actions,wallets=[],membership,setMembership}: 
  const canManage=!busy && !['challenge','waitingSync','signedOut'].includes(state.name);
  const wyntrax=process.env.NEXT_PUBLIC_WYNTRAX_URL;
  let safeWyntrax:string|undefined;try{if(wyntrax&&new URL(wyntrax).protocol==='https:')safeWyntrax=wyntrax;}catch{}
- return <><Stepper step={stepFor(state)}/><Card className="access-card"><div className="status-icon" aria-hidden>{busy?<span className="spinner"/>:name==='active'?<Check/>:name==='error'?<AlertCircle/>:name==='waitingSync'?<Clock/>:<ShieldCheck/>}</div>
+ return <><Stepper step={stepFor(state)}/><Card className="access-card" data-access-state={name}><div className="status-icon" aria-hidden>{busy?<span className="spinner"/>:name==='active'?<Check/>:name==='error'?<svg viewBox="0 0 40 40"><path d="M7 29 20 6l13 23ZM20 15v6m0 3v2" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg>:name==='noWallet'?<svg viewBox="0 0 40 40"><rect x="5" y="11" width="30" height="22" rx="4" fill="none" stroke="currentColor"/><path d="m8 11 20-5v5m7 7H25v8h10" fill="none" stroke="currentColor"/><circle cx="29" cy="22" r="1.5" fill="currentColor"/></svg>:name==='waitingSync'?<Clock/>:<ShieldCheck/>}</div>
  <div aria-live="polite" aria-atomic="true"><h2>{name==='checking'?c('checking'):t(`states.${name}.title`)}</h2><p className="status-description">{t(`states.${name}.body`)}</p></div>
  {state.name==='checking'&&<Skeleton/>}
  {state.error&&<div role="alert" className="error-note">{errors(errorKey(new ApiError(state.error)))}{state.requiredTier&&<Badge>{state.requiredTier.replace('_',' ')}</Badge>}{state.retryAt&&<p>{t('rateWait')}</p>}</div>}
