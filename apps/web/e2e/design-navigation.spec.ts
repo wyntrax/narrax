@@ -8,3 +8,7 @@ test('mobile menu traps focus, closes with Escape and returns focus; links are r
 test('reduced motion keeps an original SVG poster and all hero copy without a canvas',async({page})=>{
  await page.emulateMedia({reducedMotion:'reduce'});await page.goto('/');await expect(page.locator('.network-poster')).toBeVisible();await expect(page.locator('.network-canvas')).toHaveCount(0);await expect(page.getByRole('heading',{level:1})).toHaveText('See the narrative before the crowd does.');
 });
+test('the full proof text can be scrolled with the keyboard',async({page})=>{
+ await page.route('http://localhost:4000/**',route=>route.fulfill({headers:{'access-control-allow-origin':'http://localhost:4010'},json:{enabled:true,seatsLeft:12,inviteRequired:false}}));
+ await page.goto('/early-access?__designState=challenge');const proof=page.locator('.challenge-message');await expect(proof).toHaveAttribute('tabindex','0');await proof.focus();await expect(proof).toBeFocused();await page.keyboard.press('End');await expect.poll(()=>proof.evaluate(node=>node.scrollTop)).toBeGreaterThan(0);
+});

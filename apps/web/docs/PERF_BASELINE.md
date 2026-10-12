@@ -12,6 +12,8 @@ Baseline is the accepted Phase-1 production bundle (the Step-0 scanner verified 
 | Baseline `/early-access` | 83 | 3,248 ms | 0.019535 | 401 ms | 240,821 B |
 | Step-1 fixes `/` | **85** | **2,982 ms** | **0.000075** | **399 ms** | **163,638 B** |
 | Step-1 fixes `/early-access` | **88** | **2,665 ms** | **0.009492** | **377.5 ms** | **200,766 B** |
+| Final design `/` | **79** | **3,322 ms** | **0.064276** | **504 ms** | **169,959 B** |
+| Final design `/early-access` | **77** | **3,646 ms** | **0.005517** | **456 ms** | **206,717 B** |
 
 Accepted Phase-1 single-run 74/80 was not a median. The fresh median is 74/83; this variation is not an improvement attributable to a change.
 
@@ -36,3 +38,23 @@ Accepted Phase-1 single-run 74/80 was not a median. The fresh median is 74/83; t
 The safe pre-design fixes improve median scores **74 → 85 / 83 → 88**, while reducing script transfer by **40,055 B on each route**. LCP remains above 2.5 s and performance below 90; these are not claimed as budget passes. The observer/canvas scheduling and fonts were measured as a batch, not isolated A/B experiments. Raw after-fix results: `C:\Users\gifar\AppData\Local\Temp\opencode\narra-design-step1`; summaries and representative per-resource evidence are committed in `docs/perf/`. Final-design measurements follow after D1–D6.
 
 Step-1 build passed and scanned **266 production files** clean. Next First Load JS: landing **152 kB** (previous **192 kB**, −40 kB); early-access **186 kB** unchanged. The preview remains a separate lazy chunk. Existing optional Farcaster and next-intl webpack-cache warnings persist; neither is a new runtime integration claim.
+
+## Final design: measured tradeoffs and budget misses
+
+Raw final JSON/HTML: `C:\Users\gifar\AppData\Local\Temp\opencode\narra-design-final`. All ten run summaries: [perf/final.json](perf/final.json); representative run 3 resources/LCP/render-blocking/execution: [perf/final-evidence.json](perf/final-evidence.json); production lazy-chunk sizes: [perf/final-chunks.json](perf/final-chunks.json). These are the first complete final five-run results, with no reruns selected to improve the score. Per-metric medians need not belong to the same run. Performance ranges were 73–88 landing and 73–85 access.
+
+**Targets:** CLS <0.1 passes on both routes. Landing initial JS ≈≤200 kB gzip passes (Next First Load JS **153 kB**; access **187 kB**, shared **105 kB**). Both **LCP <2.5 s and mobile performance ≥90 fail**. Automated accessibility and best-practices scores are 100 in every final run; axe has zero remaining violations across the full state matrix and production route/theme checks. This is automated AA-oriented evidence, not a complete manual conformance claim.
+
+Relative to accepted baseline, final landing is +5 performance points, −81 ms LCP, −186 ms TBT and −33,734 B script transfer. Access is −6 points, +397 ms LCP, +55 ms TBT and −34,104 B script transfer. Relative to Step 1, the reference-led design regresses **85 → 79 / 88 → 77**, adds **6,321 / 5,951 B** script transfer, and increases LCP by **340 / 981 ms**. Do not report the Step-1 improvement as the final result.
+
+### Remaining contributors
+
+- **Text remains LCP.** Final reports identify the landing and access H1. Representative run 3 observed TTFB/render delay is 36/1,185 ms landing and 28/196 ms access; these observed trace values are distinct from Lighthouse's simulated mobile LCP. Access run 3 has 2,503 ms simulated LCP, whereas its five-run median is 3,646 ms, so it cannot stand in for the median.
+- **Shared hydration remains material.** Unchanged shared chunks `18` and `87c73c54` still transfer 47,178 + 54,949 B. Representative scripting totals for those two are 924 ms landing and 800 ms access. These are attribution evidence, not an isolated estimate of the design's own cost.
+- **More critical CSS.** Landing now transfers two stylesheets totaling **11,308 B**; access three totaling **13,892 B**. Individual blocking durations are approximately 158/308 ms landing and 160/310/310 ms access (overlapping, not additive). The additional sheets contain reference typography, grid/glow/card structure, responsive rules and polish together. No causal claim isolates D5 from D3/D4.
+- **Font tradeoff.** Landing loads five local WOFF2 files totaling **73,642 B**; access four totaling **63,647 B** in run 3. JetBrains Mono costs 21,660 B transferred, and access-only Instrument Serif costs 16,132 B. Both use swap and preload off, but visible use still triggers downloading. Landing CLS is attributed to its headline; access traces identify headline font swaps and the availability chip. A precise causal split for landing's 0.064276 CLS was not isolated. There is no remote runtime font request or oversized image LCP.
+- **Canvas cost persists despite tiny bytes.** Original geometry chunk `4257` costs **1,434 B gzip / 3,023 B raw** (1,977 B transferred). Representative CPU is 929 ms total / 411 ms scripting, versus baseline canvas 1,366/635 ms. It remains lazy, cached, ~30 fps and visibility/reduced-motion guarded, but is not free. Required rotating geometry was retained; no additional particle engine, continuous rank simulation or motion runtime was added.
+- **D5 is small but not claimed free.** Lazy enhancements `185`: **837 B gzip / 1,773 B raw** (1,380 B transferred). Below-fold sample preview `7904`: **1,237 B gzip / 3,014 B raw**; it is absent from initial audit requests. Reveal, poster, menu and loader are included in route/shared bytes. No per-effect benchmark isolates their CPU cost, so aggregate regression cannot honestly be attributed only to enhancements or only to machine variability.
+- **Access still includes landing route chunks** in the observed request list despite disabling header/hero prefetch. The change did not fully eliminate cross-route loading; no further saving is claimed. Privy is blank and no provider network load explains these results. A configured provider remains unmeasured.
+
+Final production build passes lint/types and scans **268 files** clean for fixture markers. Six production CSP/console/axe/admission checks pass. Separate from the performance target, Lighthouse reports SEO 91 landing / 54 access: missing meta descriptions on both and intentional access noindex. No SEO completion claim is made.

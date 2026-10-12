@@ -14,6 +14,8 @@ Supply public values through the inherited process environment. The Next scripts
 | NEXT_PUBLIC_PRIVY_APP_ID | Your public Privy app ID |
 | NEXT_PUBLIC_WYNTRAX_URL | Your HTTPS membership claim page |
 | NEXT_PUBLIC_SITE_URL | http://localhost:4010 (production: canonical HTTPS web origin) |
+| NEXT_PUBLIC_X_URL | Optional credential-free HTTPS Narra profile; no social button when absent/invalid |
+| NEXT_PUBLIC_TELEGRAM_URL | Optional credential-free HTTPS Narra community; no social button when absent/invalid |
 | API CORS_ORIGINS | http://localhost:4010, exactly; API refuses `*` |
 | Admin entitlements.wallet_link_domain | http://localhost:4010 |
 | Privy dashboard allowed origin | http://localhost:4010 |
@@ -39,3 +41,11 @@ For the final production check, stop the fixture server, unset `NARRA_WEB_TEST_A
 Live screenshots/reports are under `apps/web/test-results/` and `apps/web/playwright-report/`. Each browser run replaces its own output directory; retain artifacts before another run. Final screenshots and Lighthouse summary are committed in `verification/`. Final results and limits are recorded in `PHASE1-REPORT.md`; dependency details are in `DEPENDENCY-REPORT.md`. Stop the web server before the root suite: its existing contract-check test temporarily binds port 4010.
 
 Locale detection remains disabled. Explicit locale URLs win; unprefixed URLs use a valid `NARRA_LOCALE` cookie, otherwise EN, regardless of browser language. The toggle remembers the choice before navigation. `NARRA_THEME` stores the selected color scheme. Neither cookie contains authentication data.
+
+## Reference-led design branch
+
+`docs/DESIGN_HANDOFF.md` is the current design verification index; `docs/DESIGN_SPEC_PHASE1.md` records reference interpretation, intentional omissions and the EN/ID copy ledger. `docs/PERF_BASELINE.md` records five-run production medians. All before/after state/viewport/theme images are indexed in `docs/design-captures/README.md`; compact side-by-side reference comparisons are under `docs/design-review/`.
+
+Production builds **reject any set `NARRA_WEB_TEST_AUTH` value**, including `0`, and automatically scan `.next` for fixture auth/gallery leaks. Unset the variable for build/start. Test safety is documented in `docs/TEST_AUTH_SAFETY.md`. The design gallery is compile-time fixture code only, never a production route.
+
+From `apps/web`, `npx playwright test --config playwright.visual.config.ts` checks 32 committed visual baselines. Deliberate full capture uses `playwright.capture.config.ts` with `NARRA_DESIGN_CAPTURE_DIR` set to an output directory and `NARRA_DESIGN_AXE=1` for all-state axe checks. Warm routes first; keep one worker and one heavy verification process at a time. `node scripts/lighthouse.mjs <output-directory> 5` runs five sequential mobile audits per route and writes medians.
