@@ -8,6 +8,7 @@ const testAuth = process.env.NARRA_WEB_TEST_AUTH === '1';
 const config = {
   transpilePackages: ['@narra/shared'],
   poweredByHeader: false,
+  devIndicators: false,
   distDir: testAuth ? '.next-e2e' : '.next',
   webpack(config) {
     if (testAuth) {
