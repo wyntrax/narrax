@@ -1,0 +1,37 @@
+.marketing:has(.access-page){position:relative;isolation:isolate;overflow:clip}
+.marketing:has(.access-page) .site-header{position:relative;background:transparent;backdrop-filter:none;border-bottom:0;height:80px}
+.marketing:has(.access-page) .site-header .desktop-link,.marketing:has(.access-page) .site-header .header-cta,.marketing:has(.access-page) .brand-badge{display:none}
+.marketing .access-page{position:relative;isolation:isolate;width:min(100% - 40px,1000px);padding:48px 0 56px;min-height:calc(100svh - 240px)}
+.access-atmosphere{position:absolute;z-index:-1;inset:-80px calc((1000px - 100vw)/2) -200px;pointer-events:none;background:radial-gradient(ellipse 50% 55% at 50% 45%,color-mix(in srgb,var(--ac2) 13%,transparent),transparent 85%)}
+.access-stars{position:absolute;width:100%;height:100%;inset:0;fill:var(--ac2)}
+.access-stars circle{animation:star-breathe 6s ease-in-out infinite alternate}
+@keyframes star-breathe{from{opacity:.2;transform:translateY(0)}to{opacity:.7;transform:translateY(-2px)}}
+.planet-horizon{position:absolute;bottom:-250px;left:50%;transform:translateX(-50%);width:max(130vw,1000px);height:420px;border-radius:50% 50% 0 0;border-top:2px solid color-mix(in srgb,var(--ac2) 60%,var(--tx));background:var(--bg);box-shadow:0 -3px 12px color-mix(in srgb,var(--ac2) 20%,transparent),0 -24px 90px color-mix(in srgb,var(--ac2) 14%,transparent)}
+.marketing .access-heading{max-width:840px}.marketing .access-eyebrow{font-size:14px;letter-spacing:.14em;padding:6px 16px;background:color-mix(in srgb,var(--s2) 75%,transparent);color:var(--tx);border-color:color-mix(in srgb,var(--tx) 22%,transparent)}
+.marketing .access-heading h1{font-family:var(--font-body),sans-serif;font-size:clamp(38px,5.2vw,72px);line-height:1.1;font-weight:400;letter-spacing:-.025em;text-wrap:balance;margin-top:24px}
+.access-heading h1 em{font-family:var(--font-serif),serif;font-weight:400}
+.marketing .access-heading>p{font-size:17px;line-height:1.6;max-width:44ch;margin:24px auto 0;color:var(--tx2);text-wrap:pretty}
+.access-stage{position:relative;max-width:640px;margin:24px auto 0}
+.marketing .access-stage .seats-chip{font-size:14px;min-height:32px;margin:0 auto 8px;text-align:center}
+.marketing .access-stage .stepper{margin:16px auto 24px;justify-content:center;gap:12px}
+.marketing .access-stage .stepper li{font-size:14px;border:0;padding:8px 4px;background:transparent;gap:8px;color:var(--tx2)}
+.marketing .access-stage .stepper li[aria-current=step]{color:var(--tx)}
+.marketing .access-stage .stepper li[aria-current=step]>span{background:#B8FF4F;color:#0B1200}
+.marketing .access-stage .access-card{width:100%;max-width:640px;height:600px;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--ac2) transparent;align-content:center;padding:32px;border:1px solid color-mix(in srgb,var(--tx) 22%,transparent);border-radius:20px;background:color-mix(in srgb,var(--s1) 86%,transparent);box-shadow:0 20px 80px #00000018, inset 0 1px 0 color-mix(in srgb,var(--tx) 8%,transparent);backdrop-filter:blur(20px)}
+.marketing .access-stage .access-card h2{font:400 28px/1.2 var(--font-body),sans-serif;text-wrap:balance}
+.marketing .access-stage .status-icon{width:48px;height:48px;color:var(--ac2);margin:0 auto 20px;border-color:color-mix(in srgb,var(--ac2) 30%,transparent);box-shadow:none}
+.marketing .access-stage .status-description{font-size:16px;line-height:1.6;margin:16px auto 24px}
+.marketing .access-stage :is(.small-note,.wallet-explanation,.membership-check,.wallet-options small,.session-actions button,.linked-wallets>div,.tier-result p){font-size:14px}
+.marketing .access-stage .challenge-message{max-height:180px;font-size:14px;line-height:1.5;border-color:color-mix(in srgb,var(--tx) 24%,transparent)}
+.marketing .access-stage .button-primary{background:#B8FF4F;color:#0B1200;border:1px solid #B8FF4F;border-radius:12px;min-width:144px}
+.marketing .access-stage .button-ghost{border-radius:12px;border-color:color-mix(in srgb,var(--tx) 30%,transparent)}
+.marketing:has(.access-page) .site-footer{position:relative;z-index:1;border:0;max-width:760px;margin:0 auto;padding:24px 24px 48px;text-align:center}
+.marketing:has(.access-page) .site-footer :is(.footer-wordmark,.footer-bottom){display:none}
+.marketing:has(.access-page) .site-footer p{font-size:14px;line-height:1.6;color:var(--tx2);margin:8px 0}
+@media(max-width:1039px){.access-atmosphere{inset:-80px -20px -200px}}
+@media(max-width:600px){.marketing .access-page{padding-top:32px;width:calc(100% - 32px)}.marketing .access-heading h1{font-size:40px}.marketing .access-heading>p{font-size:16px}.marketing .access-stage .access-card{height:660px;padding:24px 20px}.marketing .access-stage .stepper{gap:8px}.marketing .access-stage .stepper li{font-size:14px;gap:6px}.marketing:has(.access-page) .site-header{height:76px;flex-wrap:nowrap;padding:0 16px}.marketing:has(.access-page) .site-header nav{width:auto}.marketing:has(.access-page) .site-header .brand{font-size:22px}.marketing:has(.access-page) .site-header .locale-toggle{font-size:14px}}
+@media(prefers-reduced-motion:reduce){.access-stars circle{animation:none;opacity:.5}}
+.marketing .access-stage .access-card{height:360px;align-content:safe center;padding:24px 32px}
+.marketing .access-heading h1{font-size:clamp(38px,4.7vw,64px)}
+.planet-horizon{bottom:-170px}
+@media(max-width:600px){.marketing .access-stage .access-card{height:440px;padding:24px 20px}.marketing .access-heading h1{font-size:40px}}

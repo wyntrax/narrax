@@ -8,7 +8,7 @@ import {errorKey,ApiError} from '@/lib/api';
 import {busyStates,stepFor,type AccessState} from './machine';
 export interface AccessActions {login:()=>void;retry:()=>void;connect:()=>void;select:(address:string)=>void;sign:()=>void;join:()=>void;wait:()=>void;unlink:(id:string)=>void;leave:()=>void;logout:()=>void;createWallet:()=>void}
 export function AccessView({state,actions,wallets=[],membership,setMembership}: {state:AccessState;actions:AccessActions;wallets?:{address:string;name:string}[];membership:boolean;setMembership:(value:boolean)=>void}) {
- const t=useTranslations('flow'),c=useTranslations('common'),a=useTranslations('access'),errors=useTranslations('errors'),locale=useLocale();
+ const t=useTranslations('flow'),c=useTranslations('common'),d=useTranslations('design'),errors=useTranslations('errors'),locale=useLocale();
  const busy=busyStates.includes(state.name),disabled=busy||!!state.retryAt&&Date.now()<state.retryAt;
  const name=state.name==='signedOut'&&state.status?(!state.status.enabled?'disabled':state.status.inviteRequired?'inviteOnly':state.status.seatsLeft===0?'full':state.name):state.name;
  const canManage=!busy && !['challenge','waitingSync','signedOut'].includes(state.name);
@@ -18,7 +18,7 @@ export function AccessView({state,actions,wallets=[],membership,setMembership}: 
  <div aria-live="polite" aria-atomic="true"><h2>{name==='checking'?c('checking'):t(`states.${name}.title`)}</h2><p className="status-description">{t(`states.${name}.body`)}</p></div>
  {state.name==='checking'&&<Skeleton/>}
  {state.error&&<div role="alert" className="error-note">{errors(errorKey(new ApiError(state.error)))}{state.requiredTier&&<Badge>{state.requiredTier.replace('_',' ')}</Badge>}{state.retryAt&&<p>{t('rateWait')}</p>}</div>}
- {state.name==='signedOut'&&<Button onClick={actions.login}>{a('signIn')}<span aria-hidden>↗</span></Button>}
+  {state.name==='signedOut'&&<Button onClick={actions.login}>{d('continue')}<span aria-hidden>↗</span></Button>}
  {state.name==='signedOut'&&name!=='signedOut'&&<p className="small-note">{t('existingMember')}</p>}
  {['noWallet','linked','syncExpired','disabled','full','inviteOnly'].includes(state.name)&&<><p className="wallet-explanation">{t('sameWallet')}</p><div className="actions centered"><Button onClick={actions.connect} variant={state.data?.links.length?'ghost':'primary'}>{t('connect')}</Button><Button variant="ghost" onClick={actions.createWallet}>{t('embedded')}</Button></div></>}
  {state.name==='connecting'&&<><p className="wallet-explanation">{t('sameWallet')}</p><div className="wallet-options">{wallets.map(w=><Button variant="ghost" key={w.address} onClick={()=>actions.select(w.address)}><Wallet size={16}/><span>{w.name}<small>{w.address.slice(0,6)}…{w.address.slice(-6)}</small></span></Button>)}</div><Button variant="ghost" onClick={actions.retry}>{c('cancel')}</Button></>}

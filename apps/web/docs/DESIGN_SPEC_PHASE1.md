@@ -88,3 +88,9 @@ Source images opened at native resolution before design: `design/reference/early
 | Intentional | No template email field, brand names, face, gold palette or governance text | Remain omitted per hard rules; replaced by Narra branding, approved copy and wallet-access card |
 
 Representative screenshots inspected at full resolution: `signedOut-dark-1440.png`, `signedOut-light-390.png`, `landing-dark-834.png`; all 114 state/viewport artifacts are preserved for final before/after comparison. Capture script visits the lazy preview and returns to the top before screenshotting, avoiding the old sticky-header capture offset.
+
+## D3 implementation / copy ledger
+
+Instrument Serif **italic 400**, Latin, `next/font/google`, preload off, scoped to access. “crowd” / “ramai” is styled by splitting the existing approved headline; its text is unchanged. Cool CSS horizon and sparse original SVG dots replace template artwork. The shared glass card reserves 360 px desktop / 440 px mobile with accessible overflow for the longer existing states; this intentionally exceeds an email form's height. It keeps layout stable without changing any FSM/action/proof code. Both safety lines are unchanged and the horizon rim sits in the space before the footer.
+
+Only D3 copy addition: `design.continue`: **Continue / Lanjutkan**, replacing the signed-out button's visible Sign in / Masuk label. The stepper still says Sign in / Masuk. Existing exact-label tests were updated to Continue and retain their action-count and admission assertions; **42 view tests passed**. Four desktop/mobile signed-out/challenge captures passed during implementation.
