@@ -94,3 +94,23 @@ Representative screenshots inspected at full resolution: `signedOut-dark-1440.pn
 Instrument Serif **italic 400**, Latin, `next/font/google`, preload off, scoped to access. “crowd” / “ramai” is styled by splitting the existing approved headline; its text is unchanged. Cool CSS horizon and sparse original SVG dots replace template artwork. The shared glass card reserves 360 px desktop / 440 px mobile with accessible overflow for the longer existing states; this intentionally exceeds an email form's height. It keeps layout stable without changing any FSM/action/proof code. Both safety lines are unchanged and the horizon rim sits in the space before the footer.
 
 Only D3 copy addition: `design.continue`: **Continue / Lanjutkan**, replacing the signed-out button's visible Sign in / Masuk label. The stepper still says Sign in / Masuk. Existing exact-label tests were updated to Continue and retain their action-count and admission assertions; **42 view tests passed**. Four desktop/mobile signed-out/challenge captures passed during implementation.
+
+## D4 implementation / copy ledger
+
+JetBrains Mono **400 Latin**, `next/font/google`, preload off, marketing scope only. Original 84-node software-projected latitude mesh, three orbit rings and three small polyhedra; no face/photo/model/stock asset. Geometry is precomputed, theme colors cached, rendering capped at ~30 fps, paused offscreen/hidden tab. Fine-pointer parallax only. Original inline-SVG poster renders before paint and stays under reduced motion. Canvas loads after paint/idle; final production chunk measurement follows. Navigation disables speculative prefetch, removing the identified cross-route landing fetch. Header uses real anchors and Radix mobile focus-trap dialog. No social buttons in this verification environment: neither optional social URL is supplied. Only valid credential-free HTTPS `NEXT_PUBLIC_X_URL` / `NEXT_PUBLIC_TELEGRAM_URL` render links.
+
+Additional bilingual copy (all new `design` keys; existing approved messages unchanged):
+
+| Key | EN | ID |
+|---|---|---|
+| home | Home | Beranda |
+| product | Product | Produk |
+| tiers | Tiers | Tingkat akses |
+| faq | FAQ | Tanya jawab |
+| menu | Menu | Menu |
+| menuDescription | Navigate Narra’s research introduction and early access. | Jelajahi pengenalan riset Narra dan akses awal. |
+| earlyAccess | Early access | Akses awal |
+| x | Narra on X | Narra di X |
+| telegram | Narra on Telegram | Narra di Telegram |
+
+Flank statements reuse `landing.howBody` and `access.subcopy`; primary/secondary buttons reuse approved action strings. The old hardcoded decorative “01 — NARRATIVE INTELLIGENCE” index is replaced by aria-hidden NARRA/barcode. Section content remains approved/shared-policy driven. Desktop/tablet/mobile captures inspected; web typecheck passed.
