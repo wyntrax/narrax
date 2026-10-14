@@ -40,7 +40,7 @@ beforeAll(async () => {
   app = await buildApp({ account: { db, now: () => at, verifier: { verify: async token => ({ privyUserId: `${tag}-${token}` }) } } });
   // Fastify's route tree is checked separately below through hasRoute and the source registrations.
 }, 20000);
-beforeEach(async () => { await settings({ 'entitlements.enforced': true, 'entitlements.shadow_log': false, 'entitlements.features': {}, 'early_access.enabled': false }); await membership('NONE'); });
+beforeEach(async () => { await db.accessGrant.deleteMany({ where: { userId: user } }); await settings({ 'entitlements.enforced': true, 'entitlements.shadow_log': false, 'entitlements.features': {}, 'early_access.enabled': false }); await membership('NONE'); });
 afterAll(async () => {
   await app.close(); await db.auditLog.deleteMany({ where: { OR: [{ userId: { in: [user, admin, other] } }, { detail: { path: ['membershipId'], equals: tag } }] } });
   await db.user.deleteMany({ where: { id: { in: [user, admin, other] } } }); await db.token.deleteMany({ where: { name: tag } }); await db.trackedWallet.deleteMany({ where: { address } });

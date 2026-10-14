@@ -34,7 +34,7 @@ export async function entitlementTrace(db: PrismaClient, userId: string, now: Da
       return [key, { requiredTier, min_entitlement_age_hours: hours, allowed: ACCESS_TIERS.indexOf(resolved.effectiveTier) >= rank && !!aged }];
     })) as Record<FeatureKey, { requiredTier: AccessTier; min_entitlement_age_hours: number; allowed: boolean }>;
     return { ...resolved, features, rollout: { enforced: settings.enforced, shadow_log: settings.shadow }, links: links.map(({ id, chain, address, verifiedAt }) => ({ id, chain, address, verifiedAt })),
-      grants: grants.map(g => ({ ...g, eligible: resolved.sources.some(s => s.id === g.id && s.source === g.source), reasonCode: g.status !== 'ACTIVE' ? g.status : g.validUntil && g.validUntil <= now ? 'EXPIRED' : !settings.enabled ? 'DISABLED' : !links.length ? 'WALLET_REQUIRED' : 'ACTIVE' })),
+      grants: grants.map(g => ({ ...g, eligible: resolved.sources.some(s => s.id === g.id && s.source === g.source), reasonCode: g.status !== 'ACTIVE' ? g.status : g.validUntil && g.validUntil <= now ? 'EXPIRED' : !links.length ? 'WALLET_REQUIRED' : 'ACTIVE' })),
       memberships: memberships.map(({ seq, ...m }) => ({ ...m, seq: seq.toString(), eligible: resolved.sources.some(s => s.source === 'WYNTRAX' && s.id === entitlementId(m)), reasonCode: m.status !== 'ACTIVE' ? m.status : !m.validUntil || m.validUntil <= now ? 'EXPIRED' : 'ACTIVE' })) };
   }, { isolationLevel: 'RepeatableRead' });
 }
