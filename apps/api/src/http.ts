@@ -3,6 +3,7 @@ import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import { ZodError } from 'zod';
+import { isExactBrowserOrigin } from '@narra/shared';
 
 /** Starting values, not tuned. */
 export const HTTP_LIMITS = {
@@ -17,6 +18,7 @@ export const HTTP_LIMITS = {
 export interface HttpOptions {
   /** Browser origins allowed to call the API. Empty means no cross-origin access (fail closed). */
   corsOrigins?: string[];
+  resolveCorsOrigins?: () => Promise<string[]>;
   /** Send Strict-Transport-Security. Turn on only when the API is served over HTTPS. */
   hsts?: boolean;
 }
@@ -26,9 +28,8 @@ export function parseCorsOrigins(raw: string | undefined): string[] {
   const list = (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   for (const o of list) {
     if (o === '*') throw new Error('CORS_ORIGINS must list exact origins; "*" is not allowed');
-    let u: URL;
-    try { u = new URL(o); } catch { throw new Error(`CORS_ORIGINS has an invalid origin: ${o}`); }
-    if (u.origin !== o) throw new Error(`CORS_ORIGINS entries must be bare origins (scheme, host, optional port), got: ${o}`);
+    try { new URL(o); } catch { throw new Error('CORS_ORIGINS has an invalid origin'); }
+    if (!isExactBrowserOrigin(o)) throw new Error('CORS_ORIGINS entries must be bare origins using HTTP(S), without wildcards, credentials or paths');
   }
   return list;
 }
@@ -85,12 +86,15 @@ export async function registerHttpHardening(app: FastifyInstance, opts: HttpOpti
 
   const origins = opts.corsOrigins ?? [];
   await app.register(cors, {
-    origin: origins.length ? origins : false,
+    origin: opts.resolveCorsOrigins ? (origin, cb) => {
+      if (!origin) { cb(null, false); return; }
+      opts.resolveCorsOrigins!().then(allowed => cb(null, allowed.includes(origin)), () => cb(null, origins.includes(origin)));
+    } : origins.length ? origins : false,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['authorization', 'content-type', 'x-request-id'],
     exposedHeaders: ['x-request-id', 'retry-after', 'content-disposition'],
     credentials: false, // bearer tokens, never cookies
-    maxAge: HTTP_LIMITS.corsMaxAgeSeconds,
+    maxAge: opts.resolveCorsOrigins ? 20 : HTTP_LIMITS.corsMaxAgeSeconds,
   });
 
   app.setNotFoundHandler((req, reply) => reply.code(404).send({ error: 'NOT_FOUND', requestId: req.requestId }));

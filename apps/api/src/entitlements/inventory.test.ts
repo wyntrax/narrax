@@ -6,6 +6,7 @@ it('every literal HTTP registration is deliberately classified; generated accoun
   const mixed = new Set(['GET /v1/tokens', 'GET /v1/opportunities', 'GET /v1/opportunities/:id/analysis', 'GET /v1/wallets/:address', 'GET /v1/wallets/:address/trades', 'GET /v1/stream']);
   const newRoutes = new Set(['GET /v1/me/entitlements', 'POST /v1/me/early-access/join', 'DELETE /v1/me/early-access', 'GET /v1/admin/entitlements/settings', 'PUT /v1/admin/entitlements/settings', 'GET /v1/admin/users/:userId/entitlements', 'POST /v1/admin/users/:userId/entitlements/grants', 'POST /v1/admin/users/:userId/entitlements/grants/:id/revoke', 'DELETE /v1/admin/users/:userId/linked-wallets/:id', 'GET /v1/admin/early-access/stats', 'POST /v1/integrations/wyntrax/events']);
   newRoutes.add('GET /v1/early-access/status');
+  for (const route of ['GET /v1/public-config', 'GET /v1/admin/runtime-settings', 'POST /v1/admin/runtime-settings/check-privy', 'GET /v1/admin/users/lookup', 'GET /v1/admin/early-access/grants']) newRoutes.add(route);
   const files = ['apps/api/src', 'apps/api/src/entitlements'].flatMap(dir => readdirSync(dir).filter(f => f.endsWith('.ts') && !f.includes('.test')).map(f => `${dir}/${f}`));
   let count = 0;
   for (const file of files) for (const m of readFileSync(file, 'utf8').matchAll(/\b(?:app|scoped)\.(get|post|put|patch|delete)\('([^']+)'/g)) {

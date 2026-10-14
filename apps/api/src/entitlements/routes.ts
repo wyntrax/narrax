@@ -51,7 +51,7 @@ export function registerEntitlementRoutes(app: FastifyInstance, deps: AccountDep
     if (grant) await revokeLocalGrant(db, r.userId!, grant.id, null, 'Self leave', now()); return { ok: true };
   }));
   app.get('/v1/admin/entitlements/settings', opts(true), handle(async () => ({ defaults: { 'entitlements.enforced': false, 'entitlements.shadow_log': true, 'early_access.enabled': false, 'early_access.seat_cap': 0, 'entitlements.features': {} }, items: await db.systemSetting.findMany({ where: { key: { in: Object.keys(SETTING_SCHEMAS) } } }) })));
-  app.put('/v1/admin/entitlements/settings', opts(true), handle(async r => { const v = z.object({ settings: z.unknown(), reason: Reason }).strict().parse(r.body); await updateLocalSettings(db, r.userId!, v.settings, v.reason); return { ok: true }; }));
+  app.put('/v1/admin/entitlements/settings', opts(true), handle(async r => { const v = z.object({ settings: z.unknown(), reason: Reason, overridePrivyCheck: z.boolean().optional() }).strict().parse(r.body); await updateLocalSettings(db, r.userId!, v.settings, v.reason, { overridePrivyCheck: v.overridePrivyCheck }); return { ok: true }; }));
   app.get('/v1/admin/users/:userId/entitlements', opts(true), handle(r => entitlementTrace(db, params(r).userId, now())));
   app.post('/v1/admin/users/:userId/entitlements/grants', opts(true, 10), handle(r => {
     const v = z.object({ tier: z.literal('EARLY_ACCESS'), validUntil: z.string().datetime({ offset: true }).transform(s => new Date(s)), reason: Reason }).strict().parse(r.body);

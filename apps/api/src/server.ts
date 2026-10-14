@@ -5,12 +5,13 @@ import { createEventStream } from '@narra/realtime';
 import { SolanaRpc } from '@narra/solana';
 import { makeWalletEventStore } from '@narra/worker-pipeline';
 import { OpenAiCompatibleProvider } from '@narra/ai';
-import { createPrivyVerifier } from './auth';
+import { createRuntimePrivyVerifier } from './auth';
+import { createRuntimeSettings } from './runtime-settings';
 import { parseCorsOrigins } from './http';
 import { assertEnv } from '@narra/shared';
 
 // First, before any connection is opened: stop with a clear list of what is wrong. Messages never contain a value.
-assertEnv('api');
+assertEnv('api', process.env, console, undefined, { runtimeAuth: true });
 
 const secret = process.env.HELIUS_WEBHOOK_SECRET ?? '';
 const connection = createRedis();
@@ -18,6 +19,7 @@ const connection = createRedis();
 const streamReaderConnection = createRedis();
 const queues = createQueues(connection);
 const db = createPrisma();
+const runtime = createRuntimeSettings(db);
 const store = makeWalletEventStore(db);
 
 // Edits to tracked wallets ask the worker to sync the Helius webhook. Without Helius credentials the scheduled job is also off.
@@ -28,24 +30,27 @@ if (!chatLlm) console.log('no AI provider configured: chat is off');
 
 // An async function because this file runs as CommonJS under tsx, which has no top-level await.
 async function main() {
+  const config = await runtime.read();
+  if (!config.privyAppId.value || !config.privyVerificationKey.value) throw new Error('Configure Privy in SystemSetting or PRIVY_APP_ID and PRIVY_VERIFICATION_KEY.');
   const app = await buildApp({
+    runtime,
     wyntrax: { db, secret: process.env.WYNTRAX_WEBHOOK_SECRET || undefined, previousSecret: process.env.WYNTRAX_WEBHOOK_SECRET_PREVIOUS || undefined },
     chatLlm,
     requestWalletSync: syncConfigured ? () => queues.requestWalletSync() : undefined,
     enqueueExecution: (job) => queues.enqueueExecution(job),
-    account: { db, verifier: createPrivyVerifier({ appId: process.env.PRIVY_APP_ID ?? '', verificationKey: process.env.PRIVY_VERIFICATION_KEY ?? '' }) },
+    account: { db, verifier: createRuntimePrivyVerifier(runtime) },
     webhooks: {
       secret,
       enqueue: (e) => queues.enqueueWalletEvent(e),
       isTracked: (wallet) => store.isTracked(wallet),
     },
     // Exact origins only (comma separated). Empty means browsers on other origins are refused.
-    http: { corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS), hsts: process.env.HSTS === 'true' },
+    http: { corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS), resolveCorsOrigins: runtime.origins, hsts: process.env.HSTS === 'true' },
     // Only when the API is behind a reverse proxy you control. Otherwise a client could spoof its address and dodge rate limits.
     trustProxy: process.env.TRUST_PROXY === 'true',
     // Yes or no only. The values of these settings never leave the server.
     connections: () => [
-      { name: 'privy', configured: !!(process.env.PRIVY_APP_ID && process.env.PRIVY_VERIFICATION_KEY), purpose: 'Sign-in' },
+      { name: 'privy', configured: !!(config.privyAppId.value && config.privyVerificationKey.value), purpose: 'Sign-in' },
       { name: 'helius-webhooks', configured: syncConfigured, purpose: 'Tracked wallet swap events' },
       { name: 'helius-rpc', configured: !!process.env.HELIUS_RPC_URL, purpose: 'Balances and wallet history' },
       { name: 'jupiter', configured: !!process.env.JUPITER_API_KEY, purpose: 'Swap quotes' },
