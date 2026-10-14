@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { Prisma, PrismaClient } from '@narra/database';
 import { GLOBAL_LIMITS, PROFILES } from '@narra/risk';
 import { TradingMode } from '@narra/shared';
-import type { AuthVerifier } from './auth';
+import { describeAuthFailure, type AuthVerifier } from './auth';
+import { rejectedTokenMetadata } from './auth-token';
 
 declare module 'fastify' {
   interface FastifyRequest { userId?: string }
@@ -56,7 +57,9 @@ export function makeAuthenticate(deps: Pick<AccountDeps, 'verifier' | 'db'>) {
     let privyUserId: string;
     try {
       ({ privyUserId } = await verifier.verify(token));
-    } catch {
+    } catch (e) {
+      // Only unverified routing metadata goes to the log, never the bearer token or private claims.
+      req.log.warn({ reason: describeAuthFailure(e), token: rejectedTokenMetadata(token) }, 'access token rejected');
       return reply.code(401).send({ error: 'UNAUTHORIZED' });
     }
     req.userId = await resolveUserId(db, privyUserId);

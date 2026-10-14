@@ -25,3 +25,23 @@ export function createPrivyVerifier(opts: { appId: string; verificationKey: stri
     verifyWithExpiry: check,
   };
 }
+
+/**
+ * A short reason a token was rejected, for the server log only. It never contains a token, key or app id, and clients
+ * still receive a bare 401. This turns "401 and no idea why" into one actionable line.
+ */
+export function describeAuthFailure(e: unknown): string {
+  const read = (key: string) => (typeof e === 'object' && e !== null && key in e ? String((e as Record<string, unknown>)[key]) : '');
+  const code = read('code'), claim = read('claim'), message = e instanceof Error ? e.message : '';
+  if (code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
+    if (claim === 'aud') return 'audience mismatch: the token was issued for a different Privy app than PRIVY_APP_ID';
+    if (claim === 'iss') return 'issuer mismatch: the token was not issued by privy.io';
+    return `claim check failed (${claim || 'unknown claim'})`;
+  }
+  if (code === 'ERR_JWT_EXPIRED') return 'token expired: sign in again, and check the machine clock if it keeps happening';
+  if (code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED') return 'signature mismatch: PRIVY_VERIFICATION_KEY belongs to a different Privy app than the one that issued the token';
+  if (code === 'ERR_JWS_INVALID' || code === 'ERR_JWT_INVALID') return 'not a Privy access token (malformed or the wrong kind of token)';
+  if (code === 'ERR_JOSE_ALG_NOT_ALLOWED') return 'token is not signed with ES256';
+  if (/spki|pem|key/i.test(message) || e instanceof TypeError) return 'PRIVY_VERIFICATION_KEY could not be read: it must be the full PEM public key from the Privy dashboard';
+  return 'token rejected';
+}
