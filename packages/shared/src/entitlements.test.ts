@@ -24,9 +24,9 @@ describe('pure entitlement resolution', () => {
     }
     expect(resolveEntitlements({ ...snapshot(), linkedWallets: snapshot().linkedWallets.map(w => ({ ...w, userId: 'other' })) }, now).effectiveTier).toBe('NONE');
   });
-  it('revocation, expiry at the boundary, disabled and last unlink suppress local access', () => {
+  it('closing admission preserves grants; revocation, expiry and last unlink suppress local access', () => {
     for (const g of [{ ...grant, status: 'REVOKED' }, { ...grant, validUntil: now }, { ...grant, tier: 'ELITE', source: 'ADMIN' }]) expect(resolveEntitlements({ ...snapshot(), grants: [g] }, now).effectiveTier).toBe('NONE');
-    expect(resolveEntitlements({ ...snapshot(), earlyAccessEnabled: false }, now).effectiveTier).toBe('NONE');
+    expect(resolveEntitlements({ ...snapshot(), earlyAccessEnabled: false }, now).effectiveTier).toBe('EARLY_ACCESS');
     expect(resolveEntitlements({ ...snapshot(), linkedWallets: [] }, now).effectiveTier).toBe('NONE');
     for (const validUntil of [null, now, new Date('invalid')]) expect(resolveEntitlements({ ...snapshot(), grants: [], memberships: [{ ...membership(), validUntil }] }, now).effectiveTier).toBe('NONE');
   });

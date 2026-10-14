@@ -35,7 +35,7 @@ export function resolveEntitlements(s: EntitlementSnapshot, now: Date) {
   const sources: { source: string; id: string; tier: AccessTier; validUntil: Date | null }[] = [];
   if (Number.isFinite(now.getTime())) {
     for (const g of s.grants) {
-      if (s.earlyAccessEnabled && links.size && g.userId === s.userId && ['EARLY_ACCESS', 'ADMIN'].includes(g.source) && g.tier === 'EARLY_ACCESS' && g.status === 'ACTIVE' && (g.validUntil === null || future(g.validUntil, now))) {
+      if (links.size && g.userId === s.userId && ['EARLY_ACCESS', 'ADMIN'].includes(g.source) && g.tier === 'EARLY_ACCESS' && g.status === 'ACTIVE' && (g.validUntil === null || future(g.validUntil, now))) {
         sources.push({ source: g.source, id: g.id, tier: 'EARLY_ACCESS', validUntil: g.validUntil });
       }
     }
