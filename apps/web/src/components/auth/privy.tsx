@@ -13,4 +13,4 @@ function Bridge({children}: {children: ReactNode}) {
   }), [ready, authenticated, user?.id, login, logout, getAccessToken, connectWallet, createWallet, wallets, signMessage]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-export default function AuthProvider({children}: {children: ReactNode}) {return <PrivyProvider appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID!} config={{loginMethods:['google','email','wallet'], appearance:{walletChainType:'solana-only'}, externalWallets:{solana:{connectors}}, embeddedWallets:{solana:{createOnLogin:'off'}}}}><Bridge>{children}</Bridge></PrivyProvider>;}
+export default function AuthProvider({children,appId}: {children: ReactNode;appId:string}) {return <PrivyProvider appId={appId} config={{loginMethods:['google','email','wallet'], appearance:{walletChainType:'solana-only'}, externalWallets:{solana:{connectors}}, embeddedWallets:{solana:{createOnLogin:'off'}}}}><Bridge>{children}</Bridge></PrivyProvider>;}
