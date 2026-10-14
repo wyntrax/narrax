@@ -14,7 +14,7 @@ type Env = Record<string, string | undefined>;
  * contain a value: a malformed DATABASE_URL or key would otherwise be printed into logs. An empty value counts as unset,
  * because .env.example ships with empty entries.
  */
-export function checkEnv(env: Env, role: EnvRole): EnvReport {
+export function checkEnv(env: Env, role: EnvRole, options: { runtimeAuth?: boolean } = {}): EnvReport {
   const errors: string[] = [], warnings: string[] = [];
   const get = (k: string) => { const v = env[k]; return v === undefined || v.trim() === '' ? undefined : v.trim(); };
   const prod = get('NODE_ENV') === 'production';
@@ -50,10 +50,10 @@ export function checkEnv(env: Env, role: EnvRole): EnvReport {
   }
 
   if (role === 'api') {
-    if (!get('PRIVY_APP_ID')) errors.push('PRIVY_APP_ID is required.');
+    if (!get('PRIVY_APP_ID') && !options.runtimeAuth) errors.push('PRIVY_APP_ID is required.');
     const key = get('PRIVY_VERIFICATION_KEY');
-    if (!key) errors.push('PRIVY_VERIFICATION_KEY is required.');
-    else if (!key.includes('PUBLIC KEY')) errors.push('PRIVY_VERIFICATION_KEY must be a PEM public key.');
+    if (!key && !options.runtimeAuth) errors.push('PRIVY_VERIFICATION_KEY is required.');
+    else if (key && !key.includes('PUBLIC KEY')) errors.push('PRIVY_VERIFICATION_KEY must be a PEM public key.');
     const port = get('API_PORT');
     if (port !== undefined && !(/^\d+$/.test(port) && Number(port) >= 1 && Number(port) <= 65535)) errors.push('API_PORT must be a port number from 1 to 65535.');
     bool('TRUST_PROXY');
@@ -85,8 +85,8 @@ export function checkEnv(env: Env, role: EnvRole): EnvReport {
 }
 
 /** Runs the checks, prints warnings, and exits with code 1 on any error. Call it first, before any connection is opened. */
-export function assertEnv(role: EnvRole, env: Env = process.env, out: Pick<Console, 'error' | 'warn'> = console, exit: (code: number) => never = (c) => process.exit(c)): void {
-  const { errors, warnings } = checkEnv(env, role);
+export function assertEnv(role: EnvRole, env: Env = process.env, out: Pick<Console, 'error' | 'warn'> = console, exit: (code: number) => never = (c) => process.exit(c), options: { runtimeAuth?: boolean } = {}): void {
+  const { errors, warnings } = checkEnv(env, role, options);
   for (const w of warnings) out.warn(`env warning: ${w}`);
   if (errors.length) {
     for (const e of errors) out.error(`env error: ${e}`);

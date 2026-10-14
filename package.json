@@ -9,6 +9,8 @@
   ],
   "scripts": {
     "test": "vitest run",
+    "check-privy": "tsx scripts/check-privy.ts",
+    "settings": "tsx scripts/settings.ts",
     "entitlements:expire": "tsx --env-file=.env scripts/entitlements-expire.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck -w @narra/web",
     "dev:web": "npm run dev -w @narra/web",

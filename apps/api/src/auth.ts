@@ -1,4 +1,5 @@
 import { importSPKI, jwtVerify, type KeyLike } from 'jose';
+import type { RuntimeSettingsResolver } from './runtime-settings';
 
 export interface AuthVerifier {
   /** Resolves to the Privy user id or throws. Callers must not reveal why verification failed. */
@@ -24,6 +25,17 @@ export function createPrivyVerifier(opts: { appId: string; verificationKey: stri
     async verify(token) { return { privyUserId: (await check(token)).privyUserId }; },
     verifyWithExpiry: check,
   };
+}
+
+/** Share the runtime cache with public config and origin checks. Only the active key is retained. */
+export function createRuntimePrivyVerifier(settings: RuntimeSettingsResolver): AuthVerifier {
+  let active: { appId: string; key: string; verifier: AuthVerifier } | undefined;
+  const check = async (token: string) => {
+    const config = await settings.read(), appId = config.privyAppId.value, key = config.privyVerificationKey.value;
+    if (!active || active.appId !== appId || active.key !== key) active = { appId, key, verifier: createPrivyVerifier({ appId, verificationKey: key }) };
+    return active.verifier.verifyWithExpiry!(token);
+  };
+  return { verify: async token => ({ privyUserId: (await check(token)).privyUserId }), verifyWithExpiry: check };
 }
 
 /**

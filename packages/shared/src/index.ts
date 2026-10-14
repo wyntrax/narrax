@@ -5,3 +5,4 @@ export * from './untrusted';
 export * from './alerts';
 export * from './env';
 export * from './entitlements';
+export * from './runtime-settings';

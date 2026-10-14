@@ -17,9 +17,17 @@ describe('entitlement non-escalation structural boundary', () => {
     for (const file of files) {
       const text = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
       expect(forbidden(text), file.replace(/\\/g, '/')).toBe(false);
-      // Local imports must stay in this boundary, except the existing authentication pre-handler.
-      for (const match of text.matchAll(/from ['"](\.\.[^'"]+)['"]/g)) expect(match[1], file).toBe('../account');
+      // Settings may also use the audited public-config bridges, checked below; other modules only use authentication.
+      const allowed = file.replace(/\\/g, '/').endsWith('/settings.ts') ? ['../privy-key', '../runtime-settings'] : ['../account'];
+      for (const match of text.matchAll(/from ['"](\.\.[^'"]+)['"]/g)) expect(allowed, file).toContain(match[1]);
       if (text.includes("from '../account'")) expect(text).toContain('makeAuthenticate');
+    }
+  });
+  it('public runtime bridges cannot write trading state or import trading capabilities', () => {
+    for (const file of ['apps/api/src/privy-key.ts', 'apps/api/src/runtime-settings.ts']) {
+      // Only the resolver's explicit public environment fallback may read ambient env.
+      const source = readFileSync(file, 'utf8').replace(/env: Env = process\.env/g, 'env: Env = publicEnv');
+      expect(forbidden(source), file).toBe(false);
     }
   });
   it('detects mutation fixtures and Windows paths', () => {
