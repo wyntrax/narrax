@@ -52,7 +52,7 @@ The job requests package-write access to publish the separate web package. Keep 
 Use the same `DEPLOY_PATH` as the backend, for example:
 
 ```text
-/srv/narra/
+/srv/narrax/
   .env                              existing backend configuration; not given to web
   .env.web                          frontend-only configuration, created manually
   docker/docker-compose.prod.yml    existing backend base file

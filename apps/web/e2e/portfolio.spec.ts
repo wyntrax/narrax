@@ -41,7 +41,7 @@ for(const width of [1440,390])for(const theme of ['dark','light'])test(`portfoli
  await page.screenshot({path:`test-results/portfolio-${width}-${theme}.png`,fullPage:true});
  const download=page.waitForEvent('download');
  await page.getByRole('button',{name:'Export CSV'}).click();
- expect((await download).suggestedFilename()).toBe('narra-trades.csv');
+ expect((await download).suggestedFilename()).toBe('narrax-trades.csv');
  expect(exportAuth).toBe('Bearer fixture-public-test-token');
  expect(requests.filter(p=>p==='/v1/trades/export?format=csv')).toHaveLength(1);
  await expect(page.getByText('Saved the audited CSV export.')).toBeVisible();

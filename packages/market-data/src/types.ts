@@ -57,9 +57,19 @@ export interface NewPool {
 }
 
 /** Current price, liquidity and volume. Mints missing from the result had no usable data. */
+export const SNAPSHOT_OMISSION_REASONS = ['NO_MATCHING_PAIR', 'INVALID_PAIR', 'PRICE_UNAVAILABLE', 'LIQUIDITY_UNAVAILABLE', 'VOLUME_UNAVAILABLE', 'MARKET_VALUE_UNAVAILABLE', 'UNSPECIFIED'] as const;
+export type SnapshotOmissionReason = typeof SNAPSHOT_OMISSION_REASONS[number];
+export interface SnapshotRead {
+  snapshots: Map<string, MarketSnapshot>;
+  /** One first blocking reason per omitted mint; diagnostic only, never qualification evidence. */
+  omissions: Map<string, SnapshotOmissionReason>;
+}
+
 export interface MarketQuoteSource {
   readonly name: string;
   getSnapshots(mints: string[]): Promise<Map<string, MarketSnapshot>>;
+  /** Same bounded provider requests, with omission reasons from that exact response. */
+  getSnapshotsWithDiagnostics?(mints: string[]): Promise<SnapshotRead>;
   /**
    * Price-only read for reference assets such as wrapped SOL, whose deepest pool may legitimately carry no market
    * cap or FDV. Sources without this method use `getSnapshots` for the reference instead.

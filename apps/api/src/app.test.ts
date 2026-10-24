@@ -20,7 +20,7 @@ describe('api', () => {
   it('reports health with the configured brand', async () => {
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/health' });
-    expect(res.json()).toEqual({ status: 'ok', brand: 'NARRA' });
+    expect(res.json()).toEqual({ status: 'ok', brand: 'NARRAX' });
   });
   it('runs the risk governor on a valid decision', async () => {
     const app = await buildApp();

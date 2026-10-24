@@ -54,7 +54,7 @@ Repository **variable** `DEPLOY_ENABLED=true`, and these **secrets** (preferably
 |---|---|
 | `DEPLOY_HOST` | host name or IP |
 | `DEPLOY_USER` | a non-root user that may run `docker` |
-| `DEPLOY_PATH` | absolute directory on the host, for example `/srv/narra` |
+| `DEPLOY_PATH` | absolute directory on the host, for example `/srv/narrax` |
 | `DEPLOY_SSH_KEY` | a **dedicated** private key for this job only. Use `command=`/`from=` restrictions in `authorized_keys` where you can |
 | `DEPLOY_KNOWN_HOSTS` | output of `ssh-keyscan -t ed25519 <host>` taken **from a trusted machine**, not from CI |
 
@@ -63,7 +63,7 @@ Nothing else is stored in GitHub. Application secrets (`PRIVY_*`, `HELIUS_*`, `A
 ## Preparing the host
 
 ```
-/srv/narra/
+/srv/narrax/
   .env                                  your real settings (from .env.example); never committed, never sent by CI
   docker/docker-compose.prod.yml        YOUR copy of docker/docker-compose.prod.example.yml, read line by line and adapted
   docker/docker-compose.deploy.yml      sent by CI on every deploy

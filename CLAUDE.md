@@ -12,7 +12,7 @@ Token research now includes exact-mint lookup, explicit unindexed-address handli
 
 **Wallet-flow research (2026-10-21):** Smart Money now separates three states that were previously conflated: seed/observed, operator review, and evidence qualification. `packages/smart-money/src/qualification.ts` recomputes eligibility from current evidence (20 closed legs / 5 tokens / 7 observed days, complete uncapped 30-day history, positive PnL and median ROI, score ≥70, activity ≤24 h, fresh profile); an approved review never overrides a failed check. `publishWalletResearch` follows approved wallets to tokens with 2+ independent entities (clusters count once), 0.5 SOL net each, a 1-hour window, 15-minute newest trade and market evidence, $20K liquidity, 50 fresh holders and fresh risk (no honeypot/active authority). It freezes the entry metric and exact trade signatures, dedupes under an advisory lock, and writes 1h/4h/24h rows whose missing prices become terminal `UNKNOWN` instead of being repaired later. `WalletTrade` now freezes `amountUsd`/`marketCapUsd`/`evidence` from observations at or before the trade; discovery stores buyer signature/time, funnel counters and a 50-row emerging snapshot, and reserves half its price slots for never-priced tokens. New research/admin APIs, Smart Money and admin UI, and `npm run wallets:scorecard`. Off by default via `SMART_MONEY_RESEARCH_ENABLED` / `SMART_MONEY_HISTORY_ENABLED`; migration `20261021052916_wallet_research` is applied to the isolated test DB only. Verified: full backend **1,399 tests / 123 files**, zero failed/skipped/todo, web **576 / 40**, typechecks, lint, EN/ID parity 992. No alert/order/position path was added and no plaintext user data changed. See the top of `docs/CONTINUATION.md`. Next: after the public URL/domain is ready, apply the migration, enable for one reviewed wallet, run a bounded history backfill, and observe a real 1h/4h/24h cohort.
 
-NARRA (placeholder name, set by `PROJECT_NAME`) is an AI narrative and smart-money intelligence platform for Solana DEX trading. It watches narratives forming online, matches them to tokens, tracks wallets, and produces research and trade decisions for users, who can run it in SHADOW, PAPER, SEMI_AUTO or AUTO mode. Real funds are involved eventually, so safety rules below outrank speed and features.
+NARRAX (placeholder name, set by `PROJECT_NAME`) is an AI narrative and smart-money intelligence platform for Solana DEX trading. It watches narratives forming online, matches them to tokens, tracks wallets, and produces research and trade decisions for users, who can run it in SHADOW, PAPER, SEMI_AUTO or AUTO mode. Real funds are involved eventually, so safety rules below outrank speed and features.
 
 Stack: npm workspaces monorepo, TypeScript strict, Vitest, Fastify API, BullMQ workers, Prisma 6.19 on Postgres 16 (pg driver adapter, `engineType = "client"`, no Rust engine; pinned because 7.x rejects `url` in the datasource), Redis 7, Zod at every boundary.
 
@@ -84,7 +84,7 @@ Positions, orders and trades now exist, but only as paper (`simulated`) rows. No
 | `packages/realtime` | Realtime event contract (`EVENT_DEFS`: type, channel, scope, Zod data), Redis Streams helpers (`createEventStream`), WebSocket protocol, `RealtimeHub` (routing, limits, replay), stream reader. Pure except the stream helpers |
 | `workers/pipeline` | All jobs and the Postgres stores. Entry: `src/main.ts`. B7: `src/notifications.ts` (dispatch), `src/realtimePublisher.ts` (tails tables into the stream). Execution: `src/execution.ts` (no Executor), `src/outcomes.ts` (paper, confirmation and exit handlers), `src/fanOut.ts`, `src/snapshots.ts`, `src/paperLedger.ts` |
 | `apps/api` | Fastify API: health, Helius webhook, Privy auth, account controls, read routes, confirmations, admin routes (AI models, tracked wallets, connections status), and since B7 alerts, settings, overview and rotation, search, wallet detail, token screener, own wallets and export, HTTP hardening (`http.ts`) and the WebSocket gateway (`gateway.ts`). `src/app.ts` builds it, `src/server.ts` runs it |
-| `design/prototype/narra-prototype.html` | Mock-data UI prototype the owner approved. Not the real frontend. `apps/web` does not exist yet |
+| `design/prototype/narrax-prototype.html` | Mock-data UI prototype the owner approved. Not the real frontend. `apps/web` does not exist yet |
 
 ## How to work here
 
@@ -141,6 +141,35 @@ Positions, orders and trades now exist, but only as paper (`simulated`) rows. No
 - **The model provider is one OpenAI-compatible flow, Vikey by default.** `aiProviderFromEnv()` (`packages/ai/src/fromEnv.ts`) builds it for both the API chat and the worker: `POST {AI_BASE_URL}/chat/completions` (default `https://api.vikey.ai/v1`) with `Authorization: Bearer $AI_PROVIDER_API_KEY` and `{model, messages, ...}`. `AI_REQUEST_STYLE` is `standard` (default), `bare` (only model and messages) or `full`; a router answering 400/422 gets one retry as `bare`, remembered per model. The model id comes from admin AI settings (`ai.models`), else `AI_MODEL_ID`, else a placeholder that a real provider rejects. A failed model call in chat returns the fixed fallback to the user and logs `chat model call failed` with fixed text such as `HTTP 401 (check AI_PROVIDER_API_KEY)` (`AgentRunResult.llmError`); never log the provider body or key. See `docs/AI_PROVIDER.md`.
 
 ## State (update this when you finish a phase)
+
+2026-10-24 brand wording pass: visible `NARRA`/`Narra` strings in docs, comments, UI copy, the AI prompt, health
+brand default, backtest header, Telegram headers, CSV export name and test fixtures are now `NARRAX`/`Narrax`.
+Renamed `design/prototype/narra-prototype.html` to `narrax-prototype.html`. The wallet-link protocol line is now
+`NARRAX wallet link v1`, so API and web must ship together. Technical identifiers are deliberately unchanged:
+database names/users, Redis keys, `@narra/*` scope, `NARRA_*` env vars, translation keys, Compose project/volume
+names, advisory-lock namespace, `NarraCollector-*`/`NarraRadarStatus` task names, repository/registry paths and the
+checkout folder. Docs now use `/srv/narrax`, so set `DEPLOY_PATH=/srv/narrax` on the VPS. DOCX regenerated. No
+scoring, evidence, budget, publication or trading behavior changed.
+
+2026-10-24 full-pipeline handover: owner started API/web/full workers and Helius webhook. Verified one consumer per
+pipeline queue, no execution consumer, API/web HTTP 200, active webhook sync and fresh wallet-event ingestion (403
+wallet trades timestamped in ten minutes at 09:08 UTC). Disabled the idle scoped collector tasks to avoid relaunching
+alongside the full pipeline. A full cycle retained the 150-token/18-info-call budgets with zero errors.
+One read-only 30-token DEX Screener probe found 18 no matching pairs, eight missing liquidity, one missing both
+market cap and FDV, and three usable snapshots. Added first-blocking-reason diagnostics to the same scheduled
+quote reads and aggregate counters; malformed pairs envelopes now fail as shape errors. No fallback pool, zero-fill,
+allocation change or extra recurring requests. 48 focused tests and types passed; full backend verification pending.
+The owner's running full worker needs a restart after verification to load omission-reason instrumentation.
+
+2026-10-24 coverage audit: PR #8 is merged (`99f176c`); follow-up work is on `feat/research-coverage-audit`.
+Added read-only `research:coverage`, disjoint social/narrative-link coverage and per-selection-group request
+diagnostics (written/unavailable/failed/not requested), preserving selection, budgets and gates. Live audit found
+84/150 usable snapshots in one cycle and a 24.6-minute gap between retained completed-run starts; uninterrupted
+collection is not established. Full isolated backend suite: 1,518/134 passed, zero skips; root/web types passed.
+See `docs/RESEARCH_COVERAGE_AUDIT_2026-10-24.md`. Scheduling improvements remain evidence-dependent.
+First instrumented live cycle: 150 tokens / 18 info calls, 80 prices, zero errors, one consumer. All 70 misses were
+completed requests without usable snapshots; unpriced narrative returned 0/25 and discovery 1/15. Persisted counters
+verified by the read-only CLI. One cycle does not establish repeat misses or justify reallocating slots.
 
 2026-10-24 PR #8 CI repair: unread-marker ARIA role corrected; eleven old E2E failures reconciled with current
 feature locks, limited preview endpoint, historical labels and coverage copy. Thirteen targeted browser cases,
@@ -320,8 +349,15 @@ Not built: signing and sending (B5b onward), the circuit breakers, the wallet fl
 
 ## Next
 
-PR #8 gate: rerun remote CI on the browser repair commit and resolve any remaining failures before merging main.
-Both deploy variables must remain false. Docker and backend/migration checks passed on the preceding PR revision.
+Coverage follow-up: compare newly instrumented selection groups and investigate market timeouts/duration before
+changing refresh allocation. The broad narrative-linked denominator is not a qualified-candidate cohort.
+PR #8 is merged; use the new coverage branch for review rather than reusing its closed PR. Keep deploy flags false.
+After omission-reason verification, restart only the full pipeline worker with the owner's existing environment;
+leave both scoped collector tasks disabled. Read `research:coverage` after a normal cycle. Full-pipeline ingestion
+is live, but sustained continuity, token-level repeat misses and durable radar edge remain unproven.
+
+PR #8 gate completed: remote CI passed on `00663f5` before the owner merged it. Require fresh remote CI for the
+coverage follow-up before merging; local checks do not replace that gate.
 
 SOL recovery follow-up (2026-10-24): owner-authenticated evidence-panel review, followed by 24–48 hours of
 uninterrupted collection and prospective evaluation. Session-bound API/web require restart after a harness restart.

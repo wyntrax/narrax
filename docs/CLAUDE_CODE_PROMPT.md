@@ -104,7 +104,7 @@ Out of scope for B4: any real Executor, Privy delegated signing, Jito, wallet cr
 ## Frontend session (any time after B4)
 
 ```
-Read CLAUDE.md, README.md and docs/CONTINUATION.md. The design to match is design/prototype/narra-prototype.html (mock data, approved by me). The product spec is docs/product-spec.md.
+Read CLAUDE.md, README.md and docs/CONTINUATION.md. The design to match is design/prototype/narrax-prototype.html (mock data, approved by me). The product spec is docs/product-spec.md.
 
 Build frontend phase [F1 | F2 | F3 | F4 | F5 | F6]. If I do not choose, build F1. Phases are defined in docs/CONTINUATION.md section 5.
 

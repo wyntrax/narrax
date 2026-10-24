@@ -13,7 +13,7 @@ This records the rebrand before Phase 2. The product placeholder has since been 
 - Exported transparent variants: `public/narrax-logo-dark.svg` (white symbol) and `public/narrax-logo-light.svg` (black symbol). `public/favicon.svg` follows browser dark/light preference; `favicon.ico` uses a white-on-black fallback. Regenerate variants/icons with `node scripts/favicon.cjs` from `apps/web`.
 - Social preview embeds the same local SVG; no external logo/font request or new runtime dependency.
 
-The public rename does not migrate technical identifiers: npm workspaces, environment variables, existing preference cookies and translation keys retain compatibility. The server-issued **NARRA wallet link v1** protocol text remains exact, including its display in proof review. Renaming that signed protocol would require a coordinated backend migration. Auth/API/FSM/proof/signing behavior is preserved; the only auth-component edit is its visible placeholder heading.
+The public rename does not migrate technical identifiers: npm workspaces, environment variables, existing preference cookies and translation keys retain compatibility. This pre-launch brand pass also changed the server-issued wallet-link protocol line to **NARRAX wallet link v1**, because that exact text is displayed during proof review. The API and web parsers compare it literally, so both must be released together; a mixed-version window would reject wallet-link challenges for up to five minutes. Auth/API/FSM/proof/signing behavior is otherwise preserved, and the only auth-component edit is its visible placeholder heading.
 
 ## Verification
 

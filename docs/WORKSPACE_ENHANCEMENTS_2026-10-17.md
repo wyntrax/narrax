@@ -75,7 +75,7 @@ position writes).
 
 ## Runtime state after this work
 
-- Real API on `http://localhost:4000` (`/health` → `{"status":"ok","brand":"NARRA"}`) and real web on
+- Real API on `http://localhost:4000` (`/health` → `{"status":"ok","brand":"NARRAX"}`) and real web on
   `http://localhost:4010`, both started from the owner's `local-api.ps1` / `local-web.ps1` environment
   (no test-auth). `/app`, `/app/tokens`, `/app/opportunities`, `/app/smart-money`, `/app/alerts` and
   `/early-access` all return 200. No worker, market or narrative consumer was started, so no metered

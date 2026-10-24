@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { PrismaClient } from '@narra/database';
+import { SNAPSHOT_OMISSION_REASONS } from '@narra/market-data';
 
 export const SOCIAL_INFO_PRIORITY_KEY = 'research.coverage.socialPriority';
 export const SOCIAL_INFO_CURSOR_KEY = 'market.socialInfoCursor';
@@ -29,6 +30,29 @@ export async function saveResearchDiagnostics(db: PrismaClient, stage: ResearchS
     if (key === 'errors' && Array.isArray(value)) counters.errors = value.length;
     if (key === 'evidenceSkipped' && value && typeof value === 'object') for (const [reason, count] of Object.entries(value)) {
       if (typeof count === 'number' && Number.isFinite(count) && count >= 0) counters[`evidence.${reason}`] = count;
+    }
+    if (key === 'priceCoverage' && value && typeof value === 'object') {
+      // Explicit allowlist: no token identifiers, errors or provider bodies in diagnostics.
+      counters['priceCoverage.runs'] = 1;
+      for (const lane of ['outcomes', 'discovery', 'social', 'launches', 'unpriced', 'general']) {
+        const counts = (value as Record<string, unknown>)[lane];
+        if (!counts || typeof counts !== 'object') continue;
+        for (const field of ['selected', 'written', 'unavailable', 'failed', 'notRequested']) {
+          const count = (counts as Record<string, unknown>)[field];
+          if (typeof count === 'number' && Number.isFinite(count) && count >= 0) counters[`price.${lane}.${field}`] = count;
+        }
+      }
+    }
+    if (key === 'priceOmissions' && value && typeof value === 'object') {
+      counters['priceOmissions.runs'] = 1;
+      for (const lane of ['outcomes', 'discovery', 'social', 'launches', 'unpriced', 'general']) {
+        const reasons = (value as Record<string, unknown>)[lane];
+        if (!reasons || typeof reasons !== 'object') continue;
+        for (const reason of SNAPSHOT_OMISSION_REASONS) {
+          const count = (reasons as Record<string, unknown>)[reason];
+          if (typeof count === 'number' && Number.isFinite(count) && count >= 0) counters[`omission.${lane}.${reason}`] = count;
+        }
+      }
     }
   }
   const latestKey = `${RESEARCH_DIAGNOSTICS_PREFIX}${stage}.latest`;

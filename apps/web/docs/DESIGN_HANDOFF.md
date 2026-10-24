@@ -6,7 +6,7 @@ Branch `feat/web-design` from accepted `feat/web-phase1` (`35f792f`). No push. P
 
 ## Scope
 
-The design uses the two read-only references for composition/mood, with original Narra geometry, branding and approved copy. Product/FSM/API/proof/signature/wallet/backend behavior is unchanged. Presentation-only AccessView changes: Continue label, decorative SVGs/data attribute, and keyboard focus on the scrollable exact-message `<pre>`.
+The design uses the two read-only references for composition/mood, with original Narrax geometry, branding and approved copy. Product/FSM/API/proof/signature/wallet/backend behavior is unchanged. Presentation-only AccessView changes: Continue label, decorative SVGs/data attribute, and keyboard focus on the scrollable exact-message `<pre>`.
 
 - Specification, source-string inventory, omissions/conflicts, gap analysis, and every new EN/ID string: [DESIGN_SPEC_PHASE1.md](DESIGN_SPEC_PHASE1.md).
 - Five-run mobile baseline and after-fix evidence: [PERF_BASELINE.md](PERF_BASELINE.md), [perf/](perf/).
@@ -30,7 +30,7 @@ The design uses the two read-only references for composition/mood, with original
 
 ## Intentional deviations / omissions
 
-- Template brand names, logos, governance/newsletter copy, gold face artwork and outer device frame are absent from application source. Replaced by NARRA, approved research/safety copy, cyan/lime original mesh, and a full-width web canvas.
+- Template brand names, logos, governance/newsletter copy, gold face artwork and outer device frame are absent from application source. Replaced by NARRAX, approved research/safety copy, cyan/lime original mesh, and a full-width web canvas.
 - Email field / Get Notified replaced by the current access card and Continue sign-in callback; no new email/newsletter flow.
 - Actual status card is taller than a template email bar. Fixed 360/440 px anatomy with accessible internal scrolling accommodates exact proof and existing actions without vertical state jumps. Safety footer uses natural height; the arc does not cover its text.
 - Headline is the approved longer copy, not the template slogan. Instrument Serif italic styles “crowd” / “ramai”; JetBrains Mono labels connect both pages. Fonts are next/font Google, Latin, self-hosted at runtime.

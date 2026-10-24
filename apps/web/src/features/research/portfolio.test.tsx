@@ -81,7 +81,7 @@ it('downloads the audited export, confirms it, and saves nothing when it fails',
  const user=userEvent.setup();view(<PortfolioPage/>);
  await user.click(screen.getByRole('button',{name:messages.pf.exportCsv}));
  expect(fixture.download).toHaveBeenCalledWith('trades/export?format=csv');
- expect(saveFile).toHaveBeenCalledWith('narra-trades.csv','tradeId,side\r\nt1,BUY\r\n','text/csv;charset=utf-8');
+ expect(saveFile).toHaveBeenCalledWith('narrax-trades.csv','tradeId,side\r\nt1,BUY\r\n','text/csv;charset=utf-8');
  expect(await screen.findByText(messages.pf.exported.replace('{format}','CSV'))).toBeVisible();
  saveFile.mockClear();fixture.downloadError=true;
  await user.click(screen.getByRole('button',{name:messages.pf.exportJson}));

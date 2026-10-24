@@ -52,14 +52,14 @@ The frontend does not receive database URLs, backend secrets, signing keys or th
 | GitHub repository | `OWNER/REPO` | Replace with the actual private repository |
 | Backend package | `ghcr.io/owner/repo` | Lowercase registry path |
 | Frontend package | `ghcr.io/owner/repo-web` | Separate package; compiled for public web settings |
-| VPS deploy directory | `/srv/narra` | Same `DEPLOY_PATH` for both deployment paths |
+| VPS deploy directory | `/srv/narrax` | Same `DEPLOY_PATH` for both deployment paths |
 | VPS deploy account | `deploy` | Non-root SSH account with Docker access |
 | Web origin | `https://narrax.example` | Exact canonical origin, no path or trailing slash |
 | API origin | `https://api.narrax.example` | Exact browser-reachable API origin |
 | Application DB in production template | `narra` | Database/user chosen by current Compose example |
 | Existing owner's application DB | `narra_ent` | Existing local data; never a test target |
 
-Technical paths, database names and service/project names still use `narra`. Do not rename them to match branding without a separate migration/deployment plan.
+Visible branding is Narrax. Database names, Redis keys, npm workspace names (`@narra/*`), environment variables (`NARRA_*`) and Compose project names still use `narra`, because existing local data and tooling depend on them. Do not rename those to match branding without a separate migration plan.
 
 ## 3. Decisions and accounts to collect before starting
 
@@ -410,7 +410,7 @@ Origins must be bare HTTPS origins: no trailing slash, path, credentials or quer
 | --- | --- | --- |
 | `DEPLOY_HOST` | DNS host or IPv4; no scheme, port or shell metacharacters | Repository or both protected environments |
 | `DEPLOY_USER` | Non-root Linux username, e.g. deploy | Same visibility as above |
-| `DEPLOY_PATH` | Absolute path, e.g. `/srv/narra`; no spaces or shell metacharacters | Same visibility as above |
+| `DEPLOY_PATH` | Absolute path, e.g. `/srv/narrax`; no spaces or shell metacharacters | Same visibility as above |
 | `DEPLOY_SSH_KEY` | Dedicated CI private key, complete contents | GitHub encrypted secret only |
 | `DEPLOY_KNOWN_HOSTS` | Verified SSH known_hosts entry for the target | GitHub encrypted secret |
 
@@ -418,7 +418,7 @@ The corresponding CI public key belongs in the deploy user's authorized_keys on 
 
 ### 9.6 Other secrets and package access
 
-Backend application secrets stay in `/srv/narra/.env`, not GitHub build arguments and never NEXT_PUBLIC variables. The frontend job receives only its public build inputs and deploy credentials. The built-in GITHUB_TOKEN handles GHCR publishing and is sent over SSH on stdin for the host pull; it is not a permanent host credential.
+Backend application secrets stay in `/srv/narrax/.env`, not GitHub build arguments and never NEXT_PUBLIC variables. The frontend job receives only its public build inputs and deploy credentials. The built-in GITHUB_TOKEN handles GHCR publishing and is sent over SSH on stdin for the host pull; it is not a permanent host credential.
 
 The backend package is `ghcr.io/owner/repo`; web is `ghcr.io/owner/repo-web`. Registry paths are lowercase. Check package visibility and Actions access after first creation. Keep packages private and grant the repository the access required to publish/pull. For an organization, the existing gitleaks action may require `GITLEAKS_LICENSE`; CodeQL on private repositories may require a paid security entitlement. Review current plan settings rather than assuming a workflow name grants access.
 
@@ -471,8 +471,8 @@ sudo apt-get install -y ca-certificates curl gnupg openssh-server ufw util-linux
 ```bash
 sudo adduser --disabled-password --gecos '' deploy
 sudo install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
-sudo install -d -m 750 -o deploy -g deploy /srv/narra
-sudo install -d -m 750 -o deploy -g deploy /srv/narra/docker /srv/narra/.deploy
+sudo install -d -m 750 -o deploy -g deploy /srv/narrax
+sudo install -d -m 750 -o deploy -g deploy /srv/narrax/docker /srv/narrax/.deploy
 ```
 
 If the account/directory already exists, inspect and reuse it; do not recreate or recursively chown unrelated files. Add the operator public key and the dedicated CI public key to `/home/deploy/.ssh/authorized_keys`, one key per line. The file should be owned by deploy with mode 600. `restrict` key options can disable forwarding/PTY features, but do not apply a forced command that breaks the workflow's SSH/scp operations without an appropriate reviewed wrapper.
@@ -556,7 +556,7 @@ Verify that GitHub's secrets reference the same host spelling used in known_host
 ### 14.1 Required host layout
 
 ```text
-/srv/narra/
+/srv/narrax/
   .env                              backend runtime secrets/config, mode 600
   .env.web                          frontend public/server-only config, mode 600
   docker/docker-compose.prod.yml    operator-owned adapted backend base file
@@ -576,10 +576,10 @@ CI does not create or upload the real env files, or replace your backend base Co
 
 ### 14.2 Transfer templates, not credentials
 
-From the workstation, use the verified operator connection to transfer `.env.example`, `docker/web.env.example` and `docker/docker-compose.prod.example.yml` to clearly named template files under `/srv/narra`. Do not overwrite existing host files. On the VPS, review templates, create new files only if absent, and edit privately.
+From the workstation, use the verified operator connection to transfer `.env.example`, `docker/web.env.example` and `docker/docker-compose.prod.example.yml` to clearly named template files under `/srv/narrax`. Do not overwrite existing host files. On the VPS, review templates, create new files only if absent, and edit privately.
 
 ```bash
-cd /srv/narra
+cd /srv/narrax
 umask 077
 # Only for a new host after the templates have been transferred and reviewed:
 cp -n .env.template .env
@@ -651,7 +651,7 @@ The full root `.env.example` remains the source for defaults and optional execut
 
 ## 15. Provision frontend configuration and verify cross-system equality
 
-Edit `/srv/narra/.env.web` separately from `.env`. It must not contain backend credentials. The Compose definition passes an explicit allowlist, not the entire file as container env_file.
+Edit `/srv/narrax/.env.web` separately from `.env`. It must not contain backend credentials. The Compose definition passes an explicit allowlist, not the entire file as container env_file.
 
 ```dotenv
 NEXT_PUBLIC_SITE_URL=https://narrax.example
@@ -727,7 +727,7 @@ For an existing production database, identify the actual service, database name 
 For a genuinely fresh VPS/database, record that it is empty. If desired, start only postgres/redis from the reviewed backend base Compose file to verify storage/readiness before enabling deployment. That does not require building app services:
 
 ```bash
-cd /srv/narra
+cd /srv/narrax
 docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --wait postgres redis
 docker compose --env-file .env -f docker/docker-compose.prod.yml exec -T postgres pg_isready -U narra -d narra
 docker compose --env-file .env -f docker/docker-compose.prod.yml exec -T redis redis-cli ping
@@ -738,10 +738,10 @@ docker compose --env-file .env -f docker/docker-compose.prod.yml exec -T redis r
 Run in Bash on the VPS; redirecting a binary dump through older Windows PowerShell can corrupt it. Use an encrypted off-host copy in addition to this local file. The example path is outside the source/deploy context.
 
 ```bash
-sudo install -d -m 700 -o deploy -g deploy /srv/narra-backups
-cd /srv/narra
+sudo install -d -m 700 -o deploy -g deploy /srv/narrax-backups
+cd /srv/narrax
 umask 077
-backup="/srv/narra-backups/narra-$(date -u +%Y%m%dT%H%M%SZ).dump"
+backup="/srv/narrax-backups/narrax-$(date -u +%Y%m%dT%H%M%SZ).dump"
 docker compose --env-file .env -f docker/docker-compose.prod.yml exec -T postgres \
   pg_dump -U narra -d narra -Fc > "$backup"
 test -s "$backup"
@@ -773,7 +773,7 @@ Backend deploy order: pull image → start data services → run migrations → 
 After a successful recorded deploy:
 
 ```bash
-cd /srv/narra
+cd /srv/narrax
 export NARRA_IMAGE="$(cat .deploy/current_image)"
 docker compose --env-file .env -f docker/docker-compose.prod.yml -f docker/docker-compose.deploy.yml ps
 curl -fsS http://127.0.0.1:4000/health
@@ -803,7 +803,7 @@ Frontend order: validate settings → build actual-origin image → run exact-im
 ### 18.3 Check revision, routing and private boundaries
 
 ```bash
-cd /srv/narra
+cd /srv/narrax
 cat .deploy/web/current_release
 curl -fsS http://127.0.0.1:4010/api/health
 curl -fsS https://narrax.example/api/health
@@ -840,7 +840,7 @@ Saved SystemSetting auth values take precedence over environment fallback. If an
 Sign in once on the real web origin so the user exists. List users from the backend container:
 
 ```bash
-cd /srv/narra
+cd /srv/narrax
 export NARRA_IMAGE="$(cat .deploy/current_image)"
 docker compose --env-file .env -f docker/docker-compose.prod.yml -f docker/docker-compose.deploy.yml \
   exec -T api npm run make-admin -- --list
@@ -860,12 +860,12 @@ The browser refuses a wallet proof whose Domain string differs from `window.loca
 
 Schedule grant/challenge expiry every minute. This is an operator task, not a declared Compose service or a guaranteed pipeline scheduler in the current deployment. Inside the container, invoke the TS script directly with inherited env; do not use a package command that expects a mounted `.env` file.
 
-Example operator-created `/srv/narra/.deploy/expire-entitlements.sh`:
+Example operator-created `/srv/narrax/.deploy/expire-entitlements.sh`:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-cd /srv/narra
+cd /srv/narrax
 export NARRA_IMAGE="$(cat .deploy/current_image)"
 exec /usr/bin/docker compose --env-file .env \
   -f docker/docker-compose.prod.yml -f docker/docker-compose.deploy.yml \
@@ -875,7 +875,7 @@ exec /usr/bin/docker compose --env-file .env \
 Set owner/mode appropriately, test the script manually and confirm your Docker binary path. Then add to the deploy user's crontab:
 
 ```cron
-* * * * * /usr/bin/flock -n /srv/narra/.deploy/expiry.lock /bin/bash /srv/narra/.deploy/expire-entitlements.sh >> /srv/narra/.deploy/expiry.log 2>&1
+* * * * * /usr/bin/flock -n /srv/narrax/.deploy/expiry.lock /bin/bash /srv/narrax/.deploy/expire-entitlements.sh >> /srv/narrax/.deploy/expiry.log 2>&1
 ```
 
 Configure log rotation and monitor failures. Do not create competing expiry jobs on multiple hosts. During a planned restore/migration outage, pause or account for scheduled jobs so they do not write into the recovery target.
@@ -1151,7 +1151,7 @@ Do not log bearer tokens, SSH keys, bot-token URLs, complete database URLs, priv
 The deploy script automatically attempts a known previous image on failed application health. For a deliberate manual rollback, confirm the recorded previous image exists locally, confirm schema compatibility and use the production base plus deploy override. No registry pull is required during rollback.
 
 ```bash
-cd /srv/narra
+cd /srv/narrax
 export NARRA_IMAGE="$(cat .deploy/previous_image)"
 docker image inspect "$NARRA_IMAGE" >/dev/null
 docker compose --env-file .env -f docker/docker-compose.prod.yml -f docker/docker-compose.deploy.yml \
@@ -1166,7 +1166,7 @@ This does not undo DB migrations or restore old backend env values automatically
 Read `.deploy/web/previous_release` and use `.deploy/web/previous.env`, not today's changed public config. Both must still exist and the old image must be cached locally.
 
 ```bash
-cd /srv/narra
+cd /srv/narrax
 read -r NARRA_WEB_IMAGE WEB_REVISION < .deploy/web/previous_release
 export NARRA_WEB_IMAGE
 docker image inspect "$NARRA_WEB_IMAGE" >/dev/null

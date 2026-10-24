@@ -156,7 +156,7 @@ export function formatTelegramAlert(alert: TelegramAlertRow, token: TelegramToke
     o?.matchKind ? `Match ${o.matchKind}` : null,
   ].filter(Boolean).join(' · ');
   const parsed = splitTelegramBody(alert.body);
-  const lines = [`NARRA EARLY RADAR · ${profile}${tier}`];
+  const lines = [`NARRAX EARLY RADAR · ${profile}${tier}`];
   if (meta) lines.push(meta);
   lines.push('', alert.title);
   if (parsed.body) lines.push('', 'Why it surfaced', parsed.body);
@@ -172,7 +172,7 @@ export function formatTelegramAlert(alert: TelegramAlertRow, token: TelegramToke
     lines.push('', `Mint: ${token.mint}`);
     lines.push(`Chart: https://dexscreener.com/solana/${encodeURIComponent(token.mint)}`);
   }
-  lines.push('', `${alert.createdAt.toISOString()} · NARRA research feed`);
+  lines.push('', `${alert.createdAt.toISOString()} · NARRAX research feed`);
   lines.push('Research only. No trade was placed and no return is promised. Small unvalidated sample.');
   return truncate(lines.join('\n'), TELEGRAM_LIMITS.maxText);
 }

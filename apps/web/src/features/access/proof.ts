@@ -7,7 +7,7 @@ export const CLOCK_SKEW_MS=60000;
 export function validateChallenge(challenge:Challenge,origin:string,address:string,now=Date.now()) {
  const lines=challenge.message.split('\n');
  if(lines.filter(l=>l.startsWith('Domain:')).length!==1||!lines.includes(`Domain: ${origin}`))throw new ApiError('DOMAIN_MISMATCH');
- if(lines[0]!=='NARRA wallet link v1'||lines[1]!=='This proves wallet control for research access only. It authorizes no transaction.'||lines.length!==9||lines[4]!=='Chain: solana'||lines[5]!==`Address: ${address}`||!/^User: .+$/.test(lines[3]??'')||!/^Nonce: [a-f0-9]{64}$/.test(lines[6]??''))throw new ApiError('INVALID_INPUT');
+ if(lines[0]!=='NARRAX wallet link v1'||lines[1]!=='This proves wallet control for research access only. It authorizes no transaction.'||lines.length!==9||lines[4]!=='Chain: solana'||lines[5]!==`Address: ${address}`||!/^User: .+$/.test(lines[3]??'')||!/^Nonce: [a-f0-9]{64}$/.test(lines[6]??''))throw new ApiError('INVALID_INPUT');
  const expiry=Date.parse(challenge.expiresAt),issued=Date.parse(lines[7]?.slice('Issued at: '.length)??'');
  if(!lines[7]?.startsWith('Issued at: ')||lines[8]!==`Expires at: ${challenge.expiresAt}`||!Number.isFinite(issued)||issued>now+CLOCK_SKEW_MS||!Number.isFinite(expiry)||expiry+CLOCK_SKEW_MS<=now||expiry-issued>300000)throw new ApiError('CHALLENGE_UNAVAILABLE');
  return new TextEncoder().encode(challenge.message);

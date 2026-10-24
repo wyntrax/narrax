@@ -64,7 +64,7 @@ class FakeTransport implements TelegramTransport {
 describe('telegram Early Radar delivery', () => {
   it('formats a readable research card with the frozen outcome and a chart link', () => {
     const text = formatTelegramAlert(alert(), token);
-    expect(text).toContain('NARRA EARLY RADAR · TRENCHER · STRONG');
+    expect(text).toContain('NARRAX EARLY RADAR · TRENCHER · STRONG');
     expect(text).toContain('Score 70.3 · Route NARRATIVE · Match NAME');
     expect(text).toContain(alert().title);
     expect(text).toContain('Why it surfaced');
@@ -72,7 +72,7 @@ describe('telegram Early Radar delivery', () => {
     expect(text).not.toContain('Research signal only');
     expect(text).toContain(`Mint: ${token.mint}`);
     expect(text).toContain(`https://dexscreener.com/solana/${token.mint}`);
-    expect(text).toContain('NARRA research feed');
+    expect(text).toContain('NARRAX research feed');
     expect(text).toContain('Research only. No trade was placed');
   });
 

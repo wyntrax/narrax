@@ -131,7 +131,7 @@ function Trades(){
  const [state,setState]=useState<{format:'csv'|'json'}|'error'|null>(null),[busy,setBusy]=useState(false);
  const grab=async(format:'csv'|'json')=>{
   setBusy(true);setState(null);
-  try{const text=await download(`trades/export?format=${format}`);saveTextFile(`narra-trades.${format}`,text,format==='csv'?'text/csv;charset=utf-8':'application/json');setState({format});}
+  try{const text=await download(`trades/export?format=${format}`);saveTextFile(`narrax-trades.${format}`,text,format==='csv'?'text/csv;charset=utf-8':'application/json');setState({format});}
   catch{setState('error');}
   finally{setBusy(false);}
  };

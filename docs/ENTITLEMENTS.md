@@ -8,7 +8,7 @@ Research permissions are always enforced. This supersedes rollout/off/shadow ins
 
 ## Membership webhook setup
 
-On each Wyntrax membership, enable the existing Solana token gate and set the public HTTPS URL ending `/v1/integrations/wyntrax/events`. Use integration key `MEMBER`, `PRO` or `ELITE`. Wyntrax treats keys as opaque text; Narra interprets these three keys. Copy the creator signing secret to `WYNTRAX_WEBHOOK_SECRET`. During rotation, retain the old value in `WYNTRAX_WEBHOOK_SECRET_PREVIOUS` until in-flight requests complete. Secrets stay in deployment configuration.
+On each Wyntrax membership, enable the existing Solana token gate and set the public HTTPS URL ending `/v1/integrations/wyntrax/events`. Use integration key `MEMBER`, `PRO` or `ELITE`. Wyntrax treats keys as opaque text; Narrax interprets these three keys. Copy the creator signing secret to `WYNTRAX_WEBHOOK_SECRET`. During rotation, retain the old value in `WYNTRAX_WEBHOOK_SECRET_PREVIOUS` until in-flight requests complete. Secrets stay in deployment configuration.
 
 There is no production entitlement data. Apply `packages/database/prisma/migrations/0013_membership_webhooks` and regenerate Prisma. This migration discards obsolete aggregate membership state and receipts; previous applied migrations, including `0012_entitlement_age`, remain immutable. Obtain new secrets from Wyntrax and re-evaluate memberships after deploying both sides.
 

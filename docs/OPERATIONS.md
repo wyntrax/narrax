@@ -1,6 +1,6 @@
 # Operations runbook
 
-Everything here is about running NARRA safely. It reflects what is built today: there is no Executor, so nothing can send a transaction, and the controls below govern paper trading, semi-auto confirmations and logging.
+Everything here is about running NARRAX safely. It reflects what is built today: there is no Executor, so nothing can send a transaction, and the controls below govern paper trading, semi-auto confirmations and logging.
 
 ## The controls, from gentlest to strongest
 | Control | How | Effect | Audited |
