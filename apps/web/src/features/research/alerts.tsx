@@ -35,7 +35,7 @@ function AlertList({unread,min}:{unread:boolean;min:string}){
   {(markOne.isError||markAll.isError)&&<p role="alert" className="admin-bad">{t('alFailed')}</p>}
   {query.isError?<ResourceError error={query.error} retry={()=>void query.refetch()}/>:query.isPending?<Loading/>:!query.data.items.length?<Empty body={t('alEmpty')}/>:
     <ul className="alert-list">{query.data.items.map((a:AlertItem)=>{const Icon=a.priority==='CRITICAL'||a.priority==='IMPORTANT'?ShieldAlert:a.priority==='WATCH'?Eye:Info;return <li key={a.id} data-priority={a.priority} className={a.readAt?'alert-row':'alert-row alert-unread'}>
-     <div className="alert-card-heading"><span className="alert-icon"><Icon size={20} aria-hidden="true"/></span><span className="alert-priority">{t(`alPriority.${a.priority}`)}</span><small className="alert-kind">{a.kind.replaceAll('_',' ')}</small>{!a.readAt&&<span className="alert-unread-dot" aria-label={t('alUnreadOnly')}/>}</div>
+      <div className="alert-card-heading"><span className="alert-icon"><Icon size={20} aria-hidden="true"/></span><span className="alert-priority">{t(`alPriority.${a.priority}`)}</span><small className="alert-kind">{a.kind.replaceAll('_',' ')}</small>{!a.readAt&&<span className="alert-unread-dot" role="img" aria-label={t('alUnreadOnly')}/>}</div>
      {a.token&&<Link className="alert-token" href={`/app/tokens/${encodeURIComponent(a.token.mint)}`}><TokenIdentity {...a.token} compact/></Link>}
      <h2>{a.title}</h2><p>{a.body}</p>
      <div className="alert-foot"><time dateTime={a.createdAt}>{f.date(a.createdAt)}</time>{!a.readAt&&<button className="research-control" disabled={markOne.isPending} onClick={()=>markOne.mutate(a.id)}>{t('alMarkRead')}</button>}</div></li>;})}</ul>}

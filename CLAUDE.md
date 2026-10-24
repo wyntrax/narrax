@@ -142,6 +142,11 @@ Positions, orders and trades now exist, but only as paper (`simulated`) rows. No
 
 ## State (update this when you finish a phase)
 
+2026-10-24 PR #8 CI repair: unread-marker ARIA role corrected; eleven old E2E failures reconciled with current
+feature locks, limited preview endpoint, historical labels and coverage copy. Thirteen targeted browser cases,
+alert unit regression, types and lint passed. All 175 browser scenarios exercised across split runs, but two local
+timing failures needed targeted reruns; do not claim a single clean full-suite pass. Remote CI required before merge.
+
 2026-10-24 SOL reference-price fix: DEX Screener's WSOL pool omitted market cap/FDV, causing SOL/USD refresh to fail.
 An optional price-reference method now reads that price while retaining liquidity/volume and mint/chain validation;
 full token snapshot gates and 150/18 budgets are unchanged. Live 02:00 UTC cycle wrote 89 prices with zero errors;
@@ -314,6 +319,9 @@ Verification status, honestly:
 Not built: signing and sending (B5b onward), the circuit breakers, the wallet flows (create, delegate, withdraw, exit all), wallet-leader and OG accuracy analysis, real narrative providers, creator metrics, notification retention, admin dashboards, deployment, observability, and the whole frontend. The full list is `docs/CONTINUATION.md` section 3.
 
 ## Next
+
+PR #8 gate: rerun remote CI on the browser repair commit and resolve any remaining failures before merging main.
+Both deploy variables must remain false. Docker and backend/migration checks passed on the preceding PR revision.
 
 SOL recovery follow-up (2026-10-24): owner-authenticated evidence-panel review, followed by 24–48 hours of
 uninterrupted collection and prospective evaluation. Session-bound API/web require restart after a harness restart.

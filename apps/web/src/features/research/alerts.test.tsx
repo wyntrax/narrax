@@ -12,6 +12,7 @@ it('shows readable priority, timestamp and an actionable unread notification', a
   expect(screen.getByRole('heading', { name: 'Review token risk' }).closest('li')).toHaveAttribute('data-priority', 'CRITICAL');
   expect(screen.getByText('<script>not executable</script>')).toBeVisible();
   expect(document.querySelector('time')).toHaveAttribute('datetime', '2026-10-18T00:00:00Z');
+  expect(screen.getByRole('img', { name: messages.alUnreadOnly })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Mark read' }));
   await waitFor(() => expect(send).toHaveBeenCalledWith('alerts/n1/read', expect.anything(), 'POST'));
 });
