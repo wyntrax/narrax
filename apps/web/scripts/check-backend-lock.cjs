@@ -1,0 +1,11 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- Standalone Node diagnostic. */
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');
+const root=path.resolve(__dirname,'../../..');
+const before=JSON.parse(cp.execFileSync('git',['show','9160bc9:package-lock.json'],{cwd:root,encoding:'utf8',maxBuffer:8*1024*1024}));
+const after=JSON.parse(fs.readFileSync(path.join(root,'package-lock.json'),'utf8'));
+function resolve(lock,from,name){let dir=from;for(;;){const key=(dir?dir+'/':'')+'node_modules/'+name,entry=lock.packages[key];if(entry)return entry.link?entry.resolved:key;if(!dir)return null;dir=path.posix.dirname(dir);if(dir==='.')dir='';}}
+function identity(lock,key){const entry=lock.packages[key];return (entry.name||key.split('node_modules/').pop()||'root')+'@'+(entry.version||'workspace');}
+function edges(lock,start){const seen=new Set(),result=new Set(),queue=[start];while(queue.length){const key=queue.shift();if(seen.has(key))continue;seen.add(key);const entry=lock.packages[key];if(!entry)continue;const deps={...entry.dependencies,...entry.optionalDependencies,...entry.peerDependencies,...(key===start?entry.devDependencies:{})};for(const name of Object.keys(deps)){const target=resolve(lock,key,name);if(target){result.add(identity(lock,key)+' -> '+name+' -> '+identity(lock,target));queue.push(target);}else if(!entry.optionalDependencies?.[name]&&!entry.peerDependenciesMeta?.[name]?.optional)result.add(identity(lock,key)+' -> '+name+' -> MISSING');}}return result;}
+const workspaces=Object.keys(before.packages).filter(key=>!key.includes('node_modules'));
+const changed=[],newTooling=[];for(const workspace of workspaces){const old=edges(before,workspace),current=edges(after,workspace);for(const value of old)if(!current.has(value))changed.push({workspace:workspace||'root tooling',removed:value});for(const value of current)if(!old.has(value)){const prefix=value.slice(0,value.lastIndexOf(' -> '));if(workspace===''&&![...old].some(edge=>edge.startsWith(prefix+' -> ')))newTooling.push(value);else changed.push({workspace:workspace||'root tooling',added:value});}}
+console.log(JSON.stringify({baseline:'9160bc9',workspaces:workspaces.length,changedResolutionEdges:changed,newOptionalToolingEdges:newTooling.length},null,2));if(changed.length)process.exitCode=1;

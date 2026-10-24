@@ -1,0 +1,77 @@
+# Security checks that are slower or noisier than CI, so they run weekly and when dependencies, workflows or Docker files change.
+# They are not part of the "CI passed" gate. A scheduled failure is the signal to look.
+name: Security
+
+on:
+  schedule:
+    - cron: '23 4 * * 1'
+  pull_request:
+    paths:
+      - 'package-lock.json'
+      - '**/package.json'
+      - 'docker/**'
+      - '.github/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Dependency audit (production dependencies)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      # Advisories in transitive packages often have no fix yet, so on pull requests this reports and does not block.
+      - name: npm audit
+        id: audit
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
+      - name: Report
+        if: steps.audit.outcome == 'failure'
+        run: echo "::warning::npm audit found high or critical advisories in production dependencies. See the log above."
+      - name: Fail the scheduled run so someone looks
+        if: steps.audit.outcome == 'failure' && github.event_name == 'schedule'
+        run: exit 1
+
+  secrets:
+    name: Secret scan (gitleaks)
+    # Set the repository variable GITLEAKS_ENABLED to 'false' to turn this off. Organisation-owned repositories need a
+    # GITLEAKS_LICENSE secret for this action; personal repositories do not.
+    if: ${{ vars.GITLEAKS_ENABLED != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  codeql:
+    name: CodeQL (JavaScript and TypeScript)
+    # Free for public repositories. Private repositories need GitHub Advanced Security. Set the variable ENABLE_CODEQL to 'true' to run it.
+    if: ${{ vars.ENABLE_CODEQL == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@v3

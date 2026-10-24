@@ -7,6 +7,7 @@ import { createPrivyVerifier } from './auth';
 import { csvNum, csvText } from './me';
 import { likeEscape } from './paging';
 import { SOL_PRICE_KEY } from '@narra/worker-pipeline';
+import {seedTestPro,clearTestPro} from './test-membership';
 
 const url = process.env.DATABASE_URL ?? 'postgresql://narra:narra@localhost:5432/narra';
 async function dbUp() {
@@ -75,10 +76,12 @@ describe.skipIf(!up)('B7 API routes (needs Postgres)', () => {
     });
     aliceId = (await db.user.create({ data: { privyUserId: alice } })).id;
     bobId = (await db.user.create({ data: { privyUserId: bob } })).id;
+    await seedTestPro(db,aliceId);await seedTestPro(db,bobId);
     solBackup = await db.systemSetting.findUnique({ where: { key: SOL_PRICE_KEY } });
   });
 
   afterAll(async () => {
+    await clearTestPro(db,[aliceId,bobId]);
     const uids = [aliceId, bobId];
     await db.notification.deleteMany({ where: { OR: [{ userId: { in: uids } }, { alertId: { in: createdAlerts } }] } });
     await db.alert.deleteMany({ where: { id: { in: createdAlerts } } });

@@ -102,6 +102,12 @@ export class SolanaRpc {
     return r.value.reduce((sum, a) => sum + BigInt(a.account.data.parsed.info.tokenAmount.amount), 0n);
   }
 
+  /** Total current token supply in raw units (no floating-point rounding). */
+  async getTokenSupplyRaw(mint: string): Promise<bigint> {
+    const result = await this.call('getTokenSupply', [mint, { commitment: 'confirmed' }], z.object({ value: z.object({ amount: z.string().regex(/^\d+$/) }) }));
+    return BigInt(result.value.amount);
+  }
+
   /** Signatures that touched an address, newest first. Page backwards with `before`. */
   async getSignaturesForAddress(address: string, opts: { limit?: number; before?: string } = {}): Promise<SignatureInfo[]> {
     const r = await this.call('getSignaturesForAddress', [address, { limit: opts.limit ?? 1000, ...(opts.before ? { before: opts.before } : {}), commitment: 'confirmed' }], SignaturesResult);
@@ -110,7 +116,9 @@ export class SolanaRpc {
 
   /** A transaction with instructions and token balances decoded, or null if the node does not have it. */
   async getParsedTransaction(signature: string): Promise<ParsedTx | null> {
-    return this.call('getTransaction', [signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }], ParsedTxResult);
+    // 1, not 0: Helius now returns version-1 transactions. A lower ceiling makes the node reject those outright
+    // ("Transaction version (1) is not supported"), which silently drops the token from buyer scanning.
+    return this.call('getTransaction', [signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 1, commitment: 'confirmed' }], ParsedTxResult);
   }
 
   /** Several accounts at once, in the order asked. A null entry means the account does not exist. */

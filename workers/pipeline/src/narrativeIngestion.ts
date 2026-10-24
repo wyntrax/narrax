@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@narra/database';
 import {
-  computeNarrativeMetrics, normalizeHandle, normalizeText, normalizeTopic, sha256, simhash64,
+  computeNarrativeMetrics, extractTokenRefs, normalizeHandle, normalizeText, normalizeTopic, sha256, simhash64,
   type MentionPoint, type NarrativeProvider, type RawMention,
 } from '@narra/narrative';
 import type { NarrativeStage } from '@narra/shared';
@@ -10,6 +10,7 @@ export interface IngestOptions {
   lookbackHours?: number;
   /** Hard cap per topic per run, so one noisy topic cannot flood the database. */
   maxMentionsPerTopic?: number;
+  onProviderError?: (provider: string, error: unknown) => void;
 }
 
 export interface IngestSummary {
@@ -27,13 +28,13 @@ const ALERT_FOR: Partial<Record<NarrativeStage, { kind: string; priority: 'INFO'
   DECAYING: { kind: 'NARRATIVE_DECAY', priority: 'WATCH', verb: 'is losing momentum' },
 };
 
-/** Keeps only what the schema stores. The raw text is hashed here and dropped. */
+/** Keeps only what the schema stores. The raw text is hashed here and dropped; only extracted token references (mint or $TICKER) survive. */
 function toRow(m: RawMention) {
   const norm = normalizeText(m.text);
   return {
     externalId: m.externalId.slice(0, 128), platform: m.platform.slice(0, 32), handle: normalizeHandle(m.creatorHandle),
     creatorAgeDays: m.creatorAgeDays != null && Number.isFinite(m.creatorAgeDays) ? Math.max(0, Math.round(m.creatorAgeDays)) : null,
-    textHash: sha256(norm), simhash: simhash64(norm), engagement: Math.max(0, Math.round(Number.isFinite(m.engagement) ? m.engagement : 0)), at: m.at,
+    textHash: sha256(norm), simhash: simhash64(norm), refs: extractTokenRefs(m.text), engagement: Math.max(0, Math.round(Number.isFinite(m.engagement) ? m.engagement : 0)), at: m.at,
   };
 }
 
@@ -51,22 +52,27 @@ export async function ingestNarratives(db: PrismaClient, providers: NarrativePro
 
   for (const provider of providers) {
     let topics;
-    try { topics = await provider.getTrendingTopics(); } catch { summary.providerErrors++; continue; }
+    try { topics = await provider.getTrendingTopics(); } catch (error) { summary.providerErrors++; opts.onProviderError?.(provider.name, error); continue; }
     for (const topic of topics) {
       const norm = normalizeTopic(topic.name);
       if (!norm) continue;
       summary.topicsSeen++;
       let raw: RawMention[];
-      try { raw = await provider.getTopicActivity(topic, since); } catch { summary.providerErrors++; continue; }
+      try { raw = await provider.getTopicActivity(topic, since); } catch (error) { summary.providerErrors++; opts.onProviderError?.(provider.name, error); continue; }
 
-      const narrative = await db.narrative.upsert({ where: { slug: norm.slug }, create: { name: norm.name, slug: norm.slug, firstDetectedAt: now }, update: {}, select: { id: true } });
+      const rows = raw.filter((m) => m.at >= since && m.at <= now).slice(0, cap).map(toRow).filter((r) => r.handle && r.externalId);
+      // A configured search with no observations is not evidence that a new narrative exists.
+      // Existing narratives still age/decay when a successful fetch returns no recent activity.
+      const narrative = rows.length
+        ? await db.narrative.upsert({ where: { slug: norm.slug }, create: { name: norm.name, slug: norm.slug, firstDetectedAt: now }, update: {}, select: { id: true } })
+        : await db.narrative.findUnique({ where: { slug: norm.slug }, select: { id: true } });
+      if (!narrative) continue;
       touched.set(norm.slug, narrative.id);
       await db.narrativeSource.upsert({
         where: { narrativeId_provider: { narrativeId: narrative.id, provider: provider.name } },
         create: { narrativeId: narrative.id, provider: provider.name, externalRef: topic.externalId.slice(0, 128) }, update: {},
       });
 
-      const rows = raw.filter((m) => m.at <= now).slice(0, cap).map(toRow).filter((r) => r.handle && r.externalId);
       if (!rows.length) continue;
 
       const handles = [...new Set(rows.map((r) => `${r.platform}\u0000${r.handle}`))].map((k) => { const [platform, handle] = k.split('\u0000') as [string, string]; return { platform, handle }; });
@@ -79,6 +85,9 @@ export async function ingestNarratives(db: PrismaClient, providers: NarrativePro
         skipDuplicates: true, // the same post fetched again is ignored
       });
       summary.mentionsStored += res.count;
+      // Token references found in the same posts (mint addresses, $TICKERS). Stored without the text, so the social-token scan can count them.
+      const refRows = rows.flatMap((r) => r.refs.map((ref) => ({ refKind: ref.kind, ref: ref.value, platform: r.platform, externalId: r.externalId, creatorId: creatorId.get(`${r.platform}\u0000${r.handle}`) ?? null, textHash: r.textHash, simhash: r.simhash, creatorAgeDays: r.creatorAgeDays, engagement: r.engagement, at: r.at })));
+      if (refRows.length) await db.tokenMention.createMany({ data: refRows, skipDuplicates: true });
     }
   }
 

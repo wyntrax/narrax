@@ -1,67 +1,373 @@
-# Runs on every push and pull request. It needs a real Postgres and Redis, because the integration tests are the ones that matter,
-# and it fails if ANY test is skipped. Written without being able to run GitHub Actions: the first run may need small fixes.
-name: ci
+# Continuous integration for NARRA (API, workers, executor, shared packages, web app).
+#
+# Called two ways: on every pull request, and by release.yml on pushes to main (so main is tested exactly once, and an
+# image is only published after these jobs pass). Branch protection should require the single "CI passed" check at the end.
+#
+# What this does NOT do: run the Playwright visual-baseline suite (its 32 baselines were captured on Windows), Lighthouse,
+# or the production Playwright config. Those stay manual. See docs/CI_CD.md.
+name: CI
 
 on:
-  push:
   pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+env:
+  NODE_VERSION: '22'
+  NEXT_TELEMETRY_DISABLED: '1'
+  # Not a real database. It only lets `prisma generate` read the schema, the same trick docker/Dockerfile uses.
+  GENERATE_DATABASE_URL: postgresql://build:build@localhost:5432/build
 
 jobs:
-  test:
+  # ---------------------------------------------------------------------------------------------------------------
+  static:
+    name: Types, lint and repo hygiene
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cheap guard for the mistakes that are expensive to undo: a committed secret file or a data export.
+      - name: No secrets, key files or data exports are tracked
+        run: |
+          bad="$(git ls-files | grep -E '(^|/)\.env($|\.)|\.pem$|\.p12$|(^|/)id_(rsa|ed25519)$|(^|/)backups/|(^|/)dump\.rdb$|\.zip$' | grep -vE '(^|/)\.env\.example$' || true)"
+          if [ -n "$bad" ]; then echo "::error::Tracked files that must not be in git:"; echo "$bad"; exit 1; fi
+
+      # Runs scripts/deploy-remote.sh against fake docker and curl programs: success, rollback, failed migration, refused signing key.
+      - name: Deploy script logic
+        run: |
+          bash scripts/deploy-remote.test.sh
+          bash scripts/deploy-web-remote.test.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Generate the Prisma client (the workers' types depend on it)
+        run: npx prisma generate --schema packages/database/prisma/schema.prisma
+        env:
+          DATABASE_URL: ${{ env.GENERATE_DATABASE_URL }}
+      - name: Typecheck (repository and web)
+        run: npm run typecheck
+      - name: Web lint
+        run: npm run lint -w @narra/web
+
+  # ---------------------------------------------------------------------------------------------------------------
+  backend:
+    name: Backend tests and migrations (Postgres 16, Redis 7)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16
         env:
           POSTGRES_USER: narra
           POSTGRES_PASSWORD: narra
-          POSTGRES_DB: narra
-        ports: ["5432:5432"]
+          POSTGRES_DB: narra_ci_test
+        ports: ['5432:5432']
         options: >-
-          --health-cmd "pg_isready -U narra -d narra" --health-interval 5s --health-timeout 3s --health-retries 20
+          --health-cmd "pg_isready -U narra -d narra_ci_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
       redis:
         image: redis:7
-        ports: ["6379:6379"]
+        ports: ['6379:6379']
         options: >-
-          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
     env:
-      DATABASE_URL: postgresql://narra:narra@localhost:5432/narra
-      REDIS_URL: redis://localhost:6379
+      # The test-isolation guard (scripts/test-isolation.ts) only lets tests touch a database whose name matches
+      # NARRA_TEST_DATABASE_NAME and a Redis named in NARRA_TEST_REDIS_URL. REDIS_URL is ignored on purpose.
+      NARRA_TEST_DATABASE_NAME: narra_ci_test
+      DATABASE_URL: postgresql://narra:narra@localhost:5432/narra_ci_test
+      NARRA_TEST_REDIS_URL: redis://127.0.0.1:6379/15
+      SHADOW_DATABASE_URL: postgresql://narra:narra@localhost:5432/narra_ci_shadow
       PGPASSWORD: narra
-      PRISMA_SCHEMA: packages/database/prisma/schema.prisma
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - run: npm ci
-      - run: npx prisma generate --schema "$PRISMA_SCHEMA"
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Apply every migration to the test database
-        run: npx prisma migrate deploy --schema "$PRISMA_SCHEMA"
-      - name: Migrations match the schema (no drift)
+      - run: npm ci --no-audit --no-fund
+
+      - name: Create the shadow database used by the migration diff
+        run: psql -h localhost -U narra -d postgres -v ON_ERROR_STOP=1 -c 'create database narra_ci_shadow'
+
+      - name: Generate the Prisma client
+        run: npx prisma generate --schema packages/database/prisma/schema.prisma
+
+      - name: Apply every migration to an empty database
+        run: npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
+
+      # Exit code 2 means the schema file and the migration folders disagree (someone edited the schema without a migration,
+      # or hand-edited a migration). The repo notes this check was never confirmed for some hand-written migrations.
+      - name: Migrations match the Prisma schema (empty diff)
         run: |
-          psql -h localhost -U narra -d postgres -c 'CREATE DATABASE shadow'
           npx prisma migrate diff \
             --from-migrations packages/database/prisma/migrations \
-            --to-schema-datamodel "$PRISMA_SCHEMA" \
-            --shadow-database-url postgresql://narra:narra@localhost:5432/shadow \
+            --to-schema-datamodel packages/database/prisma/schema.prisma \
+            --shadow-database-url "$SHADOW_DATABASE_URL" \
             --exit-code
-      - name: Tests
-        run: npx vitest run --reporter=json --outputFile=vitest-results.json
-      - name: No failures and no skips
+
+      - name: Full backend suite, then fail if anything was skipped
+        run: |
+          npx vitest run --reporter=default --reporter=json --outputFile.json=vitest-results.json
+          node scripts/check-test-results.mjs vitest-results.json
+
+      - name: Keep the results
         if: always()
-        run: node scripts/check-test-results.mjs vitest-results.json
-      - name: Dependency audit (information only)
-        continue-on-error: true
-        run: npm audit --omit=dev --audit-level=high
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-vitest-results
+          path: vitest-results.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------------------------------------------
+  web:
+    name: Web unit tests and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_API_URL: http://localhost:44099
+      NEXT_PUBLIC_SITE_URL: https://narrax.example
+      NEXT_PUBLIC_PRIVY_APP_ID: ''
+      NEXT_PUBLIC_WYNTRAX_URL: https://wyntrax.example/claim
+      NARRA_SEO_INDEXABLE: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Generate the Prisma client
+        run: npx prisma generate --schema packages/database/prisma/schema.prisma
+        env:
+          DATABASE_URL: ${{ env.GENERATE_DATABASE_URL }}
+      - name: Web unit and component tests
+        run: npm run test -w @narra/web -- --maxWorkers=1 --minWorkers=1
+
+      # NARRA_WEB_TEST_AUTH must NOT be set here: the production build rejects any value, and then scans the output for
+      # test-auth leaks (apps/web/scripts/check-production-auth.cjs). The public Privy id stays blank, as in the repo's
+      # own production check. These NEXT_PUBLIC values are inlined at build time, so this is a check, not a deployable build.
+      - name: Production build and auth-leak scan
+        run: npm run build -w @narra/web
+
+      - name: Install Chromium for production SEO checks
+        run: npx -w @narra/web playwright install --with-deps chromium
+
+      - name: Start the built web server (no fixture authentication or backend)
+        run: |
+          cp -R apps/web/public apps/web/.next/standalone/apps/web/public
+          cp -R apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+          HOSTNAME=0.0.0.0 PORT=4010 nohup node apps/web/.next/standalone/apps/web/server.js > web-production.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://localhost:4010/research; then exit 0; fi
+            sleep 2
+          done
+          echo "::error::The production web server did not start"; tail -n 60 web-production.log; exit 1
+
+      - name: Production SEO, social previews, indexing boundaries and accessibility
+        run: npx -w @narra/web playwright test e2e/seo.spec.ts --workers=1
+
+      - name: Keep production SEO failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-seo-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+            web-production.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # Separate from `backend` on purpose: the backend suite has a test that briefly binds port 4010, and the fixture web
+  # server below uses it. Never run them in the same job or at the same time.
+  e2e:
+    name: Browser tests (Playwright, fixture auth)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NARRA_WEB_TEST_AUTH: '1'
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_SITE_URL: http://localhost:4010
+      NEXT_PUBLIC_PRIVY_APP_ID: fixture-app
+      NEXT_PUBLIC_WYNTRAX_URL: https://wyntrax.example/claim
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Install the browser
+        run: npx -w @narra/web playwright install --with-deps chromium
+
+      - name: Start the fixture web server (compile-time test auth adapter, output in .next-e2e, never deployed)
+        run: |
+          nohup npm run dev -w @narra/web > web-dev.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -fsS -o /dev/null http://localhost:4010/; then echo "web server is up after ${i} tries"; exit 0; fi
+            sleep 2
+          done
+          echo "::error::The fixture web server did not start"; tail -n 60 web-dev.log; exit 1
+
+      # The repo's own notes say to warm routes first: Next compiles on demand and a cold route can exceed a test timeout.
+      - name: Warm the main routes
+        run: |
+          for p in / /en /id /en/early-access /en/app; do curl -s -o /dev/null --max-time 90 "http://localhost:4010$p" || true; done
+
+      - name: Run the browser suite
+        run: npm run e2e -w @narra/web
+
+      - name: Keep the report and server log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+            web-dev.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # docker/Dockerfile says it was never built. This builds it for real, checks what ended up inside, and runs the exact
+  # production migration command from the image against a throwaway Postgres.
+  docker:
+    name: Docker image builds and migrates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: narra
+          POSTGRES_PASSWORD: narra
+          POSTGRES_DB: narra_ci_image
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U narra -d narra_ci_image"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the image (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          push: false
+          tags: narra:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Nothing secret or exported is baked into the image
+        run: |
+          docker run --rm --entrypoint sh narra:ci -c '
+            for p in /app/.git /app/backups /app/.github /app/local-api.ps1 /app/local-web.ps1; do
+              if [ -e "$p" ]; then echo "::error::$p is inside the image"; exit 1; fi
+            done
+            find_secret() {
+              find /app -path "*/node_modules/*" -prune -o -type f \( "$@" \) -print -quit
+            }
+            envfile="$(find_secret -name ".env" -o -name ".env.*" ! -name ".env.example")"
+            [ -z "$envfile" ] || { echo "::error::$envfile is inside the image"; exit 1; }
+            keyfile="$(find_secret -name "*.pem" -o -name "*.key" -o -name "*.p12" -o -name "*.pfx")"
+            [ -z "$keyfile" ] || { echo "::error::$keyfile is inside the image"; exit 1; }
+            exit 0'
+
+      - name: The image runs as a non-root user with the migration tooling present
+        run: |
+          test "$(docker run --rm --entrypoint id narra:ci -u)" != "0"
+          docker run --rm --entrypoint npx narra:ci prisma --version
+
+      - name: Production migration command works from the image
+        run: |
+          docker run --rm --network host \
+            -e DATABASE_URL=postgresql://narra:narra@localhost:5432/narra_ci_image \
+            narra:ci npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
+
+      # The release deploys with docker-compose.deploy.yml layered over the production compose file. Check that the layering
+      # parses and does what it claims: pins the image, and blanks the secrets the executor refuses to start with.
+      - name: Deploy compose override merges correctly
+        run: |
+          cp .env.example .env
+          NARRA_IMAGE=ghcr.io/example/narra@sha256:0000 POSTGRES_PASSWORD=ci \
+            docker compose -f docker/docker-compose.prod.example.yml -f docker/docker-compose.deploy.yml config --format json > merged.json
+          jq -e '.services.api.image == "ghcr.io/example/narra@sha256:0000" and .services.executor.image == .services.api.image and .services.migrate.image == .services.api.image' merged.json
+          jq -e '.services.executor.environment | (.PRIVY_APP_SECRET // "") == "" and (.EXECUTOR_SIGNING_KEY // "") == "" and (.WALLET_PRIVATE_KEY // "") == ""' merged.json
+          jq -e '.services.api.environment.DATABASE_URL | startswith("postgresql://narra:")' merged.json
+          rm -f .env merged.json
+
+  web-docker:
+    name: Standalone frontend image and isolated runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_SITE_URL: https://narrax.example
+      NEXT_PUBLIC_API_URL: https://api.narrax.example
+      NEXT_PUBLIC_PRIVY_APP_ID: ci-public-app
+      NEXT_PUBLIC_WYNTRAX_URL: ''
+      NARRA_SEO_INDEXABLE: 'false'
+      WEB_REVISION: ${{ github.sha }}
+      WEB_SMOKE_IMAGE: narrax-web:ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.web
+          load: true
+          tags: narrax-web:ci
+          build-args: |
+            NEXT_PUBLIC_SITE_URL=${{ env.NEXT_PUBLIC_SITE_URL }}
+            NEXT_PUBLIC_API_URL=${{ env.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_PRIVY_APP_ID=${{ env.NEXT_PUBLIC_PRIVY_APP_ID }}
+            NEXT_PUBLIC_WYNTRAX_URL=${{ env.NEXT_PUBLIC_WYNTRAX_URL }}
+            NARRA_SEO_INDEXABLE=${{ env.NARRA_SEO_INDEXABLE }}
+            WEB_REVISION=${{ env.WEB_REVISION }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+      - name: Run exact-image non-root/read-only smoke checks
+        run: bash scripts/check-web-image.sh
+      - name: Validate independent frontend Compose project and environment allowlist
+        run: |
+          cp docker/web.env.example .env.web
+          NARRA_WEB_IMAGE=ghcr.io/example/narra-web@sha256:0000 \
+            docker compose --env-file .env.web -f docker/docker-compose.web.yml config --format json > web-compose.json
+          jq -e '.name == "narrax-web" and (.services | keys) == ["web"]' web-compose.json
+          jq -e '.services.web.read_only == true and .services.web.ports[0].host_ip == "127.0.0.1"' web-compose.json
+          jq -e '.services.web.environment | (has("DATABASE_URL") or has("PRIVY_APP_SECRET") or has("NARRA_WEB_TEST_AUTH")) | not' web-compose.json
+          rm -f .env.web web-compose.json
+
+  # ---------------------------------------------------------------------------------------------------------------
+  # One stable name for branch protection. It fails if any required job failed, was cancelled or was skipped.
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [static, backend, web, e2e, docker, web-docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job must have succeeded
+        run: |
+          echo '${{ toJSON(needs) }}'
+          if [ '${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}' = 'true' ]; then
+            echo "::error::At least one CI job did not succeed"; exit 1
+          fi

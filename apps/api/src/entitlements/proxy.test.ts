@@ -4,8 +4,9 @@ import { createPrisma } from '@narra/database';
 import { buildApp } from '../app';
 import { VECTOR_BODY, VECTOR_SECRET, VECTOR_TIME } from './fixtures.test-support';
 
+import { assertTestDatabase } from '../../../../scripts/test-database';
 const target = new URL(process.env.DATABASE_URL ?? 'invalid:');
-if (target.hostname !== 'localhost' || target.port !== '5432' || target.pathname !== '/narra_ent') throw Error('Scratch only');
+assertTestDatabase(target);
 const db = createPrisma(target.toString()), tag = `proxy-${randomUUID()}`;
 let sequence = 0;
 const now = () => new Date(Number(VECTOR_TIME) * 1000);

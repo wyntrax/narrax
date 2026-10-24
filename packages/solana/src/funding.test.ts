@@ -63,7 +63,7 @@ describe('SolanaRpc history methods', () => {
     let sent: { method: string; params: unknown[] } | undefined;
     expect(await rpcWith(null, (b) => { sent = b; }).getParsedTransaction('sig')).toBeNull();
     expect(sent!.method).toBe('getTransaction');
-    expect(sent!.params[1]).toMatchObject({ encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 });
+    expect(sent!.params[1]).toMatchObject({ encoding: 'jsonParsed', maxSupportedTransactionVersion: 1 });
     const parsed = await rpcWith(tx([transfer(F1, W, 1e9)])).getParsedTransaction('sig');
     expect(parsed && inboundSolTransfers(parsed, W)).toHaveLength(1);
   });

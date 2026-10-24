@@ -1,0 +1,174 @@
+{
+  "runs": [
+    {
+      "page": "/",
+      "run": 1,
+      "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+      "scores": {
+        "performance": 74,
+        "accessibility": 100,
+        "best-practices": 100,
+        "seo": 91
+      },
+      "lcpMs": 3360.218,
+      "cls": 0.06427617601172349,
+      "tbtMs": 603,
+      "scriptTransferBytes": 169959
+    },
+    {
+      "page": "/",
+      "run": 2,
+      "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+      "scores": {
+        "performance": 73,
+        "accessibility": 100,
+        "best-practices": 100,
+        "seo": 91
+      },
+      "lcpMs": 3381.07,
+      "cls": 0.04233771997652631,
+      "tbtMs": 701,
+      "scriptTransferBytes": 169959
+    },
+    {
+      "page": "/",
+      "run": 3,
+      "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+      "scores": {
+        "performance": 79,
+        "accessibility": 100,
+        "best-practices": 100,
+        "seo": 91
+      },
+      "lcpMs": 3321.5797,
+      "cls": 0.06427617601172349,
+      "tbtMs": 459.5,
+      "scriptTransferBytes": 169959
+    },
+    {
+      "page": "/",
+      "run": 4,
+      "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+      "scores": {
+        "performance": 88,
+        "accessibility": 100,
+        "best-practices": 100,
+        "seo": 91
+      },
+      "lcpMs": 3011.694,
+      "cls": 0.06427617601172349,
+      "tbtMs": 240,
+      "scriptTransferBytes": 169959
+    },
+    {
+      "page": "/",
+      "run": 5,
+      "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+      "scores": {
+        "performance": 79,
+        "accessibility": 100,
+        "best-practices": 100,
+        "seo": 91
+      },
+      "lcpMs": 3183,
+      "cls": 0.06427617601172349,
+      "tbtMs": 504,
+      "scriptTransferBytes": 169959
+    },
+    {
+      "page": "/early-access",
+      "run": 1,
+      "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+      "scores": {
+        "performance": 77,
+        "accessibility": 100,
+        "best-practices": 100,
+        "seo": 54
+      },
+      "lcpMs": 3733.7596,
+      "cls": 0.005517463964357886,
+      "tbtMs": 430,
+      "scriptTransferBytes": 206717
+    },
+    {
+      "page": "/early-access",
+      "run": 2,
+      "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+      "scores": {
+        "performance": 81,
+        "accessibility": 100,
+        "best-practices": 100,
+        "seo": 54
+      },
+      "lcpMs": 3645.735800000001,
+      "cls": 0.01023875825241428,
+      "tbtMs": 331,
+      "scriptTransferBytes": 206717
+    },
+    {
+      "page": "/early-access",
+      "run": 3,
+      "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+      "scores": {
+        "performance": 85,
+        "accessibility": 100,
+        "best-practices": 100,
+        "seo": 54
+      },
+      "lcpMs": 2502.8477999999996,
+      "cls": 0.00409994460214635,
+      "tbtMs": 456,
+      "scriptTransferBytes": 206717
+    },
+    {
+      "page": "/early-access",
+      "run": 4,
+      "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+      "scores": {
+        "performance": 77,
+        "accessibility": 100,
+        "best-practices": 100,
+        "seo": 54
+      },
+      "lcpMs": 3310.9753,
+      "cls": 0.00409994460214635,
+      "tbtMs": 575,
+      "scriptTransferBytes": 206717
+    },
+    {
+      "page": "/early-access",
+      "run": 5,
+      "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+      "scores": {
+        "performance": 73,
+        "accessibility": 100,
+        "best-practices": 100,
+        "seo": 54
+      },
+      "lcpMs": 3841.1444999999994,
+      "cls": 0.01023875825241428,
+      "tbtMs": 578.9999999999995,
+      "scriptTransferBytes": 206717
+    }
+  ],
+  "medians": [
+    {
+      "page": "/",
+      "runs": 5,
+      "performance": 79,
+      "lcpMs": 3321.5797,
+      "cls": 0.06427617601172349,
+      "tbtMs": 504,
+      "scriptTransferBytes": 169959
+    },
+    {
+      "page": "/early-access",
+      "runs": 5,
+      "performance": 77,
+      "lcpMs": 3645.735800000001,
+      "cls": 0.005517463964357886,
+      "tbtMs": 456,
+      "scriptTransferBytes": 206717
+    }
+  ]
+}

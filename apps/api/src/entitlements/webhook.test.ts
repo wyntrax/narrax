@@ -7,8 +7,9 @@ import { registerHttpHardening } from '../http';
 import { registerWyntraxWebhook, type WyntraxDeps } from './webhook';
 import { VECTOR_BODY, VECTOR_SECRET, VECTOR_SIGNATURE, VECTOR_TIME } from './fixtures.test-support';
 
+import { assertTestDatabase } from '../../../../scripts/test-database';
 const url = new URL(process.env.DATABASE_URL ?? 'invalid:');
-if (url.hostname !== 'localhost' || url.port !== '5432' || url.pathname !== '/narra_ent') throw new Error('Require scratch database');
+assertTestDatabase(url);
 const db = createPrisma(url.toString());
 const tag = `wh-${randomUUID()}`;
 const now = new Date(Number(VECTOR_TIME) * 1000);

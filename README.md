@@ -1,6 +1,60 @@
 # NARRA (placeholder name)
 
+## Web Phase 1
+
+`apps/web` is the Next.js 15 / React 19 frontend workspace. Run `npm run dev:web` on port 4010 with the API on 4000. See [web setup](apps/web/README.md) for public configuration, exact CORS and wallet-proof origin requirements, and verification. Phase 2 waits for owner approval.
+
 AI narrative and smart-money intelligence agent for Solana.
+
+## Current market dashboard
+
+### Evidence review follow-up (October 24)
+
+Stored observations now fail independently, cached evidence ages on screen, and RugCheck risk flags are visible.
+The real Jupiter parser rejects blank/negative/non-finite impact values, quote requests retain spacing across concurrent
+mints and scan boundaries, and unknown safety-policy versions cannot bypass v2 provenance validation. Disabled
+collector tasks are registered disabled atomically; Stop/Remove clean up their own native children. The scoped market collector now also matures research-only radar
+outcomes with the existing bounded tracker. See [review findings and verification](docs/CONTINUATION.md).
+
+### Same-VPS frontend delivery (October 22)
+
+Frontend CD is now implemented as a separate, disabled-by-default release job: standalone image, exact-image checks before publishing, digest-pinned deployment, build/runtime configuration validation, health checks and previous-image/config rollback. It shares the backend VPS but not its containers or credentials. Configure `WEB_DEPLOY_ENABLED`, the `production-web` environment and host `.env.web` using [Frontend deployment](docs/FRONTEND_DEPLOYMENT.md). Docker/Compose and the first live GitHub/VPS run remain pending.
+
+### Public search visibility (October 22)
+
+Narrax now includes public English/Indonesian research guides and methodology pages, route-specific search/social metadata, structured data and a localized sitemap. Private workspace/access pages remain noindex. Production indexing requires explicit opt-in and the actual HTTPS canonical origin. See the [SEO launch checklist](docs/SEO.md) before publishing; domain verification and search-engine submission are still required.
+
+### Research coverage & discovery reliability (October 21)
+
+Social candidates missing holder evidence now get a bounded handoff to market collection within the existing **150-token / 18-info-call** budgets. Admin → Data Health shows price/holder/risk freshness, coverage gaps, stage liveness and persisted rejection counters. `npm run radar:daily` pairs a trailing-24h outcome scorecard with current collection diagnostics; counts are repeated attempts, not unique missed signals. No scoring gate was relaxed. See [coverage details](docs/EARLY_RADAR.md#research-coverage-and-discovery-reliability) and [verification](docs/CONTINUATION.md).
+
+### CI/CD (October 21)
+
+GitHub Actions now checks types, lint, isolated backend tests/migrations, web tests/build, fixture-browser tests and Docker builds. Releases publish a backend image to GHCR and optionally deploy it over SSH with migration-before-restart and image rollback. Deployment stays **off** until GitHub/VPS setup and approval are configured; frontend deployment is not included. See [CI/CD setup and verification limits](docs/CI_CD.md). No live deploy has run.
+
+### Wallet-flow research (October 21)
+
+Smart Money now separates **observed buyers**, **operator review** and **evidence qualification**. A wallet is admitted to research flows only when it is approved, has at least 20 closed legs across 5 tokens over 7+ days, a complete uncapped 30-day swap history, positive observed PnL and median ROI, a score of at least 70 and activity within 24 hours. Approval never bypasses those checks, and the ten seed wallets remain provisional. Flows require two independent wallets/clusters, 0.5 SOL net each, fresh trades and market/holder/risk evidence, and freeze their entry and exact signatures. Results are gross token-price changes at 1h/4h/24h; a missing horizon is `UNKNOWN`, never repaired from a later price. Discovery now reports why scans cannot be judged and keeps a bounded list of repeat early buyers. No alert, AI decision, order or position is created by this research. Add a review reason in **Admin -> Smart-money research review**; `npm run wallets:scorecard` prints the outcome cohorts. Both research flags default to off. See [status and limits](docs/CONTINUATION.md).
+
+### Fresh collection coverage (October 21)
+
+The collector now retains the verifying quote for newly discovered social mints, reserves bounded refresh space for fresh launches, retries young pools, and rotates general prices and due holder lookups so older IDs or repeated failures cannot monopolize collection. Existing 150-token / 20-info-call budgets and qualification gates remain. Job summaries expose launch/general selection and social snapshot counts. Verified with **1,346 isolated backend tests** and root/web typechecks; see [operational evidence and remaining gaps](docs/CONTINUATION.md).
+
+### Token research brief (October 21)
+
+On `/app/tokens`, paste an exact Solana mint under **Research a Solana token** to open its indexed research independently of screener filters. Token details now summarize source freshness, 1h price movement, volume/liquidity, pool versus token creation, and available/missing evidence. Copy the mint, refresh the research, or jump to narrative context and historical snapshots. Cached market figures expire after the existing 15-minute window. An unknown address gets an explicit unindexed state with explorer/chart links; this lookup does not start ingestion. English and Indonesian supported. Verified with 572 web tests, 1,342 isolated backend tests and four mocked-auth Chromium flows; real owner-session review remains pending.
+
+`/app/portfolio` includes manual **paper-only** buys and partial/full closes with review, explicit simulation acknowledgement, existing risk checks and duplicate-submit protection. Live positions remain read-only. Buys require existing trading permission and fresh stored evidence; no wallet funds are used. See [current state and verification](docs/CONTINUATION.md).
+
+`/app/trade` is a separate **manual mainnet** flow, default off (`MANUAL_TRADING_ENABLED=false`). It assembles stored research, blocks incomplete buy evidence, builds an unsigned Jupiter Swap V2 transaction, and requires a verified linked wallet to sign. The API simulates, verifies the exact route/amounts/accounts and signed message before broadcasting. It does not create paper orders or positions and does not enable the automated executor. See [Manual trading](docs/MANUAL_TRADING.md).
+
+Early-radar outcome tracking now records frozen alert-time prices/valuations and 1h/24h/7d results. `npm run early-radar:report -- --from <ISO> --to <ISO>` reports sample sizes and missingness by profile, score tier and discovery route. Apply the generated outcome migration before running updated workers. A new call is only published when the exact price and holder rows behind its score are at most 15 and 60 minutes old; otherwise it is skipped and counted by reason, never backfilled from later prices. Verified with 1,373 passing backend tests on isolated installed-version services; production performance remains unverified. See [Early Radar](docs/EARLY_RADAR.md).
+
+**Radar scorecard and liveness (October 20):** `npm run radar:scorecard` recomputes 15m/1h/4h/24h returns, peak capture and a fixed exit-rule replay from frozen alert entries and stored 5-minute closes. It prints medians first, subtracts a 3% round-trip cost and marks every bucket under 30 events / 15 tokens INSUFFICIENT. `npm run radar:status` reports the newest call, newest price and candidate supply, and exits 2 when stale; `scripts/radar-status.ps1` is the Task Scheduler wrapper and `scripts/radar-status-scheduled.ps1` adds timestamped logging for recurring checks. Both are read-only. The live cohort shows the edge is short-lived: the 4h peak median is +21.1% while the 4h close median is -6.0% and the 24h median is -48.9%. See [the dated status](docs/CONTINUATION.md).
+
+**Telegram Early Radar feed (October 20):** a read-only delivery layer posts global Early Radar alerts to one Telegram group. `powershell -File scripts\telegram-send.ps1` is a dry run that prints the exact messages; add `-Send` after setting `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the ignored `.env`. The pipeline worker schedules the same delivery every 30 seconds, skips calls older than 15 minutes, deduplicates by alert and backs off on a 429. It never sends user-owned alerts, orders, positions or P&L, needs no schema or migration, and is not a validated buy signal. See [Telegram setup](docs/TELEGRAM.md).
+
+Tokens and Opportunities now use recent, source-linked DEX Screener snapshots with liquidity, volume, price change, pool age and valuation basis. Historical scores and unverified wallet performance are explicitly separated. The dashboard follows the landing's graphite/pill design in EN/ID and dark/light themes. Run the standalone collector with `npm run dev:market` using the supplied process environment; it shares the existing five-minute market scheduler and should be the only market queue consumer. See [verification and remaining data gaps](docs/DASHBOARD_MARKET_REFRESH_2026-10-16.md).
 
 ## Wyntrax membership webhooks
 
@@ -69,6 +123,12 @@ All require a Privy bearer token. Market data is shared; positions and trades ar
 Limits are capped at 100. Nothing writes to these tables yet except the wallet-event worker, so most lists are empty until ingestion and scoring exist.
 
 ## Wallet intelligence
+### Smart Money freshness and recovery (October 19)
+- **30D is a rolling lookback, not a 30-day wait.** Scores refresh every 15 minutes once at least five matched buy/sell closes exist. Wallet count means active tracked addresses; discovery suggestions require admin acceptance before joining that directory.
+- Keep the public Helius webhook endpoint running. For local development, start `ngrok http 4000`, set `HELIUS_WEBHOOK_URL` in `local-api.ps1` to the current HTTPS endpoint plus `/webhooks/helius`, and restart the pipeline with that configuration. A tunnel restart can change its URL. An active Helius webhook or successful sync alone does not prove delivery; inspect the last non-empty receipt in Admin Data Health (stale after one hour).
+- To recover missed supported swaps, use `npm run wallets:backfill` to preview, then `npm run wallets:backfill -- --apply` with the application environment. This bounded, idempotent recovery stores trades and recomputes scores without enqueueing screening/execution. Short filtered history pages are followed until empty, outside the window, or capped; `capped: true` means incomplete coverage. Depth defaults to 3 pages per wallet; pass `--pages=N` (1–10) for a deeper bounded scan, e.g. `npm run wallets:backfill -- --pages=10 --apply`. A malformed `--pages` value fails rather than silently under-fetching.
+- Helius list entries missing addresses are hydrated from webhook detail before diffing. Completed early-buyer scans receive rotating price coverage (at most 25 slots within the existing 150-token refresh budget), so discovery can obtain both first and later prices. Qualification thresholds remain unchanged.
+
 `recomputeWalletIntelligence` runs every 15 minutes (BullMQ scheduler) and rebuilds profiles, 30D metrics, timing clusters and per-token consensus from `WalletTrade` in one transaction. All rules are fixed code, no model is involved.
 - Win rate, PnL and ROI use average-cost accounting per token. Sells of tokens first bought before tracking began are skipped.
 - A wallet needs at least 5 closed trades to be scored. The win rate uses a confidence lower bound, and a short record is discounted but never rewarded.
@@ -77,9 +137,15 @@ Limits are capped at 100. Nothing writes to these tables yet except the wallet-e
 - Not implemented: MEME_EARLY style (needs token categories), typical entry market cap (needs market-cap data on trades), funding graph.
 - The weights and thresholds are starting values. Backtest them before trusting scores for real trades.
 
+## Admin-configured research access (October 19)
+`/app/admin` configures the minimum Early Access, Member or Pro tier for each research feature, including Agent. Pro is the highest offered level; legacy Elite memberships resolve to Pro without rewriting records. Saves require a reason and use the audited settings endpoint. **Permissions are always enforced**; legacy rollout-off settings cannot bypass them. Ineligible research links remain visible with locks, and direct URLs show a lock without loading restricted page content. Server HTTP, Agent-tool and realtime checks remain authoritative. Portfolio, Alerts and Settings remain own-account pages. Holding requirements remain based on verified Wyntrax membership. No trading permission or risk limit is changed. See [continuation and verification](docs/CONTINUATION.md).
+
 ## Narrative ingestion
-`ingestNarratives` runs every 5 minutes. It asks each `NarrativeProvider` for trending topics and recent posts, stores a hash and similarity hash per post (never the text), upserts creators, then recomputes each narrative from its stored posts in one transaction: mention, creator and engagement velocity, acceleration, organic score and manipulation risk, saturation risk, score and lifecycle stage. Stage changes raise alerts.
-- **No real provider ships yet.** `StaticProvider` is for tests and demos. Add X, Reddit, YouTube or news providers by implementing `NarrativeProvider` and listing them in `workers/pipeline/src/main.ts`. Until then the job does nothing.
+`ingestNarratives` asks each `NarrativeProvider` for topics and recent posts, stores a hash and similarity hash per post (never the text), upserts creators, then recomputes each narrative from its stored posts in one transaction: mention, creator and engagement velocity, acceleration, organic score and manipulation risk, saturation risk, score and lifecycle stage. Stage changes raise alerts.
+- **Treg social ingestion:** opt-in X, Reddit and TikTok watchlist searches, bounded pages/costs, source receipts, and a preview/import command. Load `local-api.ps1`, then run `npm run dev:narratives` to start the dedicated consumer (30-minute default). Live calls and scheduled ingestion have been verified; `Solana Ecosystem` had 105 real mentions at the latest check. See [docs/SOCIAL_TREG.md](docs/SOCIAL_TREG.md) for setup, fixture cleanup and verification limits. Sampled search results are not global trend coverage. Run database-writing tests against a separate test database, never the application database.
+- **Research response fix (October 15):** opportunities without a linked narrative now render correctly in Overview and Opportunities. The topbar distinguishes request failures, restricted access and missing/stale readings; malformed responses no longer produce a connection-error explanation. See [the frontend handoff](apps/web/docs/PHASE2_HANDOFF.md) for verification and remaining data-availability limits.
+- **Marketing refresh:** Luora-inspired landing and early-access styling, inspected with REA and adapted to Narrax. See [reference evidence and verification](apps/web/docs/LUORA_REFRESH.md).
+- **Owner ZIP integration:** Smart Money, Alerts, Analytics, Agent, Settings, admin tier/window controls and Wyntrax attribution are merged while preserving the refreshed landing. See [merge record and verification](docs/ZIP_INTEGRATION_2026-10-15.md).
 - Stages are rule-based: a growing narrative moves up one stage per run, decay applies immediately, and death needs two quiet hours in a row. The thresholds (for example 150 posts/hour for mainstream) are starting values to tune against real data.
 - Organic score uses new-account share, near-duplicate posts, one-minute bursts, unique-creator ratio and cross-platform spread. With fewer than 10 recent posts it reports 50 and says so, instead of guessing.
 - Not implemented: search velocity, creator network analysis, historical creator hit rate, smart-money correlation.
@@ -99,17 +165,17 @@ Limits are capped at 100. Nothing writes to these tables yet except the wallet-e
 | Need | Source | Limit used |
 |---|---|---|
 | Price, liquidity, 24h volume, market cap, pool age | DEX Screener (`/tokens/v1/solana/...`, 30 mints per call) | 300 requests a minute documented, spaced at 250 ms |
-| Launch detection, holder count, top-10 share, mint and freeze authority, honeypot flag | GeckoTerminal (`new_pools`, token `info`) | 30 calls a minute documented, spaced at 2.2 s |
+| Launch detection, holder count, top-10 share, mint and freeze authority, honeypot flag | GeckoTerminal (`new_pools`, token `info`) | 30 calls a minute documented, but bursts of ~6 return 429; spaced at 15 s (4/min) |
 
-`refreshMarketData` (in `workers/pipeline`, queue `market-data`, every 5 minutes) does five things: stores SOL/USD in the `market.solUsd` setting (`readSolUsd` refuses a missing or stale value); turns new pools with at least 5,000 USD liquidity into token rows; refreshes prices for placeholder, new, recently priced, narrative-linked and held tokens; fills placeholder names and an approximate age; and, for up to 20 tokens a run, writes holder rows and risk rows (reused for 30 minutes).
+`refreshMarketData` (in `workers/pipeline`, queue `market-data`, every 5 minutes) does five things: stores SOL/USD in the `market.solUsd` setting (`readSolUsd` refuses a missing or stale value); turns new pools with at least 5,000 USD liquidity into token rows; refreshes prices for placeholder, new, recently priced, narrative-linked and held tokens; fills placeholder names and an approximate age; and, for up to 18 tokens a run at the 15 s Gecko pace, writes holder rows and risk rows (reused for 30 minutes). The social scan separately tops up a bounded number of stale candidate prices from DEX Screener before applying the evidence gate.
 
 Rules it follows: a missing price, liquidity, volume or holder figure skips the row and is never zero-filled; names and symbols are sanitized before storage; a token with no holder row is never ranked; a token whose latest risk row is `HONEYPOT` is never ranked (guard added in `resolveTokens`). Turn the job off with `MARKET_DATA_ENABLED=false`.
 
 Limits, stated plainly:
-- Response shapes come from the providers' public docs and were never called live. GeckoTerminal's holder fields are marked beta, and its top-10 share is of total supply, so it can include pool and exchange accounts and overstate concentration.
+- Response shapes are exercised against the live providers. GeckoTerminal's holder fields are marked beta, and its top-10 share is of total supply, so it can include pool and exchange accounts and overstate concentration.
 - `createdOnChainAt` is the pool creation time, a proxy for token age. `deployer` and developer holding are not available from these sources and stay empty (stored as unknown, never as zero).
 - How GeckoTerminal spells "authority renounced" is undocumented. Only an address-shaped value counts as active; anything else is unknown.
-- The refresh set is capped at 150 tokens, ordered by id, so a very large set can starve its tail. Rate limits are per process.
+- The refresh set is capped at 150 tokens. Priority groups and a rotating cursor reduce, but do not eliminate, starvation under a very large backlog. Rate limits are per process, so run one market consumer.
 - Risk weights and the 5,000 USD launch floor are unvalidated starting values (`RISK_WEIGHTS`, `MARKET_DATA_LIMITS`).
 - The free providers' terms were not reviewed. One source states DEX Screener's terms bar building a competing product. Read both before launch.
 

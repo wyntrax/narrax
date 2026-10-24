@@ -1,7 +1,12 @@
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPrisma } from '@narra/database';
 import { resolveTokens } from './tokenResolution';
+import { attributeNarrativeMentions } from './narrativeTokens';
+import { createHash } from 'node:crypto';
+// These cases replay full resolution passes over accumulated fixtures in shared PostgreSQL.
+// Files run serially; observed full-suite passes still exceed the 5 s default.
+vi.setConfig({ testTimeout: 30_000 });
 
 const url = process.env.DATABASE_URL ?? 'postgresql://narra:narra@localhost:5432/narra';
 async function dbUp() {
@@ -114,8 +119,69 @@ describe.skipIf(!up)('token resolution on a real Postgres', () => {
     expect(await db.opportunity.count({ where: { tokenId: t.id } })).toBe(0); // no liquidity or holders yet, so it is only watched
   });
 
+  it('uses bounded safety evidence for an early candidate and freezes the exact mapped facts', async () => {
+    const word = rand(12);
+    const n = await db.narrative.create({ data: { name: `${word} early`, slug: `early-${tag}`, stage: 'ACCELERATING', score: 91, velocity: 240, firstDetectedAt: ago(3) } });
+    await db.narrativeMetric.create({ data: { narrativeId: n.id, score: 91, velocity: 240, acceleration: 5, organicScore: 80, manipulationRisk: 12, mentionVelocity: 240, creatorVelocity: 60, engagementVelocity: 90, at: NOW } });
+    const t = await db.token.create({ data: { mint: `SAFE${tag}`.padEnd(40, '1'), symbol: word.toUpperCase(), name: `${word} Token`, deployer: `dep-safe-${tag}`, createdOnChainAt: ago(5) } });
+    const metric = await db.tokenMetric.create({ data: { tokenId: t.id, priceUsd: 0.001, marketCapUsd: 50_000, liquidityUsd: 25_000, volume24hUsd: 100_000, at: NOW } });
+    await db.systemSetting.create({ data: { key: `research.marketMetric.${metric.id}`, value: { metricId: metric.id, source: 'dexscreener', marketCapIsFdv: false } } });
+    await db.tokenMetric.create({ data: { tokenId: t.id, priceUsd: 0.0009, marketCapUsd: 45_000, liquidityUsd: 24_000, volume24hUsd: 90_000, at: ago(1.1) } });
+    await db.tokenMetric.create({ data: { tokenId: t.id, priceUsd: 0.0007, marketCapUsd: 35_000, liquidityUsd: 20_000, volume24hUsd: 70_000, at: ago(3.2) } });
+    await db.tokenHolderMetric.create({ data: { tokenId: t.id, holders: 500, top10Pct: 20, devHoldingPct: null, smartWalletHolders: 5, at: NOW } });
+    await db.tokenHolderMetric.create({ data: { tokenId: t.id, holders: 450, top10Pct: 22, devHoldingPct: null, smartWalletHolders: 3, at: ago(3.2) } });
+    const calls: string[] = [],tradeabilityCalls: string[] = [];
+    const safety = {
+      begin() {},
+      async get(mint: string) {
+        calls.push(mint);
+        return { mint, source: 'rugcheck' as const, sourceAt: NOW.toISOString(), devHoldingPct: 2, top10ExLpPct: 18, lpBurnedPct: null, lpLocked: true, riskFlags: [] };
+      },
+    };
+    const tradeability = {
+      begin() {},
+      async get(mint: string) {
+        tradeabilityCalls.push(mint);
+        return testTradeability(mint,NOW,1.25);
+      },
+    };
+    await resolveTokens(db, NOW, { safety, tradeability });
+    expect(calls).toContain(t.mint);
+    expect(tradeabilityCalls).toContain(t.mint);
+    const alert = await db.alert.findFirstOrThrow({ where: { refId: t.id, kind: { in: ['EARLY_RADAR_TRENCHER', 'EARLY_RADAR_HOLDER'] } } });
+    expect(alert.body).toContain('Safety evidence:');
+    expect(alert.body).toContain('Top-10 excluding known pool/locker accounts 18.0%');
+    const frozen = await db.systemSetting.findUniqueOrThrow({ where: { key: `research.radarSafety.${alert.id}` } });
+    expect(frozen.value).toMatchObject({ facts: { devHoldingPct: 2, top10ExLpPct: 18, priceImpactPct: 1.25, tradeabilityAt: NOW.toISOString(), evidenceSource: 'rugcheck' } });
+    const checks = (frozen.value as { checks: { code: string; status: string; value: unknown }[] }).checks;
+    expect(checks.find(c => c.code === 'TRADEABILITY')).toMatchObject({ status: 'PASS', value: 1.25 });
+  });
+
   it('never creates orders or positions', async () => {
     expect(await db.order.count({ where: { tokenId: { in: Object.values(ids) } } })).toBe(0);
     expect(await db.position.count({ where: { tokenId: { in: Object.values(ids) } } })).toBe(0);
   });
+  it.each([
+    {key:'two',accounts:2,posts:12,burst:false,nameMatch:false,eligible:false},
+    {key:'burst',accounts:3,posts:12,burst:true,nameMatch:false,eligible:false},
+    {key:'organic',accounts:3,posts:12,burst:false,nameMatch:false,eligible:true},
+    {key:'unknown',accounts:3,posts:4,burst:false,nameMatch:false,eligible:false},
+    {key:'name',accounts:2,posts:2,burst:true,nameMatch:true,eligible:true},
+  ])('gates social-only opportunity attribution: $key',async c=>{
+    const word=rand(15);
+    const n=await db.narrative.create({data:{name:word,slug:`gate-${c.key}-${tag}`,stage:'ACCELERATING',score:85,velocity:200,firstDetectedAt:ago(3)}});
+    const t=await token(`gate-${c.key}`,c.nameMatch?word.toUpperCase():rand(15),c.nameMatch?word:rand(15),4,'gate',{liq:100000,holders:200,price:0.01});
+    for(let i=0;i<c.posts;i++){
+      const externalId=`gate-${c.key}-${tag}-${i}`;
+      const data={platform:'x',externalId,creatorId:`account-${i%c.accounts}`,creatorAgeDays:100,engagement:5,at:new Date(+NOW-(c.burst?1000:i*600000+1000)),textHash:c.burst?'copied':externalId,simhash:c.burst?'0000000000000000':createHash('sha256').update(externalId).digest('hex').slice(0,16)};
+      await db.narrativeMention.create({data:{...data,narrativeId:n.id}});
+      await db.tokenMention.create({data:{...data,refKind:'MINT',ref:t.mint}});
+    }
+    await attributeNarrativeMentions(db,NOW);
+    expect(await db.narrativeTokenRelation.count({where:{narrativeId:n.id,tokenId:t.id}})).toBe(1);
+    await resolveTokens(db,NOW);
+    expect(await db.opportunity.count({where:{narrativeId:n.id,tokenId:t.id}})).toBe(c.eligible?1:0);
+    expect(await db.narrativeTokenRelation.count({where:{narrativeId:n.id,tokenId:t.id}})).toBe(1);
+  });
 });
+import {testTradeability} from '../../../scripts/test-tradeability';

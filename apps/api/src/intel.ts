@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { marketTokenImages } from './marketEvidence';
 import { z } from 'zod';
 import type { PrismaClient } from '@narra/database';
 import { makeAuthenticate, type AccountDeps } from './account';
@@ -38,10 +39,12 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     });
     if (!w) return reply.code(404).send({ error: 'NOT_FOUND' });
 
-    const [metricRows, trades, scan] = await Promise.all([
+    const [metricRows, trades, scan, intelligence, history] = await Promise.all([
       db.walletMetric.findMany({ where: { walletId: w.id }, orderBy: { computedAt: 'desc' }, take: 40 }),
-      db.walletTrade.findMany({ where: { walletId: w.id }, orderBy: [{ at: 'desc' }, { id: 'desc' }], take: WALLET_DETAIL.recentTrades, include: { token: { select: { mint: true, symbol: true } } } }),
+      db.walletTrade.findMany({ where: { walletId: w.id }, orderBy: [{ at: 'desc' }, { id: 'desc' }], take: WALLET_DETAIL.recentTrades, include: { token: { select: { mint: true, symbol: true, name:true } } } }),
       db.walletTrade.findMany({ where: { walletId: w.id, at: { gte: new Date(now().getTime() - WALLET_DETAIL.narrativeLookbackDays * DAY) } }, orderBy: { at: 'desc' }, take: WALLET_DETAIL.narrativeTradeScan, select: { tokenId: true, side: true, amountSol: true, at: true } }),
+      db.systemSetting.findUnique({ where: { key: `wallet.intelligence.${w.id}` } }),
+      db.systemSetting.findUnique({ where: { key: `wallet.history.${w.id}` } }),
     ]);
 
     // Newest reading per window.
@@ -69,8 +72,12 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     }
 
     const f = w.funding;
+    const images=await marketTokenImages(db,trades.map(t=>({id:t.tokenId,mint:t.token.mint})));
     return {
       address: w.address, label: w.label, source: w.source, trackedSince: w.createdAt,
+      researchReview: w.researchReview, qualification: (await walletQualifications(db,[w],now())).get(w.id),
+      intelligence: intelligence?.value ?? null,
+      history: history?.value ?? null,
       profile: w.profile ? { score: w.profile.score, leaderScore: w.profile.leaderScore, style: w.profile.style, medianHoldSeconds: w.profile.medianHoldSeconds, strongestNarrative: w.profile.strongestNarrative, bestPattern: w.profile.bestPattern, weakPattern: w.profile.weakPattern, typicalEntryMarketCapUsd: { min: n(w.profile.typicalEntryMcMin), max: n(w.profile.typicalEntryMcMax) }, updatedAt: w.profile.updatedAt } : null,
       performance,
       // Cluster and relationship links are inferred from timing and funding, so confidence always comes with them.
@@ -80,7 +87,7 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
         ...w.incoming.filter((r) => r.from.active).map((r) => ({ direction: 'IN' as const, kind: r.kind, confidence: r.confidence, wallet: { address: r.from.address, label: r.from.label } })),
       ],
       funding: f ? { status: f.status, funder: f.funder, fundedAt: f.fundedAt, amountSol: f.lamports != null ? Number(f.lamports) / LAMPORTS : null, checkedAt: f.checkedAt } : null,
-      recentTrades: trades.map((t) => ({ id: t.id, at: t.at, side: t.side, amountSol: n(t.amountSol), marketCapUsd: n(t.marketCapUsd), signature: t.signature, token: t.token })),
+      recentTrades: trades.map((t) => ({ id: t.id, at: t.at, side: t.side, amountSol: n(t.amountSol), marketCapUsd: n(t.marketCapUsd), signature: t.signature, token: {...t.token,imageUrl:images.get(t.tokenId)??null} })),
       narrativeHistory: { lookbackDays: WALLET_DETAIL.narrativeLookbackDays, scannedTrades: scan.length, scanCapped: scan.length === WALLET_DETAIL.narrativeTradeScan, items: [...hist.values()].sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime()).map((h) => ({ ...h, netSol: Math.round(h.netSol * 1e6) / 1e6 })) },
     };
   });
@@ -95,10 +102,11 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     if (q.data.cursor && !(await db.walletTrade.count({ where: { id: q.data.cursor, walletId: w.id } }))) return reply.code(400).send(bad);
     const rows = await db.walletTrade.findMany({
       where: { walletId: w.id, ...(q.data.side ? { side: q.data.side } : {}) }, orderBy: [{ at: 'desc' }, { id: 'desc' }], take: q.data.limit + 1,
-      ...(q.data.cursor ? { cursor: { id: q.data.cursor }, skip: 1 } : {}), include: { token: { select: { mint: true, symbol: true } } },
+      ...(q.data.cursor ? { cursor: { id: q.data.cursor }, skip: 1 } : {}), include: { token: { select: { mint: true, symbol: true, name:true } } },
     });
     const page = rows.slice(0, q.data.limit);
-    return { items: page.map((t) => ({ id: t.id, at: t.at, side: t.side, amountSol: n(t.amountSol), marketCapUsd: n(t.marketCapUsd), signature: t.signature, token: t.token })), nextCursor: rows.length > q.data.limit ? page[page.length - 1]!.id : null };
+    const images=await marketTokenImages(db,page.map(t=>({id:t.tokenId,mint:t.token.mint})));
+    return { items: page.map((t) => ({ id: t.id, at: t.at, side: t.side, amountSol: n(t.amountSol), amountUsd: n(t.amountUsd), marketCapUsd: n(t.marketCapUsd), evidence: t.evidence, signature: t.signature, token: {...t.token,imageUrl:images.get(t.tokenId)??null} })), nextCursor: rows.length > q.data.limit ? page[page.length - 1]!.id : null };
   });
 
   // Search across tokens, narratives, tracked wallets, creators and transaction signatures. A query is matched the way it looks:
@@ -151,3 +159,4 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     };
   });
 }
+import { walletQualifications } from '@narra/worker-pipeline';

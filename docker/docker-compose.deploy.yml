@@ -1,0 +1,24 @@
+# Override used by the release workflow (.github/workflows/release.yml) on top of YOUR host's base compose file
+# (a copy of docker-compose.prod.example.yml that you have read and adapted, kept on the host as docker/docker-compose.prod.yml).
+# It swaps "build from source" for the release image of the CI-checked commit, pinned by digest in NARRA_IMAGE.
+# Requires Docker Compose v2.17 or newer (the deploy script uses `up --wait`).
+
+services:
+  migrate: &image
+    image: "${NARRA_IMAGE:?set NARRA_IMAGE to the image reference to run}"
+    pull_policy: always
+  api: *image
+  worker: *image
+
+  executor:
+    <<: *image
+    # The executor refuses to start if any signing or Privy secret is present (workers/executor/src/main.ts), but the base
+    # compose file gives every service the same .env, and the API legitimately needs PRIVY_APP_SECRET. Blanking these for the
+    # executor only takes capability away; it never adds any. An empty value counts as unset.
+    environment:
+      EXECUTOR_SIGNING_KEY: ""
+      PRIVY_APP_SECRET: ""
+      PRIVY_AUTHORIZATION_PRIVATE_KEY: ""
+      PRIVY_AUTHORIZATION_KEY: ""
+      WALLET_PRIVATE_KEY: ""
+      SOLANA_PRIVATE_KEY: ""

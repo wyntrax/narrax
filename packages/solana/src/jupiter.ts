@@ -8,7 +8,7 @@ const QuoteResponse = z.object({
   outAmount: z.string(),
   /** The least Jupiter promises to deliver after slippage, in output base units. */
   otherAmountThreshold: z.string().regex(/^\d+$/).optional(),
-  priceImpactPct: z.union([z.string(), z.number()]),
+  priceImpactPct: z.union([z.string().trim().regex(/^\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/), z.number().finite().nonnegative()]),
   slippageBps: z.number(),
 }).passthrough();
 
@@ -62,28 +62,30 @@ export class JupiterClient {
 
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.opts.timeoutMs ?? 4000);
-    let res: Response;
+    let body: unknown;
     try {
-      res = await (this.opts.fetch ?? fetch)(url, {
+      const res = await (this.opts.fetch ?? fetch)(url, {
         headers: this.opts.apiKey ? { 'x-api-key': this.opts.apiKey } : {},
         signal: ctrl.signal,
       });
+      if (!res.ok) throw new QuoteError(`Quote request returned HTTP ${res.status}`);
+      body = await res.json();
     } catch (e) {
+      if (e instanceof QuoteError) throw e;
       throw new QuoteError(`Quote request failed: ${(e as Error).name}`);
     } finally {
       clearTimeout(timer);
     }
-    if (!res.ok) throw new QuoteError(`Quote request returned HTTP ${res.status}`);
-
-    const parsed = QuoteResponse.safeParse(await res.json().catch(() => null));
+    const parsed = QuoteResponse.safeParse(body);
     if (!parsed.success) throw new QuoteError('Quote response had an unexpected shape');
     const q = parsed.data;
     const impact = Number(q.priceImpactPct);
-    if (!Number.isFinite(impact)) throw new QuoteError('Quote price impact was not a number');
+    const priceImpactPct = this.opts.priceImpactFormat === 'percent' ? impact : impact * 100;
+    if (!Number.isFinite(priceImpactPct) || priceImpactPct < 0 || priceImpactPct > 100) throw new QuoteError('Quote price impact was out of range');
 
     return {
       inputMint: q.inputMint, outputMint: q.outputMint, inAmount: q.inAmount, outAmount: q.outAmount, otherAmountThreshold: q.otherAmountThreshold ?? null,
-      priceImpactPct: Math.abs(this.opts.priceImpactFormat === 'percent' ? impact : impact * 100),
+      priceImpactPct,
       slippageBps: q.slippageBps, fetchedAt: (this.opts.now ?? (() => new Date()))(), raw: q,
     };
   }

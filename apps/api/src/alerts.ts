@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from '@narra/database';
 import { AlertPriority, ALERT_PRIORITY_RANK } from '@narra/shared';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { IdCursor, Limit } from './paging';
+import { marketTokenImages } from './marketEvidence';
 
 const Query = z.object({
   limit: Limit,
@@ -51,8 +52,12 @@ export function registerAlertRoutes(app: FastifyInstance, deps: Pick<AccountDeps
       include: { alert: { select: { id: true, kind: true, priority: true, title: true, body: true, refType: true, refId: true, createdAt: true } } },
     });
     const page = rows.slice(0, q.data.limit);
+    const tokenIds=[...new Set(page.flatMap(n=>n.alert.refType==='TOKEN'&&n.alert.refId?[n.alert.refId]:[]))];
+    const tokens=tokenIds.length?await db.token.findMany({where:{id:{in:tokenIds}},select:{id:true,mint:true,symbol:true,name:true}}):[];
+    const images=await marketTokenImages(db,tokens);
+    const byId=new Map(tokens.map(token=>[token.id,{mint:token.mint,symbol:token.symbol,name:token.name,imageUrl:images.get(token.id)??null}]));
     return {
-      items: page.map((n) => ({ id: n.id, alertId: n.alertId, readAt: n.readAt, createdAt: n.createdAt, kind: n.alert.kind, priority: n.alert.priority, title: n.alert.title, body: n.alert.body, refType: n.alert.refType, refId: n.alert.refId })),
+      items: page.map((n) => ({ id: n.id, alertId: n.alertId, readAt: n.readAt, createdAt: n.createdAt, kind: n.alert.kind, priority: n.alert.priority, title: n.alert.title, body: n.alert.body, refType: n.alert.refType, refId: n.alert.refId, token:n.alert.refType==='TOKEN'&&n.alert.refId?byId.get(n.alert.refId)??null:null })),
       nextCursor: rows.length > q.data.limit ? page[page.length - 1]!.id : null,
       unreadCount: await db.notification.count({ where: { userId, readAt: null } }),
     };

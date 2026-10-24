@@ -1,0 +1,28 @@
+[
+  {
+    "page": "/",
+    "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+    "scores": {
+      "performance": 74,
+      "accessibility": 100,
+      "best-practices": 100,
+      "seo": 91
+    },
+    "lcpMs": 3762.5989999999997,
+    "cls": 0.00007527011313728638,
+    "scriptTransferBytes": 203693
+  },
+  {
+    "page": "/early-access",
+    "mode": "Lighthouse mobile defaults; local server, fixture availability API",
+    "scores": {
+      "performance": 80,
+      "accessibility": 100,
+      "best-practices": 100,
+      "seo": 54
+    },
+    "lcpMs": 3720.9396,
+    "cls": 0.01953489130391625,
+    "scriptTransferBytes": 240821
+  }
+]

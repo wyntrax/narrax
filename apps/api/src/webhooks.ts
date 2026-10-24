@@ -3,6 +3,7 @@ import type { SwapEvent } from '@narra/queue';
 import { parseHeliusSwaps, verifyWebhookAuth } from '@narra/solana';
 
 export interface WebhookDeps {
+  recordReceipt?(receipt:{at:string;items:number;parsed:number;queued:number;skipped:number}):Promise<void>;
   secret: string;
   enqueue(event: SwapEvent): Promise<unknown>;
   /** Only events from wallets we track are queued. */
@@ -21,6 +22,9 @@ export function registerWebhooks(app: FastifyInstance, deps: WebhookDeps): void 
     for (const e of events) {
       if (await deps.isTracked(e.wallet)) { await deps.enqueue(e); queued++; }
     }
+    // Record only non-empty authenticated deliveries. An empty health probe must not
+    // make an idle ingestion pipeline look active. No raw payloads or credentials.
+    if(Array.isArray(req.body)&&req.body.length&&deps.recordReceipt){try{await deps.recordReceipt({at:new Date().toISOString(),items:req.body.length,parsed:events.length,queued,skipped});}catch{req.log.warn('Could not record webhook receipt telemetry');}}
     return { received: events.length, queued, skipped };
   });
 }

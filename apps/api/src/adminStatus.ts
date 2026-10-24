@@ -7,6 +7,7 @@ import { sanitizeUntrusted } from '@narra/shared';
 import { TRADING_PAUSE_KEY, aiEnabled, loadAiConfig, parsePause, tokensUsedToday } from '@narra/worker-pipeline';
 import { makeRequireAdmin } from './admin';
 import type { AccountDeps } from './account';
+import {dataHealth,type HealthPorts} from './dataHealth';
 
 const DAY = 86_400_000;
 /** SystemSetting key for the admin-entered model prices. Prices are never guessed or built in. */
@@ -18,7 +19,7 @@ const STALE_AFTER_EXPECTED = 3;
 const QUEUE_BACKLOG_WARN = 100;
 const BUDGET_WARN_FRACTION = 0.8;
 
-export interface OpsDeps {
+export interface OpsDeps extends HealthPorts {
   /** Answers whether Redis responds. Absent when the API was started without one. */
   redisPing?: () => Promise<boolean>;
   queueCounts?: () => Promise<Record<string, QueueCounts>>;
@@ -40,6 +41,7 @@ export function registerAdminStatusRoutes(app: FastifyInstance, deps: Pick<Accou
   const ops = deps.ops ?? {};
   const opts = { preHandler: makeRequireAdmin(deps), config: { rateLimit: { max: 30, timeWindow: '1 minute' } } };
   const json = (v: unknown) => v as Prisma.InputJsonValue;
+  app.get('/v1/admin/data-health',opts,async()=>dataHealth(db,ops,now()));
 
   async function timed(fn: () => Promise<unknown>): Promise<{ ok: boolean; latencyMs: number | null }> {
     const t = Date.now();

@@ -29,3 +29,12 @@ export const DEFAULT_AI_CONFIG: AiConfig = {
   confidenceThreshold: 0.75, tokenBudget: 2_000_000, maxTokensPerCall: 1500, chatTokenBudget: 500_000, chatTokensPerUserPerDay: 50_000, minOpportunityScoreForBuy: 60,
   maxSuggestedSizePct: 5, maxSlippageBps: 150, maxPriceImpactPct: 2,
 };
+
+/**
+ * The defaults, with AI_MODEL_ID (when set) as the fast and reasoning model. Saved admin settings still win over this.
+ * The built-in names are placeholders that a real provider rejects, so setting AI_MODEL_ID is the quickest way to a working chat.
+ */
+export function defaultAiConfig(env: Record<string, string | undefined> = process.env): AiConfig {
+  const id = env.AI_MODEL_ID?.trim();
+  return id && id.length <= 80 ? { ...DEFAULT_AI_CONFIG, fastModel: id, reasoningModel: id } : DEFAULT_AI_CONFIG;
+}

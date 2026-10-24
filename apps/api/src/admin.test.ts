@@ -6,6 +6,7 @@ import { DEFAULT_AI_CONFIG } from '@narra/ai';
 import { loadAiConfig, saveAiConfig, setAiEnabled } from '@narra/worker-pipeline';
 import { buildApp } from './app';
 import { createPrivyVerifier } from './auth';
+import {seedTestPro,clearTestPro} from './test-membership';
 
 const url = process.env.DATABASE_URL ?? 'postgresql://narra:narra@localhost:5432/narra';
 async function dbUp() {
@@ -23,10 +24,17 @@ describe.skipIf(!up)('admin and analysis routes (needs Postgres)', () => {
   const admin = `did:privy:admin-${tag}`, user = `did:privy:user-${tag}`, other = `did:privy:other-${tag}`;
   let userId = '', otherId = '';
 
-  const call = async (method: 'GET' | 'PUT', path: string, sub: string, payload?: unknown) => {
+  const call = async (method: 'GET' | 'PUT', path: string, sub: string, payload?: unknown, headers?: Record<string, string>) => {
     const token = await new SignJWT({}).setProtectedHeader({ alg: 'ES256' }).setSubject(sub).setIssuer('privy.io').setAudience(APP_ID).setIssuedAt().setExpirationTime('5m').sign(keys.privateKey);
-    const res = await app.inject({ method, url: path, payload: payload as object, headers: { authorization: `Bearer ${token}` } });
+    const res = await app.inject({ method, url: path, payload: payload as object, headers: { authorization: `Bearer ${token}`, ...headers } });
     return { status: res.statusCode, body: res.json() };
+  };
+  /** Runs `work` with ADMIN_EMAIL / ADMIN_PRIVY_USER_ID replaced, then puts the real environment back exactly as it was. */
+  const withAdminEnv = async (env: { email?: string; privyUserId?: string }, work: () => Promise<void>) => {
+    const before = { email: process.env.ADMIN_EMAIL, id: process.env.ADMIN_PRIVY_USER_ID };
+    const set = (key: 'ADMIN_EMAIL' | 'ADMIN_PRIVY_USER_ID', value?: string) => { if (value === undefined) delete process.env[key]; else process.env[key] = value; };
+    set('ADMIN_EMAIL', env.email); set('ADMIN_PRIVY_USER_ID', env.privyUserId);
+    try { await work(); } finally { set('ADMIN_EMAIL', before.email); set('ADMIN_PRIVY_USER_ID', before.id); }
   };
 
   beforeAll(async () => {
@@ -35,9 +43,10 @@ describe.skipIf(!up)('admin and analysis routes (needs Postgres)', () => {
     await db.user.create({ data: { privyUserId: admin, isAdmin: true } });
     userId = (await db.user.create({ data: { privyUserId: user } })).id;
     otherId = (await db.user.create({ data: { privyUserId: other } })).id;
+    await seedTestPro(db,userId);await seedTestPro(db,otherId);
   });
   afterEach(async () => { await saveAiConfig(db, DEFAULT_AI_CONFIG); await setAiEnabled(db, true); });
-  afterAll(async () => { await app.close(); await db.$disconnect(); });
+  afterAll(async () => { await clearTestPro(db,[userId,otherId]);await db.linkedWallet.deleteMany({where:{userId:{in:[userId,otherId]}}});await app.close(); await db.$disconnect(); });
 
   it('keeps model settings away from non-admins', async () => {
     expect((await call('GET', '/v1/admin/ai-models', user)).status).toBe(403);
@@ -70,6 +79,34 @@ describe.skipIf(!up)('admin and analysis routes (needs Postgres)', () => {
     expect((await call('PUT', '/v1/admin/ai-enabled', admin, { enabled: false })).body).toEqual({ enabled: false });
     expect((await call('GET', '/v1/admin/ai-models', admin)).body.enabled).toBe(false);
     expect((await call('PUT', '/v1/admin/ai-enabled', admin, { enabled: 'no' })).status).toBe(400);
+  });
+
+  it('lets only the ADMIN_PRIVY_USER_ID account be admin, ignoring a leftover database flag', async () => {
+    await withAdminEnv({ privyUserId: user }, async () => {
+      // The database admin is refused and the environment-listed account is allowed, without touching any stored row.
+      expect((await call('GET', '/v1/admin/ai-models', admin)).status).toBe(403);
+      expect((await call('GET', '/v1/admin/ai-models', user)).status).toBe(200);
+      expect((await call('GET', '/v1/me', admin)).body).toMatchObject({ isAdmin: false });
+      expect((await call('GET', '/v1/me', user)).body).toMatchObject({ isAdmin: true, admin: { configured: true, privyUserId: user } });
+      expect((await db.user.findUniqueOrThrow({ where: { privyUserId: admin } })).isAdmin).toBe(true);
+    });
+  });
+
+  it('accepts the configured admin by verified email from a Privy identity token', async () => {
+    const address = `owner-${tag}@example.com`;
+    await withAdminEnv({ email: address }, async () => {
+      // A signed identity token is the only thing that can vouch for an email, and it is bound to the same user as the access token.
+      const identity = await new SignJWT({ linked_accounts: [{ type: 'email', address: `Owner-${tag}@Example.com` }] })
+        .setProtectedHeader({ alg: 'ES256' }).setSubject(other).setIssuer('privy.io').setAudience(APP_ID).setIssuedAt().setExpirationTime('5m').sign(keys.privateKey);
+      const me = await call('GET', '/v1/me', other, undefined, { 'x-privy-identity-token': identity });
+      expect(me.body).toMatchObject({ isAdmin: true, admin: { email: address } });
+      expect((await db.user.findUniqueOrThrow({ where: { privyUserId: other } })).email).toBe(address);
+      // Someone else's identity token is ignored, so it cannot borrow the admin email.
+      const borrowed = await call('GET', '/v1/me', user, undefined, { 'x-privy-identity-token': identity });
+      expect(borrowed.body).toMatchObject({ isAdmin: false });
+      // A junk identity token is ignored too, and never rejects an otherwise valid sign-in.
+      expect((await call('GET', '/v1/me', other, undefined, { 'x-privy-identity-token': 'not-a-token' })).status).toBe(200);
+    });
   });
 
   it('explains a decision with the bull, bear and risk arguments, and shows each user only their own view', async () => {

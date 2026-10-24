@@ -5,3 +5,6 @@ export * from './replay';
 export * from './compare';
 export * from './sweep';
 export * from './report';
+export * from './earlyRadar';
+export * from './radarScorecard';
+export * from './walletResearch';

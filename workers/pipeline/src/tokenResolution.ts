@@ -1,7 +1,12 @@
 import type { PrismaClient } from '@narra/database';
+import { createEarlyRadarAlert } from './earlyRadarTracking';
+import type { RadarSafetyEvidence, RadarSafetySource } from './radarSafetyEvidence';
+import type { TradeabilityEvidence, TradeabilitySource } from './tradeabilityEvidence';
+import { socialOpportunityEvidence } from './socialOpportunity';
+import { saveResearchDiagnostics } from './researchDiagnostics';
 import {
-  MATCH_THRESHOLD, attentionPriceDivergence, matchScore, meetsFloors, opportunityScore, resolveCandidates, words,
-  type Candidate,
+  EARLY_RULES, MATCH_THRESHOLD, attentionPriceDivergence, evaluateEarlyBoth, matchScore, meetsFloors, opportunityScore, resolveCandidates, words,
+  type Candidate, isRadarEvidenceCandidate, radarEvidenceIssue, recordRadarEvidenceSkip, type RadarEvidenceSkips,
 } from '@narra/token-intel';
 
 export interface ResolveSummary {
@@ -11,6 +16,14 @@ export interface ResolveSummary {
   opportunitiesWritten: number;
   noTokenYet: number;
   alerts: number;
+  /** Small tokens (under the early market cap ceiling) that passed an early-radar profile. Research only. */
+  earlyCandidates: number;
+  evidenceSkipped: RadarEvidenceSkips;
+  radarAlerts: number;
+  /** Safety shadow/enforcement outcomes. Counts one per evaluated candidate/profile. */
+  safetyPass: number;
+  safetyUnknown: number;
+  safetyBlocked: number;
 }
 
 const HOUR = 3_600_000;
@@ -22,8 +35,11 @@ const num = (v: { toString(): string } | null | undefined) => (v == null ? null 
  * that pass liquidity and holder floors. This job only reads market data and writes research rows and alerts.
  * It has no access to orders, positions or execution, so a matching ticker can never trigger a buy.
  */
-export async function resolveTokens(db: PrismaClient, now: Date = new Date()): Promise<ResolveSummary> {
-  const out: ResolveSummary = { narrativesChecked: 0, candidates: 0, newCandidates: 0, opportunitiesWritten: 0, noTokenYet: 0, alerts: 0 };
+export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?: RadarSafetySource | null; tradeability?: TradeabilitySource | null } = {}): Promise<ResolveSummary> {
+  const now=at??new Date();
+  deps.safety?.begin();
+  deps.tradeability?.begin();
+  const out: ResolveSummary = { narrativesChecked: 0, candidates: 0, newCandidates: 0, opportunitiesWritten: 0, noTokenYet: 0, alerts: 0, radarAlerts: 0, earlyCandidates: 0, evidenceSkipped: {}, safetyPass: 0, safetyUnknown: 0, safetyBlocked: 0 };
   const alert = async (data: { kind: string; priority: 'INFO' | 'WATCH' | 'IMPORTANT' | 'CRITICAL'; title: string; body: string; refType: string; refId: string }) => {
     await db.alert.create({ data: { ...data, createdAt: now } });
     out.alerts++;
@@ -46,6 +62,24 @@ export async function resolveTokens(db: PrismaClient, now: Date = new Date()): P
       include: { metrics: { orderBy: { at: 'desc' }, take: 1 }, holders: { orderBy: { at: 'desc' }, take: 1 }, consensus: { orderBy: { at: 'desc' }, take: 1 }, risk: { orderBy: { at: 'desc' }, take: 1 } },
     });
     const matched = tokens.map((t) => ({ t, match: matchScore(n.name, { symbol: t.symbol, name: t.name }) })).filter((x) => x.match >= MATCH_THRESHOLD);
+
+    // A related-token link alone is not opportunity evidence. Non-name matches
+    // need independent, sufficiently sampled organic social attribution.
+    const links = await db.narrativeTokenRelation.findMany({ where: { narrativeId: n.id }, select: { tokenId: true, matchScore: true } });
+    const seen = new Set(matched.map((x) => x.t.id));
+    const linkIds = links.map((l) => l.tokenId).filter((id) => !seen.has(id));
+    if (linkIds.length) {
+      const linked = await db.token.findMany({
+        where: { id: { in: linkIds }, blacklisted: false },
+        include: { metrics: { orderBy: { at: 'desc' }, take: 1 }, holders: { orderBy: { at: 'desc' }, take: 1 }, consensus: { orderBy: { at: 'desc' }, take: 1 }, risk: { orderBy: { at: 'desc' }, take: 1 } },
+      });
+      const score = new Map(links.map((l) => [l.tokenId, l.matchScore]));
+      const social=await socialOpportunityEvidence(db,n.id,linked.filter(t=>matchScore(n.name,t)<MATCH_THRESHOLD),now);
+      for (const t of linked) {
+        if(matchScore(n.name,t)<MATCH_THRESHOLD&&!social.has(t.id))continue;
+        matched.push({ t, match: score.get(t.id) ?? MATCH_THRESHOLD });
+      }
+    }
 
     if (!matched.length) {
       // A narrative with no token yet is watched, not traded. One alert, and candidates are picked up as they appear.
@@ -85,11 +119,15 @@ export async function resolveTokens(db: PrismaClient, now: Date = new Date()): P
 
       // Ranking needs real liquidity and holders. Until then it stays a watched candidate.
       const m = t.metrics[0], h = t.holders[0];
+      const marketCapUsd = num(m?.marketCapUsd);
+      // Count only tokens that actually reach the early-lane screen. A token with no
+      // metric or above the ceiling is not a withheld radar call, and is reported elsewhere.
+      const evidenceIssue = m != null && isRadarEvidenceCandidate(marketCapUsd, r.relation) ? radarEvidenceIssue({at:m.at,priceUsd:num(m.priceUsd)},h,now) : null;
+      if (evidenceIssue) recordRadarEvidenceSkip(out.evidenceSkipped,evidenceIssue);
       if (!m || !h || r.relation === 'SUSPICIOUS') continue;
       // A confirmed honeypot is never ranked, whatever its narrative score. Other risk flags only lower the score.
       if (t.risk[0]?.flags.includes('HONEYPOT')) continue;
       const liquidityUsd = num(m.liquidityUsd) ?? 0;
-      if (!meetsFloors({ liquidityUsd, holders: h.holders, relation: r.relation })) continue;
 
       const price = num(m.priceUsd) ?? 0;
       const priceAt = async (hoursAgo: number) => {
@@ -101,6 +139,59 @@ export async function resolveTokens(db: PrismaClient, now: Date = new Date()): P
       const growth1h = growth(p1), growth3h = growth(p3);
 
       const divergence = attentionPriceDivergence(n.velocity, growth3h);
+
+      // Early radar lane (research only): small tokens under the market cap ceiling are judged on their own floors,
+      // because the main opportunity floors (20K liquidity, 50 holders) would hide most of them. It writes alerts, never
+      // opportunities, orders or decisions, so the trading path and its floors are unchanged.
+      // marketCapUsd was computed above, before the evidence check, so the skip report and the lane agree on the ceiling.
+      if (!evidenceIssue && marketCapUsd != null && marketCapUsd < EARLY_RULES.maxMarketCapUsd) {
+        const thenRow = await db.tokenHolderMetric.findFirst({ where: { tokenId: t.id, at: { lte: new Date(now.getTime() - 3 * HOUR) } }, orderBy: { at: 'desc' }, select: { holders: true } });
+        const earlyInput = (devHoldingPct: number | null) => evaluateEarlyBoth({
+          marketCapUsd, liquidityUsd, volume24hUsd: num(m.volume24hUsd) ?? NaN, holders: h.holders, holdersThen: thenRow?.holders ?? null,
+          top10Pct: h.top10Pct, devHoldingPct, smartWalletHolders: h.smartWalletHolders, tokenAgeMinutes: t.createdOnChainAt ? (now.getTime() - t.createdOnChainAt.getTime()) / 60_000 : null,
+          relation: r.relation, ogScore: r.ogScore, narrativeScore: n.score, narrativeStage: n.stage, narrativeManipulationRisk: n.metrics[0]?.manipulationRisk ?? null,
+          divergence: divergence.label, priceGrowth1hPct: growth1h, riskFlags: t.risk[0]?.flags ?? [],
+        });
+        const early = earlyInput(h.devHoldingPct ?? null);
+        let safetyEvidence: RadarSafetyEvidence | null = null;
+        let tradeability: TradeabilityEvidence | null = null;
+        // Enrich publication candidates for the separate safety gate; preserve the attention score and its inputs.
+        if ([early.trencher, early.holder].some(e => e.eligible && (e.tier === 'WATCH' || e.tier === 'STRONG'))) {
+          if (deps.safety) safetyEvidence = await deps.safety.get(t.mint, at);
+          if (deps.tradeability) tradeability = await deps.tradeability.get(t.mint, at);
+        }
+        const safetyContext = {
+          priceGrowth1hPct: growth1h, priceGrowth3hPct: growth3h,
+          narrativeManipulationRisk: n.metrics[0]?.manipulationRisk ?? null,
+          ...(safetyEvidence ?? {}),
+          ...(tradeability ? {priceImpactPct: tradeability.priceImpactPct, tradeabilityAt: tradeability.sourceAt,tradeability} : {}),
+        };
+        let counted = false;
+        for (const profile of ['trencher', 'holder'] as const) {
+          const e = early[profile];
+          if (!e.eligible || (e.tier !== 'WATCH' && e.tier !== 'STRONG')) continue;
+          counted = true;
+          const kind = profile === 'trencher' ? 'EARLY_RADAR_TRENCHER' : 'EARLY_RADAR_HOLDER';
+          const recent = await db.alert.count({ where: { kind, refId: t.id, createdAt: { gte: new Date(now.getTime() - 6 * HOUR) } } });
+          if (recent) continue;
+          const k = (v: number) => `$${Math.round(v / 1000)}K`;
+          const created=await createEarlyRadarAlert(db,{
+            tokenId:t.id,mint:t.mint,profile,tier:e.tier,route:'NARRATIVE',matchKind:'NAME',score:e.score,metricId:m.id,holderMetricId:h.id,
+            safetyContext,
+            title: `${t.symbol}: early ${profile} candidate for ${n.name} (${k(marketCapUsd)} cap)`,
+            body: `${profile} score ${e.score} (${e.tier.toLowerCase()}). Market cap ${k(marketCapUsd)}, liquidity ${k(liquidityUsd)}, ${h.holders} holders, top 10 hold ${Math.round(h.top10Pct)}% (reported; may include the pool), narrative ${n.stage.toLowerCase()}${e.flags.length ? `. Cautions: ${e.flags.join(', ')}` : ''}. Research signal only, not a prediction or a recommendation to buy.`,
+          },at);
+          if(created.safety?.status==='PASS')out.safetyPass++;
+          else if(created.safety?.status==='UNKNOWN')out.safetyUnknown++;
+          else if(created.safety?.status==='BLOCK')out.safetyBlocked++;
+          if(created.created){out.alerts++;out.radarAlerts++;}
+          else if(created.reason!=='DUPLICATE'&&created.reason!=='SAFETY_BLOCKED')recordRadarEvidenceSkip(out.evidenceSkipped,created.reason);
+        }
+        if (counted) out.earlyCandidates++;
+      }
+
+      // Ranking needs real liquidity and holders. Until then it stays a watched candidate (or an early-radar alert above).
+      if (!meetsFloors({ liquidityUsd, holders: h.holders, relation: r.relation })) continue;
       const sc = opportunityScore({
         narrativeScore: n.score, smartMoneyScore: t.consensus[0]?.score ?? 0, liquidityUsd, holders: h.holders, priceGrowth1hPct: growth1h, ogScore: r.ogScore,
         relation: r.relation, divergence: divergence.label, top10Pct: h.top10Pct, devHoldingPct: h.devHoldingPct ?? null,
@@ -123,5 +214,6 @@ export async function resolveTokens(db: PrismaClient, now: Date = new Date()): P
       }
     }
   }
+  await saveResearchDiagnostics(db, 'narrative', now, out);
   return out;
 }

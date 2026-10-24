@@ -30,6 +30,7 @@ export interface GatewayDeps {
   hubOptions?: HubOptions;
   /** Browser origins allowed to open a socket. Empty means any origin may connect, and only a valid token gets anything. */
   allowedOrigins?: string[];
+  resolveAllowedOrigins?: () => Promise<string[]>;
   now?: () => number;
   limits?: { [K in keyof typeof GATEWAY_LIMITS]?: number };
 }
@@ -94,9 +95,13 @@ export async function registerGateway(app: FastifyInstance, deps: GatewayDeps): 
     }
   }
 
-  app.get('/v1/stream', { websocket: true, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, (socket: WebSocket, req) => {
+  app.get('/v1/stream', { websocket: true, config: { rateLimit: { max: 30, timeWindow: '1 minute' } }, preValidation: async (req, reply) => {
+    if (!deps.resolveAllowedOrigins || !req.headers.origin) return;
+    const allowed = await deps.resolveAllowedOrigins().catch(() => origins);
+    if (!allowed.includes(req.headers.origin)) return reply.code(403).send({ error: 'FORBIDDEN' });
+  } }, (socket: WebSocket, req) => {
     const origin = req.headers.origin;
-    if (origins.length && origin && !origins.includes(origin)) { socket.close(CLOSE.FORBIDDEN, 'origin_not_allowed'); return; }
+    if (!deps.resolveAllowedOrigins && origins.length && origin && !origins.includes(origin)) { socket.close(CLOSE.FORBIDDEN, 'origin_not_allowed'); return; }
 
     let entitlementUserId: string | null = null, entitlementSessionExpiry = 0;
     const egress = researchEgress(m => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(m)); }, async feature => {

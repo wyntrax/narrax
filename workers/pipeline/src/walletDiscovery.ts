@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@narra/database';
 import { DISCOVERY, rankCandidates, type TokenScan } from '@narra/smart-money';
-import { earlyBuyer } from '@narra/solana';
+import { earlyBuyer, WSOL_MINT } from '@narra/solana';
 import { oldestSignatures, type HistoryPort } from './walletFunding';
 
 /** Starting values, not validated against outcomes. */
@@ -42,14 +42,14 @@ export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: D
   for (const t of tokens) {
     try {
       const { oldestFirst, complete } = await oldestSignatures(rpc, t.mint, L.maxPages, L.pageSize);
-      const buyers: { wallet: string; rank: number }[] = [];
+        const buyers: { wallet: string; rank: number; signature: string; at: string | null }[] = [];
       if (complete) {
         const seen = new Set<string>();
         for (const sig of oldestFirst.slice(0, L.maxTxsPerToken)) {
           if (buyers.length >= DISCOVERY.maxRank) break;
           const tx = await rpc.getParsedTransaction(sig);
           const buyer = tx ? earlyBuyer(tx, t.mint) : null;
-          if (buyer && !seen.has(buyer)) { seen.add(buyer); buyers.push({ wallet: buyer, rank: buyers.length + 1 }); }
+          if (buyer && !seen.has(buyer)) { seen.add(buyer); buyers.push({ wallet: buyer, rank: buyers.length + 1, signature: sig, at: typeof tx?.blockTime === 'number' ? new Date(tx.blockTime * 1000).toISOString() : null }); }
         }
       }
       const data = { complete, buyers, scannedAt: now };
@@ -63,7 +63,26 @@ export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: D
   return out;
 }
 
-export interface DiscoverySummary { tokensJudged: number; winners: number; candidates: number }
+export interface DiscoverySummary { tokensJudged: number; winners: number; candidates: number; completeScans: number; noPrice: number; stalePrice: number; insufficientObservations: number; invalidPrice: number; emerging: number }
+export const DISCOVERY_HEALTH_KEY = 'wallet.discovery.health';
+export const DISCOVERY_EMERGING_KEY = 'wallet.discovery.emerging';
+
+/** Price completed discovery scans repeatedly while they can still be judged. Rotate
+ * by token id so missing provider coverage cannot permanently occupy the budget. */
+export async function discoveryPriceCandidates(db: PrismaClient, now: Date, limit: number, excluded: string[], after: string | null): Promise<string[]> {
+  if (limit <= 0) return [];
+  const where = { blacklisted: false, mint: { not: WSOL_MINT }, earlyBuyers: { is: { complete: true } }, createdOnChainAt: { gte: new Date(+now - DISCOVERY_LIMITS.lookbackMs), lte: now } };
+  // Half the existing quota targets first observations; the rest guarantees repeat observations.
+  const initialLimit = Math.floor(limit / 2);
+  const firstWhere = { ...where, metrics: { none: {} } };
+  const initial = initialLimit ? await db.token.findMany({ where: { ...firstWhere, id: { notIn: excluded, ...(after ? { gt: after } : {}) } }, orderBy: { id: 'asc' }, take: initialLimit, select: { id: true } }) : [];
+  if (after && initial.length < initialLimit) initial.push(...await db.token.findMany({ where: { ...firstWhere, id: { notIn: excluded, lte: after } }, orderBy: { id: 'asc' }, take: initialLimit - initial.length, select: { id: true } }));
+  const omit = [...excluded, ...initial.map(t => t.id)], remaining = limit - initial.length;
+  const first = await db.token.findMany({ where: { ...where, id: { notIn: omit, ...(after ? { gt: after } : {}) } }, orderBy: { id: 'asc' }, take: remaining, select: { id: true } });
+  const wrap = after && first.length < remaining ? await db.token.findMany({ where: { ...where, id: { notIn: omit, lte: after } }, orderBy: { id: 'asc' }, take: remaining - first.length, select: { id: true } }) : [];
+  // Keep cursor advancement in traversal order even when a first-price slot is reserved.
+  return [...initial, ...first, ...wrap].map(t => t.id).sort((a,b) => Number(!!after && a <= after) - Number(!!after && b <= after) || a.localeCompare(b));
+}
 
 /**
  * Turns scanned tokens into wallet suggestions. A token is a winner when its latest price is at least 3x its first
@@ -79,14 +98,22 @@ export async function discoverCandidates(db: PrismaClient, now: Date = new Date(
   const scans: TokenScan[] = [];
   const mintOf = new Map<string, string>();
   let winners = 0;
+  const out: DiscoverySummary = { tokensJudged: 0, winners: 0, candidates: 0, completeScans: rows.length, noPrice: 0, stalePrice: 0, insufficientObservations: 0, invalidPrice: 0, emerging: 0 };
+  const repeat = new Map<string, Set<string>>();
   for (const r of rows) {
+    for (const b of Array.isArray(r.buyers) ? r.buyers : []) {
+      if (!b || typeof b !== 'object' || Array.isArray(b) || typeof b.wallet !== 'string' || typeof b.rank !== 'number' || b.rank < 1 || b.rank > DISCOVERY.maxRank) continue;
+      const ids = repeat.get(b.wallet) ?? new Set<string>(); ids.add(r.token.id); repeat.set(b.wallet, ids);
+    }
     const [first, last] = await Promise.all([
-      db.tokenMetric.findFirst({ where: { tokenId: r.token.id }, orderBy: { at: 'asc' }, select: { priceUsd: true } }),
+      db.tokenMetric.findFirst({ where: { tokenId: r.token.id }, orderBy: { at: 'asc' }, select: { id: true, at: true, priceUsd: true } }),
       db.tokenMetric.findFirst({ where: { tokenId: r.token.id }, orderBy: { at: 'desc' }, select: { priceUsd: true, liquidityUsd: true, at: true } }),
     ]);
-    if (!first || !last || now.getTime() - last.at.getTime() > L.maxMetricAgeMs) continue; // undecided
+    if (!first || !last) { out.noPrice++; continue; }
+    if (+last.at > +now || +first.at > +now || now.getTime() - last.at.getTime() > L.maxMetricAgeMs) { out.stalePrice++; continue; }
+    if (+first.at >= +last.at) { out.insufficientObservations++; continue; }
     const p0 = Number(first.priceUsd.toString()), p1 = Number(last.priceUsd.toString());
-    if (!(p0 > 0) || !(p1 > 0)) continue;
+    if (!(p0 > 0) || !(p1 > 0)) { out.invalidPrice++; continue; }
     const honeypot = r.token.risk[0]?.flags.includes('HONEYPOT') ?? false;
     const winner = !honeypot && p1 / p0 >= L.winnerGrowth && Number(last.liquidityUsd.toString()) >= L.minLiquidityUsd;
     const buyers = Array.isArray(r.buyers) ? (r.buyers as unknown[]).filter((b): b is { wallet: string; rank: number } => typeof (b as { wallet?: unknown })?.wallet === 'string' && typeof (b as { rank?: unknown })?.rank === 'number') : [];
@@ -102,9 +129,17 @@ export async function discoverCandidates(db: PrismaClient, now: Date = new Date(
   const exclude = new Set([...tracked, ...reviewed].map((x) => x.address));
   const ranked = rankCandidates(scans, exclude).filter((c) => c.score >= L.minCandidateScore).slice(0, L.maxCandidates);
   for (const c of ranked) {
-    const data = { score: c.score, winnerTokens: c.winnerTokens, evidence: { scannedTokens: c.scannedTokens, hitRate: c.hitRate, avgRank: c.avgRank, winnerMints: c.winners.slice(0, 10).map((id) => mintOf.get(id) ?? id) } };
+    const data = { score: c.score, winnerTokens: c.winnerTokens, evidence: { checkedAt: now.toISOString(), scannedTokens: c.scannedTokens, hitRate: c.hitRate, avgRank: c.avgRank, winnerMints: c.winners.slice(0, 10).map((id) => mintOf.get(id) ?? id) } };
     // Existing PENDING suggestions are re-scored. A reviewed address is excluded above, so its status is never touched.
     await db.walletCandidate.upsert({ where: { address: c.address }, create: { address: c.address, ...data }, update: data });
   }
-  return { tokensJudged: scans.length, winners, candidates: ranked.length };
+  const emerging = [...repeat].filter(([address, ids]) => ids.size >= 2 && !exclude.has(address)).map(([address, ids]) => ({ address, scannedTokens: ids.size })).sort((a,b) => b.scannedTokens - a.scannedTokens || a.address.localeCompare(b.address));
+  Object.assign(out, { tokensJudged: scans.length, winners, candidates: ranked.length, emerging: emerging.length });
+  const health = { ...out, checkedAt: now.toISOString(), lookbackHours: 48 };
+  const candidates = { checkedAt: now.toISOString(), total: emerging.length, capped: emerging.length > 50, items: emerging.slice(0,50) };
+  await db.$transaction([
+    db.systemSetting.upsert({ where: { key: DISCOVERY_HEALTH_KEY }, create: { key: DISCOVERY_HEALTH_KEY, value: health }, update: { value: health } }),
+    db.systemSetting.upsert({ where: { key: DISCOVERY_EMERGING_KEY }, create: { key: DISCOVERY_EMERGING_KEY, value: candidates }, update: { value: candidates } }),
+  ]);
+  return out;
 }

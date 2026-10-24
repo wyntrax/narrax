@@ -6,14 +6,34 @@ const grant: LocalGrant = { id: 'g', userId: 'u', tier: 'EARLY_ACCESS', source: 
 const snapshot = (): EntitlementSnapshot => ({ userId: 'u', linkedWallets: [{ chain: 'solana', address: 'CaseSensitive', userId: 'u', verifiedAt: now }], grants: [grant], memberships: [], earlyAccessEnabled: true });
 const membership = (key = 'PRO', address = 'CaseSensitive') => ({ membershipId: 'm', chain: 'solana', address, key, status: 'ACTIVE', validUntil: later });
 describe('pure entitlement resolution', () => {
+  it.each(['MEMBER','PRO','ELITE'])('requires an active Wyntrax membership for %s while early access needs no holding', tier => {
+    const s = snapshot();
+    expect(resolveEntitlements(s, now).effectiveTier).toBe('EARLY_ACCESS');
+    expect(resolveEntitlements({ ...s, grants: [] }, now).effectiveTier).toBe('NONE');
+    expect(resolveEntitlements({ ...s, grants: [], memberships: [membership(tier)] }, now).effectiveTier).toBe(tier === 'ELITE' ? 'PRO' : tier);
+    for (const status of ['PENDING','REVOKED']) expect(resolveEntitlements({ ...s, grants: [], memberships: [{ ...membership(tier), status }] }, now).effectiveTier).toBe('NONE');
+    expect(resolveEntitlements({ ...s, grants: [], memberships: [{ ...membership(tier), validUntil: now }] }, now).effectiveTier).toBe('NONE');
+  });
   it('defaults to NONE; unknown features never grant', () => {
     expect(resolveEntitlements({ ...snapshot(), grants: [] }, now).effectiveTier).toBe('NONE');
     expect(featureAllowed('ELITE', 'trading')).toBe(false);
   });
+  it('an admin holds PRO-equivalent full access with no wallets, grants or memberships', () => {
+    const bare: EntitlementSnapshot = { userId: 'u', linkedWallets: [], grants: [], memberships: [], earlyAccessEnabled: false, admin: true };
+    const r = resolveEntitlements(bare, now);
+    expect(r.admin).toBe(true);
+    expect(r.effectiveTier).toBe('PRO');
+    expect(r.researchPageLimit).toBe(70);
+    expect(Object.values(r.features).every(f => f.allowed)).toBe(true);
+    expect(r.sources).toContainEqual({ source: 'ADMIN', id: 'admin', tier: 'PRO', validUntil: null });
+    // The flag is opt-in: the same snapshot without it still resolves to NONE.
+    expect(resolveEntitlements({ ...bare, admin: false }, now).effectiveTier).toBe('NONE');
+    expect(resolveEntitlements({ ...bare, admin: false }, now).admin).toBe(false);
+  });
   it('maxes sources across multiple wallets without adding tiers', () => {
     const s = snapshot(); s.linkedWallets = [...s.linkedWallets, { chain: 'solana', address: 'other', userId: 'u', verifiedAt: now }];
     s.memberships = ['MEMBER', 'ELITE', 'PRO'].map((key, i) => ({ ...membership(key, i ? 'other' : 'CaseSensitive'), membershipId: String(i) }));
-    expect(resolveEntitlements(s, now)).toMatchObject({ effectiveTier: 'ELITE', researchPageLimit: 100 });
+    expect(resolveEntitlements(s, now)).toMatchObject({ effectiveTier: 'PRO', researchPageLimit: 70 });
   });
   it.each(['NONE', 'UNKNOWN', 'EARLY_ACCESS'])('wire tier %s grants nothing', tier => {
     expect(resolveEntitlements({ ...snapshot(), grants: [], memberships: [membership(tier)] }, now).effectiveTier).toBe('NONE');
@@ -24,9 +44,9 @@ describe('pure entitlement resolution', () => {
     }
     expect(resolveEntitlements({ ...snapshot(), linkedWallets: snapshot().linkedWallets.map(w => ({ ...w, userId: 'other' })) }, now).effectiveTier).toBe('NONE');
   });
-  it('revocation, expiry at the boundary, disabled and last unlink suppress local access', () => {
+  it('closing admission preserves grants; revocation, expiry and last unlink suppress local access', () => {
     for (const g of [{ ...grant, status: 'REVOKED' }, { ...grant, validUntil: now }, { ...grant, tier: 'ELITE', source: 'ADMIN' }]) expect(resolveEntitlements({ ...snapshot(), grants: [g] }, now).effectiveTier).toBe('NONE');
-    expect(resolveEntitlements({ ...snapshot(), earlyAccessEnabled: false }, now).effectiveTier).toBe('NONE');
+    expect(resolveEntitlements({ ...snapshot(), earlyAccessEnabled: false }, now).effectiveTier).toBe('EARLY_ACCESS');
     expect(resolveEntitlements({ ...snapshot(), linkedWallets: [] }, now).effectiveTier).toBe('NONE');
     for (const validUntil of [null, now, new Date('invalid')]) expect(resolveEntitlements({ ...snapshot(), grants: [], memberships: [{ ...membership(), validUntil }] }, now).effectiveTier).toBe('NONE');
   });
@@ -35,7 +55,7 @@ describe('pure entitlement resolution', () => {
   });
   it('independent memberships fall back ELITE to PRO to MEMBER without revoking a peer', () => {
     const s = snapshot(); s.memberships = ['MEMBER', 'PRO', 'ELITE'].map(key => ({ ...membership(key), membershipId: key }));
-    expect(resolveEntitlements(s, now).effectiveTier).toBe('ELITE');
+    expect(resolveEntitlements(s, now).effectiveTier).toBe('PRO');
     s.memberships = s.memberships.map(m => m.key === 'ELITE' ? { ...m, status: 'REVOKED' } : m);
     expect(resolveEntitlements(s, now).effectiveTier).toBe('PRO');
     s.memberships = s.memberships.map(m => m.key === 'PRO' ? { ...m, validUntil: now } : m);

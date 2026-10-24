@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from '@narra/database';
-import { AiConfigSchema, DEFAULT_AI_CONFIG, analyzeOpportunity, type AiConfig, type LlmProvider, type OpportunityFacts } from '@narra/ai';
+import { AiConfigSchema, analyzeOpportunity, defaultAiConfig, type AiConfig, type LlmProvider, type OpportunityFacts } from '@narra/ai';
 import { sanitizeUntrusted, wrapUntrusted, type UntrustedField } from '@narra/shared';
 import { attentionPriceDivergence } from '@narra/token-intel';
 
@@ -11,8 +11,9 @@ const startOfUtcDay = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUT
 /** The saved admin settings merged over the defaults. Anything invalid falls back to the defaults, never to a looser setting. */
 export async function loadAiConfig(db: PrismaClient): Promise<AiConfig> {
   const row = await db.systemSetting.findUnique({ where: { key: 'ai.models' } });
-  const merged = AiConfigSchema.safeParse({ ...DEFAULT_AI_CONFIG, ...((row?.value as object | null) ?? {}) });
-  return merged.success ? merged.data : DEFAULT_AI_CONFIG;
+  const base = defaultAiConfig();
+  const merged = AiConfigSchema.safeParse({ ...base, ...((row?.value as object | null) ?? {}) });
+  return merged.success ? merged.data : base;
 }
 
 export async function saveAiConfig(db: PrismaClient, cfg: AiConfig): Promise<void> {

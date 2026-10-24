@@ -16,6 +16,8 @@ export interface SwapExpectations {
   /** Base units going in, from the quote. */
   inAmount: bigint;
   limits: TxLimits;
+  /** Optional lookup keys resolved from the chain by the caller, in message writable/readonly order. Never accept client-supplied keys. */
+  resolvedLookupKeys?: {writable: string[]; readonly: string[]};
 }
 
 /** Starting values, not tuned. The executor config can only make them stricter than its hard-coded ceilings. */
@@ -100,6 +102,13 @@ export function verifySwapTransaction(base64: string, exp: SwapExpectations): Ve
   const staticCount = keys.length;
   const ixs: MessageCompiledInstruction[] = msg.compiledInstructions;
   const lookups = msg.addressTableLookups ?? [];
+  if(exp.resolvedLookupKeys){
+    const {writable,readonly}=exp.resolvedLookupKeys;
+    if(writable.length!==lookups.reduce((n,l)=>n+l.writableIndexes.length,0)||readonly.length!==lookups.reduce((n,l)=>n+l.readonlyIndexes.length,0)||![...writable,...readonly].every(isBase58Address)){
+      fail('LOOKUP_KEYS_MISMATCH','Resolved lookup keys do not match the message.');return done();
+    }
+    keys.push(...writable,...readonly);
+  }
   summary.version = msg.version;
   summary.feePayer = keys[0] ?? null;
   summary.requiredSignatures = msg.header.numRequiredSignatures;
@@ -133,7 +142,7 @@ export function verifySwapTransaction(base64: string, exp: SwapExpectations): Ve
     if (!program) { fail('PROGRAM_NOT_ALLOWED', `${at} calls ${programId}, which is not on the allow list.`); summary.instructions.push({ program: programId, kind: 'not-allowed' }); return; }
 
     const idx = [...ix.accountKeyIndexes];
-    const staticOnly = idx.every((n) => n < staticCount);
+    const staticOnly = idx.every((n) => n < (exp.resolvedLookupKeys?keys.length:staticCount));
     const acct = (n: number) => keys[idx[n] ?? -1];
     const data = ix.data;
     const note = (kind: string, detail?: string) => summary.instructions.push({ program, kind, ...(detail ? { detail } : {}) });

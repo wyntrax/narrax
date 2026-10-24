@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@narra/database';
 import {
-  classifyStyle, computeConsensus, computeLeaderStats, computeWalletStats, detectTimingClusters, holdingPatterns, rotationRate, walletScore,
+  classifyStyle, computeConsensus, computeLeaderStats, computeWalletStats, detectTimingClusters, holdingPatterns, rotationRate, walletScore, MIN_CLOSED_LEGS, researchSample,
   type ConsensusEvent, type Entry, type TradeRow, type WalletInfo,
 } from '@narra/smart-money';
 
@@ -63,6 +63,12 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
     const mine = byWallet.get(w.id) ?? [];
     const stats = computeWalletStats(mine);
     const score = walletScore(stats);
+    const sample = researchSample(mine, stats, score, now);
+    const researchKey = `wallet.research.${w.id}`;
+    ops.push(db.systemSetting.upsert({ where: { key: researchKey }, create: { key: researchKey, value: { ...sample } }, update: { value: { ...sample } } }));
+    const key = `wallet.intelligence.${w.id}`;
+    const value = { checkedAt: now.toISOString(), windowDays, observedTrades: mine.length, observedBuys: mine.filter(t=>t.side==='BUY').length, observedSells: mine.filter(t=>t.side==='SELL').length, unmatchedSells: stats.unmatchedSells, closedTrades: stats.legs.length, requiredClosedTrades: MIN_CLOSED_LEGS, status: score === null ? 'INSUFFICIENT_HISTORY' : 'READY' };
+    ops.push(db.systemSetting.upsert({ where: { key }, create: { key, value }, update: { value } }));
     if (score === null) { unscored.push(w.id); continue; }
     const leader = leaders.get(w.id);
     const style = classifyStyle(stats, leader, rotationRate(mine));

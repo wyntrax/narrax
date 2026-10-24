@@ -66,9 +66,43 @@ describe('DexScreenerSource', () => {
     for (const p of bad) expect((await new DexScreenerSource({ ...fast, fetch: reply([p]) }).getSnapshots([M1])).size).toBe(0);
   });
 
+  it('keeps only allow-listed provider artwork and never invents one', async () => {
+    const shot = async (imageUrl?: unknown) => (await new DexScreenerSource({ ...fast, fetch: reply([pair(imageUrl === undefined ? {} : { info: { imageUrl } })]) }).getSnapshots([M1])).get(M1)!;
+    expect((await shot('https://dd.dexscreener.com/ds-data/tokens/solana/Z.png')).imageUrl).toBe('https://dd.dexscreener.com/ds-data/tokens/solana/Z.png');
+    for (const imageUrl of ['https://evil.example/x.png', 'javascript:alert(1)', 42]) expect((await shot(imageUrl)).imageUrl).toBeNull();
+    expect((await shot()).imageUrl).toBeNull();
+  });
+
   it('falls back to FDV when market cap is missing and says so', async () => {
     const s = (await new DexScreenerSource({ ...fast, fetch: reply([pair({ marketCap: undefined, fdv: 9_000_000 })]) }).getSnapshots([M1])).get(M1)!;
     expect(s).toMatchObject({ marketCapUsd: 9_000_000, marketCapIsFdv: true });
+  });
+
+  it('reads a reference price when the deepest pool has no market cap or FDV', async () => {
+    const body = [pair({
+      baseToken: { address: WSOL_MINT, name: 'Wrapped SOL', symbol: 'SOL' },
+      quoteToken: { address: USDC_MINT, name: 'USD Coin', symbol: 'USDC' },
+      priceUsd: '102.38', marketCap: null, fdv: null, liquidity: { usd: 29_000_000 },
+    })];
+    const src = new DexScreenerSource({ ...fast, fetch: reply(body) });
+    expect((await src.getSnapshots([WSOL_MINT])).size).toBe(0);
+    expect((await src.getReferencePrices([WSOL_MINT])).get(WSOL_MINT)).toBe(102.38);
+  });
+
+  it('uses the deepest priced pool for a reference asset and never a zero price', async () => {
+    const body = [
+      pair({ baseToken: { address: WSOL_MINT, name: 'Wrapped SOL', symbol: 'SOL' }, priceUsd: '99', marketCap: null, fdv: null, liquidity: { usd: 10 } }),
+      pair({ baseToken: { address: WSOL_MINT, name: 'Wrapped SOL', symbol: 'SOL' }, priceUsd: '101', marketCap: null, fdv: null, liquidity: { usd: 20_000_000 } }),
+      pair({ baseToken: { address: WSOL_MINT, name: 'Wrapped SOL', symbol: 'SOL' }, priceUsd: '0', marketCap: null, fdv: null, liquidity: { usd: 40_000_000 } }),
+    ];
+    expect((await new DexScreenerSource({ ...fast, fetch: reply(body) }).getReferencePrices([WSOL_MINT])).get(WSOL_MINT)).toBe(101);
+  });
+
+  it('does not relax liquidity, volume, chain or mint binding for reference prices', async () => {
+    for (const over of [{ liquidity: null }, { liquidity: { usd: -1 } }, { volume: null }, { volume: { h24: -1 } }, { chainId: 'base' }, { baseToken: { address: M2 } }, { priceUsd: '1e999' }]) {
+      const src = new DexScreenerSource({ ...fast, fetch: reply([pair({ marketCap: null, fdv: null, ...over })]) });
+      expect((await src.getReferencePrices([M1])).size).toBe(0);
+    }
   });
 
   it('ignores other chains, unrequested tokens, and pools where the token is only the quote side', async () => {
@@ -133,6 +167,12 @@ describe('GeckoTerminalSource.getTokenInfo', () => {
 });
 
 describe('GeckoTerminalSource.getNewPools', () => {
+  it('uses the API path for an origin-only configuration and discovers both pool samples', async () => {
+    const urls:string[]=[];
+    const src=new GeckoTerminalSource({...fast,baseUrl:'https://api.geckoterminal.com/',fetch:async(input)=>{urls.push(String(input));return new Response(JSON.stringify({data:[]}),{status:200});}});
+    await src.getNewPools();await src.getTrendingPools();
+    expect(urls).toEqual(['https://api.geckoterminal.com/api/v2/networks/solana/new_pools?include=base_token&page=1','https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?include=base_token&page=1']);
+  });
   const pool = (tokenId: string, over: Record<string, unknown> = {}) => ({
     id: `solana_pool${tokenId}`, type: 'pool',
     attributes: { address: 'Pool1', name: 'ZORB / SOL', pool_created_at: '2026-09-30T11:00:00Z', reserve_in_usd: '42000.5', ...over },

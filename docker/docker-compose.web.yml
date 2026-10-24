@@ -1,0 +1,23 @@
+# Independent Compose project: frontend deploy/rollback never restarts backend services or runs migrations.
+name: narrax-web
+services:
+  web:
+    image: "${NARRA_WEB_IMAGE:?set the digest-pinned frontend image}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    ports: ["127.0.0.1:4010:3000"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /app/apps/web/.next/cache:rw,nosuid,size=64m,uid=1000,gid=1000
+    # Deliberate allowlist, NOT env_file: never inherit the backend .env or signing credentials.
+    environment:
+      NEXT_PUBLIC_SITE_URL: "${NEXT_PUBLIC_SITE_URL:?set the public HTTPS web origin}"
+      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:?set the public HTTPS API origin}"
+      NEXT_PUBLIC_PRIVY_APP_ID: "${NEXT_PUBLIC_PRIVY_APP_ID:?set the public Privy app ID}"
+      NEXT_PUBLIC_WYNTRAX_URL: "${NEXT_PUBLIC_WYNTRAX_URL:-}"
+      NARRA_SEO_INDEXABLE: "${NARRA_SEO_INDEXABLE:?explicitly choose true or false}"
+      NARRA_GOOGLE_SITE_VERIFICATION: "${NARRA_GOOGLE_SITE_VERIFICATION:-}"
+      NARRA_BING_SITE_VERIFICATION: "${NARRA_BING_SITE_VERIFICATION:-}"

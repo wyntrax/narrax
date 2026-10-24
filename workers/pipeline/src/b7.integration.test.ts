@@ -103,7 +103,10 @@ describe.skipIf(!up)('B7 workers: notification dispatch and realtime publishing 
   });
 
   describe('publishNewEvents', () => {
-    const T0 = new Date();
+    // Keep publisher fixtures outside the shared DB's real-time notification
+    // backlog: dispatch tests can create more than one bounded publisher batch.
+    // Every publisher fixture below uses this same synthetic clock.
+    const T0 = new Date(Date.now() + 60 * 60_000);
     const at = (ms: number) => new Date(T0.getTime() + ms);
     const all = async (): Promise<StreamEvent[]> => stream.readRange('0-0', 5000);
     const mine = (events: StreamEvent[], pred: (e: StreamEvent) => boolean) => events.filter(pred);

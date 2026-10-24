@@ -1,0 +1,33 @@
+{
+  "at": "2026-10-21T00:51:01.022Z",
+  "startedAt": "2026-10-21T00:50:37.756Z",
+  "consumers": 1,
+  "narrative": {
+    "evidenceSkipped": {
+      "MARKET_STALE": 6,
+      "HOLDERS_STALE": 1
+    },
+    "earlyCandidates": 0,
+    "alerts": 4
+  },
+  "social": {
+    "evidenceSkipped": {
+      "MARKET_STALE": 38,
+      "HOLDERS_STALE": 6,
+      "HOLDERS_MISSING": 25
+    },
+    "earlyCandidates": 0,
+    "alerts": 0
+  },
+  "priorAlert": {
+    "entryAt": null,
+    "entryPriceUsd": null,
+    "entryUnknownReason": "NO_FRESH_ENTRY_PRICE"
+  },
+  "priorTokenCurrentEvidence": {
+    "priceAt": "2026-10-21T00:50:23.454Z",
+    "holdersAt": "2026-10-21T00:45:00.031Z",
+    "issue": null
+  },
+  "newRadarCalls": 0
+}

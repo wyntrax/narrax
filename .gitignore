@@ -11,6 +11,11 @@ credentials*.json
 *service-account*.json
 secrets/
 .secrets/
+# Host-only runtime configuration and deployment state (may contain env snapshots).
+*.env
+!*.env.example
+.deploy/
+/docker/docker-compose.prod.yml
 
 # Dependencies and generated outputs.
 node_modules/
@@ -22,7 +27,18 @@ out/
 coverage/
 *.tsbuildinfo
 *.log
+# Includes rotated logs such as collector-market.log.previous.
+logs/
+*.log.*
 vitest-results*.json
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
 
 # Local databases, backups, dumps, and exports. Schema migrations are source.
 backups/
@@ -34,15 +50,38 @@ exports/
 *.db
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+dump.rdb
+appendonly.aof
+appendonlydir/
 *.sql
 !packages/database/prisma/migrations/**/migration.sql
 *.sql.gz
 *.sql.zip
 *.dump.gz
 *.csv
+# Local archives (for example narra-full.zip); never part of the build context or git history.
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
 
 # Editor and OS metadata.
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+~$*
+playwright-report/
+test-results/
+.next-e2e/
+
+local-api.ps1
+local-web.ps1

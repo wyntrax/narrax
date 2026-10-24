@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from '@narra/database';
 import { sanitizeUntrusted } from '@narra/shared';
 import { makeRequireAdmin } from './admin';
 import type { AccountDeps } from './account';
+import { walletQualifications } from '@narra/worker-pipeline';
 
 const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const Address = z.string().regex(BASE58_ADDRESS);
@@ -12,7 +13,7 @@ const Paging = z.object({ limit: z.coerce.number().int().min(1).max(100).default
 const AddBody = z.object({ address: Address, label: Label.optional() }).strict();
 const ImportBody = z.object({ wallets: z.array(z.object({ address: z.string().max(80), label: z.string().max(120).nullish() }).strict()).min(1).max(500) }).strict();
 const PatchBody = z.object({ label: Label.optional(), active: z.boolean().optional() }).strict().refine((b) => b.label !== undefined || b.active !== undefined, 'nothing to change');
-const ApproveBody = z.object({ label: Label.optional() }).strict();
+const ApproveBody = z.object({ label: Label.optional(), reason: z.string().trim().min(1).max(300).transform(s=>sanitizeUntrusted(s,300)).optional() }).strict();
 const isUnique = (e: unknown) => (e as { code?: string } | null)?.code === 'P2002';
 
 export interface WalletAdminDeps extends Pick<AccountDeps, 'db' | 'verifier'> {
@@ -43,8 +44,9 @@ export function registerWalletAdminRoutes(app: FastifyInstance, deps: WalletAdmi
       include: { profile: { select: { score: true } }, cluster: { select: { id: true, label: true, confidence: true } }, funding: { select: { status: true, funder: true, fundedAt: true } } },
     });
     const page = rows.slice(0, q.data.limit);
+    const qualifications = await walletQualifications(db,page,new Date());
     return {
-      items: page.map((w) => ({ address: w.address, label: w.label, source: w.source, active: w.active, createdAt: w.createdAt, score: w.profile?.score ?? null, cluster: w.cluster, funding: w.funding })),
+      items: page.map((w) => ({ address: w.address, label: w.label, source: w.source, active: w.active, createdAt: w.createdAt, score: w.profile?.score ?? null, cluster: w.cluster, funding: w.funding, researchReview: w.researchReview, researchReviewReason: w.researchReviewReason, qualification: qualifications.get(w.id) })),
       nextCursor: rows.length > q.data.limit ? page[page.length - 1]!.id : null,
     };
   });
@@ -115,38 +117,44 @@ export function registerWalletAdminRoutes(app: FastifyInstance, deps: WalletAdmi
   app.get('/v1/admin/wallet-candidates', opts, async (req, reply) => {
     const q = Paging.extend({ status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).default('PENDING') }).safeParse(req.query);
     if (!q.success) return reply.code(400).send(bad());
-    const rows = await db.walletCandidate.findMany({ where: { status: q.data.status }, orderBy: [{ score: 'desc' }, { id: 'asc' }], take: q.data.limit });
-    return { items: rows.map((c) => ({ address: c.address, score: c.score, winnerTokens: c.winnerTokens, status: c.status, evidence: c.evidence, createdAt: c.createdAt, reviewedAt: c.reviewedAt })) };
+    if(q.data.cursor&&!await db.walletCandidate.count({where:{id:q.data.cursor,status:q.data.status}}))return reply.code(400).send(bad());
+    const rows = await db.walletCandidate.findMany({ where: { status: q.data.status }, orderBy: [{ score: 'desc' }, { id: 'asc' }], take: q.data.limit+1, ...(q.data.cursor?{cursor:{id:q.data.cursor},skip:1}:{}) });
+    const page=rows.slice(0,q.data.limit);
+    return { nextCursor:rows.length>page.length?page.at(-1)!.id:null,items: page.map((c) => ({ address: c.address, score: c.score, winnerTokens: c.winnerTokens, status: c.status, evidence: c.evidence, createdAt: c.createdAt, reviewedAt: c.reviewedAt })) };
   });
 
-  const review = async (req: { params: unknown; userId?: string }, status: 'APPROVED' | 'REJECTED', label?: string | null) => {
+  const review = async (req: { params: unknown; userId?: string }, status: 'APPROVED' | 'REJECTED', label?: string | null, reason?: string) => {
     const { address } = req.params as { address: string };
     if (!BASE58_ADDRESS.test(address)) return { code: 400 as const };
-    const c = await db.walletCandidate.findUnique({ where: { address } });
-    if (!c) return { code: 404 as const };
-    if (c.status !== 'PENDING') return { code: 409 as const };
-    // The status check is part of the update, so two admins cannot both approve the same candidate.
-    const claimed = await db.walletCandidate.updateMany({ where: { id: c.id, status: 'PENDING' }, data: { status, reviewedAt: new Date(), reviewedBy: req.userId! } });
-    if (claimed.count === 0) return { code: 409 as const };
-    if (status === 'APPROVED') {
-      const w = await db.trackedWallet.findUnique({ where: { address }, select: { id: true } });
-      if (w) await db.trackedWallet.update({ where: { id: w.id }, data: { active: true } });
-      else await db.trackedWallet.create({ data: { address, label: label ?? null, source: 'DISCOVERED' } });
-    }
-    await audit(req.userId!, status === 'APPROVED' ? 'wallet_candidate.approved' : 'wallet_candidate.rejected', { address, score: c.score });
-    return { code: 200 as const, address };
+    return db.$transaction(async (tx) => {
+      const c = await tx.walletCandidate.findUnique({ where: { address } });
+      if (!c) return { code: 404 as const };
+      if (c.status !== 'PENDING') return { code: 409 as const };
+      // The status check is part of the update, so two admins cannot both approve the same candidate.
+      const claimed = await tx.walletCandidate.updateMany({ where: { id: c.id, status: 'PENDING' }, data: { status, reviewedAt: new Date(), reviewedBy: req.userId! } });
+      if (claimed.count === 0) return { code: 409 as const };
+      if (status === 'APPROVED') {
+        const w = await tx.trackedWallet.findUnique({ where: { address }, select: { id: true } });
+        if (w) await tx.trackedWallet.update({ where: { id: w.id }, data: { active: true } });
+        else await tx.trackedWallet.create({ data: { address, label: label ?? null, source: 'DISCOVERED' } });
+      }
+      await tx.auditLog.create({ data: { userId: req.userId!, action: status === 'APPROVED' ? 'wallet_candidate.approved' : 'wallet_candidate.rejected', detail: { address, score: c.score, reason: reason ?? null, evidence: c.evidence } } });
+      return { code: 200 as const, address };
+    });
   };
 
   app.post('/v1/admin/wallet-candidates/:address/approve', opts, async (req, reply) => {
     const body = ApproveBody.safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send(bad(body.error.issues));
-    const r = await review(req, 'APPROVED', body.data.label);
+    const r = await review(req, 'APPROVED', body.data.label, body.data.reason);
     if (r.code !== 200) return reply.code(r.code).send({ error: r.code === 404 ? 'NOT_FOUND' : r.code === 409 ? 'ALREADY_REVIEWED' : 'INVALID_INPUT' });
     return { approved: r.address, syncRequested: await sync() };
   });
 
   app.post('/v1/admin/wallet-candidates/:address/reject', opts, async (req, reply) => {
-    const r = await review(req, 'REJECTED');
+    const body=ApproveBody.safeParse(req.body??{});
+    if(!body.success)return reply.code(400).send(bad(body.error.issues));
+    const r = await review(req, 'REJECTED',undefined,body.data.reason);
     if (r.code !== 200) return reply.code(r.code).send({ error: r.code === 404 ? 'NOT_FOUND' : r.code === 409 ? 'ALREADY_REVIEWED' : 'INVALID_INPUT' });
     return { rejected: r.address };
   });

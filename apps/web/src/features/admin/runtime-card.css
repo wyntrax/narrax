@@ -1,0 +1,4 @@
+.runtime-form textarea{width:100%;min-height:80px;padding:8px 12px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit;font-size:14px;resize:vertical}
+.runtime-form textarea:focus-visible{outline:2px solid var(--tx);outline-offset:2px}
+.runtime-form textarea[aria-invalid=true]{border-color:var(--neg)}
+.runtime-form pre{max-width:100%;white-space:pre-wrap}

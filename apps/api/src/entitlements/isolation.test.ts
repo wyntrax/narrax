@@ -17,9 +17,28 @@ describe('entitlement non-escalation structural boundary', () => {
     for (const file of files) {
       const text = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
       expect(forbidden(text), file.replace(/\\/g, '/')).toBe(false);
-      // Local imports must stay in this boundary, except the existing authentication pre-handler.
-      for (const match of text.matchAll(/from ['"](\.\.[^'"]+)['"]/g)) expect(match[1], file).toBe('../account');
+      // Settings may also use the audited public-config bridges, checked below; other modules only use authentication
+      // and the single admin decision (read-only: `decideIsAdmin`, never the environment-reading allowlist helpers).
+      // The route module may read stored, mint-bound token artwork; that helper issues no provider request and writes nothing.
+      const relative = file.replace(/\\/g, '/');
+      const allowed = relative.endsWith('/settings.ts') ? ['../privy-key', '../runtime-settings']
+        : relative.endsWith('/entitlements/routes.ts') ? ['../account', '../adminAccess', '../marketEvidence']
+        : ['../account', '../adminAccess'];
+      for (const match of text.matchAll(/from ['"](\.\.[^'"]+)['"]/g)) expect(allowed, file).toContain(match[1]);
+      for (const match of text.matchAll(/import\s*\{([^}]+)\}\s*from\s*['"]\.\.\/marketEvidence['"]/g)) {
+        expect(match[1]!.split(',').map(name => name.trim()).sort(), file).toEqual(['marketTokenImages']);
+      }
       if (text.includes("from '../account'")) expect(text).toContain('makeAuthenticate');
+      for (const match of text.matchAll(/import\s*\{([^}]+)\}\s*from\s*['"]\.\.\/adminAccess['"]/g)) {
+        expect(match[1]!.split(',').map(name => name.trim()).sort(), file).toEqual(['decideIsAdmin']);
+      }
+    }
+  });
+  it('public runtime bridges cannot write trading state or import trading capabilities', () => {
+    for (const file of ['apps/api/src/privy-key.ts', 'apps/api/src/runtime-settings.ts']) {
+      // Only the resolver's explicit public environment fallback may read ambient env.
+      const source = readFileSync(file, 'utf8').replace(/env: Env = process\.env/g, 'env: Env = publicEnv');
+      expect(forbidden(source), file).toBe(false);
     }
   });
   it('detects mutation fixtures and Windows paths', () => {

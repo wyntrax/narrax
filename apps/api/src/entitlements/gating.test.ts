@@ -13,8 +13,9 @@ import { researchPorts } from './chatAccess';
 import { makeAgentPorts } from '../chatPorts';
 import { RealtimeHub, type EventStream, type StreamEvent } from '@narra/realtime';
 import * as access from './access';
+import { assertTestDatabase } from '../../../../scripts/test-database';
 const target = new URL(process.env.DATABASE_URL ?? 'invalid:');
-if (target.hostname !== 'localhost' || target.port !== '5432' || target.pathname !== '/narra_ent') throw Error('Scratch only');
+assertTestDatabase(target);
 const db = createPrisma(target.toString()), tag = `gate-${randomUUID()}`, address = bs58.encode(randomBytes(32));
 const keys = ['entitlements.enforced', 'entitlements.shadow_log', 'entitlements.features', 'early_access.enabled', 'early_access.seat_cap'];
 let saved: Awaited<ReturnType<typeof db.systemSetting.findMany>>, app: Awaited<ReturnType<typeof buildApp>>, user: string, admin: string, other: string;
@@ -22,7 +23,7 @@ let at = new Date('2026-10-08T00:00:00Z'), version = 0, ownOpp: string, sharedOp
 const get = (url: string, who = 'user') => app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${who}` }, remoteAddress: `192.0.2.${++requestNo % 200 + 1}` });
 let requestNo = 0;
 const settings = (values: Record<string, unknown>) => updateLocalSettings(db, admin, values, 'Gate test');
-const membership = (tier: 'NONE' | 'PRO' | 'ELITE' = 'PRO', validUntil = new Date(+at + 86400000)) => applyWyntraxEvent(db, { id: `${tag}-${++version}`, type: tier === 'NONE' ? 'membership.revoked' : 'membership.granted', occurredAt: at.toISOString(), data: { membershipId: tag, seq: version, key: tier === 'NONE' ? 'PRO' : tier, validUntil: tier === 'NONE' ? null : validUntil.toISOString(), chain: 'solana', wallet: address, checkedAt: at.toISOString() } }, 'fixture', at);
+const membership = (tier: 'NONE' | 'MEMBER' | 'PRO' | 'ELITE' = 'PRO', validUntil = new Date(+at + 86400000)) => applyWyntraxEvent(db, { id: `${tag}-${++version}`, type: tier === 'NONE' ? 'membership.revoked' : 'membership.granted', occurredAt: at.toISOString(), data: { membershipId: tag, seq: version, key: tier === 'NONE' ? 'PRO' : tier, validUntil: tier === 'NONE' ? null : validUntil.toISOString(), chain: 'solana', wallet: address, checkedAt: at.toISOString() } }, 'fixture', at);
 beforeAll(async () => {
   saved = await db.systemSetting.findMany({ where: { key: { in: keys } } });
   const ids = await Promise.all(['user', 'admin', 'other'].map(async who => (await db.user.create({ data: { privyUserId: `${tag}-${who}`, isAdmin: who === 'admin' } })).id));
@@ -40,7 +41,7 @@ beforeAll(async () => {
   app = await buildApp({ account: { db, now: () => at, verifier: { verify: async token => ({ privyUserId: `${tag}-${token}` }) } } });
   // Fastify's route tree is checked separately below through hasRoute and the source registrations.
 }, 20000);
-beforeEach(async () => { await settings({ 'entitlements.enforced': true, 'entitlements.shadow_log': false, 'entitlements.features': {}, 'early_access.enabled': false }); await membership('NONE'); });
+beforeEach(async () => { await db.accessGrant.deleteMany({ where: { userId: user } }); await settings({ 'entitlements.enforced': false, 'entitlements.shadow_log': false, 'entitlements.features': {}, 'early_access.enabled': false }); await membership('NONE'); });
 afterAll(async () => {
   await app.close(); await db.auditLog.deleteMany({ where: { OR: [{ userId: { in: [user, admin, other] } }, { detail: { path: ['membershipId'], equals: tag } }] } });
   await db.user.deleteMany({ where: { id: { in: [user, admin, other] } } }); await db.token.deleteMany({ where: { name: tag } }); await db.trackedWallet.deleteMany({ where: { address } });
@@ -49,6 +50,54 @@ afterAll(async () => {
   await db.systemSetting.deleteMany({ where: { key: { in: keys } } }); for (const row of saved) await db.systemSetting.create({ data: { ...row, value: row.value === null ? Prisma.JsonNull : row.value as Prisma.InputJsonValue } }); await db.$disconnect();
 });
 describe('enforced research boundaries on scratch PostgreSQL', () => {
+  it('NONE can read only the authenticated four-metric preview; rich research remains gated',async()=>{
+    expect((await app.inject('/v1/market-preview')).statusCode).toBe(401);
+    const response=await get('/v1/market-preview');expect(response.statusCode).toBe(200);
+    const body=response.json();expect(Object.keys(body).sort()).toEqual(['at','narrativeHeat','opportunities24h','solUsd','trackedWallets']);
+    expect(body.trackedWallets).toBe(await db.trackedWallet.count({where:{active:true}}));
+    expect(body.opportunities24h).toBe(await db.opportunity.count({where:{createdAt:{gte:new Date(+at-86400000),lte:at}}}));
+    expect(body.at).toBe(at.toISOString());expect(JSON.stringify(body)).not.toContain(address);
+    expect((await get('/v1/intelligence-bar')).statusCode).toBe(403);
+    expect((await get('/v1/smart-money/wallets')).statusCode).toBe(403);
+    expect((await get('/v1/overview')).json()).toMatchObject({bar:null,strip:{topNarratives:[],hottestOpportunity:null}});
+  });
+  it('defaults to mandatory permissions without rollout rows and fails closed on malformed feature settings',async()=>{
+    await db.systemSetting.deleteMany({where:{key:{in:['entitlements.enforced','entitlements.shadow_log']}}});
+    expect((await get('/v1/narratives')).statusCode).toBe(403);
+    await db.systemSetting.upsert({where:{key:'entitlements.features'},create:{key:'entitlements.features',value:{unknown:{requiredTier:'NONE'}}},update:{value:{unknown:{requiredTier:'NONE'}}}});
+    const response=await get('/v1/narratives');expect(response.statusCode).toBe(503);expect(response.json().error).toBe('ENTITLEMENTS_UNAVAILABLE');
+    expect((await get('/v1/overview')).json().bar).toBeNull();
+  });
+  it('admin tier changes govern Agent and its tool reads independently, including Member and legacy Elite', async () => {
+    await membership('MEMBER');
+    const headers = { authorization: 'Bearer admin' };
+    const response = await app.inject({ method: 'PUT', url: '/v1/admin/entitlements/settings', headers, payload: { settings: { 'entitlements.features': { 'research.chat': { requiredTier: 'MEMBER' }, 'research.tokens': { requiredTier: 'PRO' } } }, reason: 'Member Agent only' } });
+    expect(response.statusCode).toBe(200);
+    expect((await featureDecision(db, user, 'research.chat', at)).allowed).toBe(true);
+    const ports = researchPorts(makeAgentPorts(db, () => at), db, user, () => at);
+    expect(await ports.getToken(mint)).toBeNull();
+    expect((await get('/v1/tokens')).statusCode).toBe(403);
+    await settings({ 'entitlements.features': { 'research.chat': { requiredTier: 'PRO' } } });
+    expect((await featureDecision(db, user, 'research.chat', at)).allowed).toBe(false);
+    const denied = await app.inject({ method: 'POST', url: '/v1/chat', headers: { authorization: 'Bearer user' }, payload: { message: 'Hello' } });
+    expect(denied.statusCode).toBe(403);
+    await membership('ELITE');
+    const trace = await entitlementTrace(db, user, at);
+    expect(trace.effectiveTier).toBe('PRO');expect(trace.features['research.chat'].allowed).toBe(true);
+    expect(trace.researchPageLimit).toBe(70);
+  });
+  it('an admin reads every gated route at NONE, keeps the highest page limit, and cannot be locked by an override', async () => {
+    expect((await featureDecision(db, admin, 'research.smart_money', at)).allowed).toBe(true);
+    const trace = await entitlementTrace(db, admin, at);
+    expect(trace.admin).toBe(true);
+    expect(trace.features['research.chat'].allowed).toBe(true);
+    expect(trace.researchPageLimit).toBe(70);
+    // Not even a feature override that names a higher tier or an age gate may lock the admin out.
+    await settings({ 'entitlements.features': { 'research.chat': { requiredTier: 'PRO', min_entitlement_age_hours: 72 } } });
+    expect((await featureDecision(db, admin, 'research.chat', at)).allowed).toBe(true);
+    const read = await app.inject({ method: 'GET', url: '/v1/narratives', headers: { authorization: 'Bearer admin' } });
+    expect(read.statusCode).toBe(200);
+  });
   it.each([
     ['GET', '/v1/me/entitlements'], ['POST', '/v1/me/early-access/join'], ['DELETE', '/v1/me/early-access'],
     ['GET', '/v1/admin/entitlements/settings'], ['PUT', '/v1/admin/entitlements/settings'], ['GET', '/v1/admin/users/:userId/entitlements'],
@@ -74,11 +123,15 @@ describe('enforced research boundaries on scratch PostgreSQL', () => {
     expect((await get('/v1/tokens?sort=liquidity')).statusCode).toBe(403);
     await membership(); expect((await get('/v1/smart-money/wallets')).statusCode).toBe(200);
   });
-  it('off/shadow preserve availability; shadow logs contain only safe denial metadata', async () => {
-    await settings({ 'entitlements.enforced': false, 'entitlements.shadow_log': true });
-    const log = vi.fn(); expect((await featureDecision(db, user, 'research.chat', at, log)).allowed).toBe(true);
-    expect(log).toHaveBeenCalledWith({ code: 'ENTITLEMENT_DENIAL', feature: 'research.chat', enforced: false });
-    expect((await get('/v1/narratives')).statusCode).toBe(200);
+  it.each([true,false])('legacy rollout off cannot bypass permissions (denial logging %s)', async shadow => {
+    await settings({ 'entitlements.enforced': false, 'entitlements.shadow_log': shadow });
+    const log = vi.fn(); expect((await featureDecision(db, user, 'research.chat', at, log)).allowed).toBe(false);
+    if(shadow)expect(log).toHaveBeenCalledWith({ code: 'ENTITLEMENT_DENIAL', feature: 'research.chat', enforced: true });
+    else expect(log).not.toHaveBeenCalled();
+    expect((await entitlementTrace(db,user,at)).rollout.enforced).toBe(true);
+    for(const url of ['/v1/narratives','/v1/tokens','/v1/tokens?sort=liquidity','/v1/smart-money/wallets','/v1/analytics/backtest-summary'])expect((await get(url)).statusCode).toBe(403);
+    const ports=researchPorts(makeAgentPorts(db,()=>at),db,user,()=>at);
+    expect(await ports.getToken(mint)).toBeNull();expect(await ports.listOpportunities(20)).toEqual([]);
   });
   it('page clamps precede queries, preserve nextCursor and leave invalid limits invalid', async () => {
     await settings({ 'early_access.enabled': true, 'early_access.seat_cap': 100 });
@@ -120,10 +173,10 @@ describe('enforced research boundaries on scratch PostgreSQL', () => {
     await membership('NONE'); await membership(); expect((await featureDecision(db, user, 'research.screener', at)).allowed).toBe(false);
     await membership('PRO', new Date(+at - 1)); await membership(); expect((await entitlementTrace(db, user, at)).memberships[0]!.proSince).toEqual(at);
   });
-  it('ELITE age cannot borrow PRO history and invalid overrides/paid local grants are rejected and audited', async () => {
+  it('legacy ELITE resolves to PRO with its continuous PRO age; invalid overrides/paid grants are rejected', async () => {
     await membership(); at = new Date(+at + 7200000); await membership('ELITE');
     await settings({ 'entitlements.features': { 'research.chat': { min_entitlement_age_hours: 1 } } });
-    expect((await featureDecision(db, user, 'research.chat', at)).allowed).toBe(false);
+    expect((await featureDecision(db, user, 'research.chat', at)).allowed).toBe(true);
     for (const payload of [{ 'entitlements.features': { unknown: { requiredTier: 'NONE' } } }, { 'entitlements.features': { 'research.chat': { min_entitlement_age_hours: -1 } } }, { 'executor.kill_switch': false }]) await expect(settings(payload)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     expect(await db.auditLog.count({ where: { userId: admin, action: 'entitlements.setting_changed' } })).toBeGreaterThan(0);
     for (const tier of ['PRO', 'ELITE', 'MEMBER']) {

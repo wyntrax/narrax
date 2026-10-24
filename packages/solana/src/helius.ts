@@ -26,6 +26,29 @@ const HeliusTx = z.object({
   }).passthrough().optional(),
 }).passthrough();
 
+const TransferSwap = z.object({
+  type: z.literal('SWAP'), transactionError: z.null().optional(),
+  signature: z.string(), timestamp: z.number(), slot: z.number().optional(), feePayer: z.string(),
+  tokenTransfers: z.array(z.object({mint:z.string(),tokenAmount:z.number().positive().finite(),fromUserAccount:z.string(),toUserAccount:z.string()})),
+});
+/** Some enhanced AMM swaps omit events.swap. Require two explicit, opposite token flows
+ * belonging to the fee payer and a shared counterparty. Native balance changes can include
+ * rent/fees, so only explicit wrapped-SOL transfers are accepted by this fallback. */
+function transferSwap(item: unknown): SwapEvent | null {
+  const parsed=TransferSwap.safeParse(item);if(!parsed.success)return null;
+  const tx=parsed.data,flows=new Map<string,{amount:number;peers:Set<string>}>();
+  for(const t of tx.tokenTransfers){
+    const incoming=t.toUserAccount===tx.feePayer,outgoing=t.fromUserAccount===tx.feePayer;
+    if(incoming===outgoing)continue;
+    const flow=flows.get(t.mint)??{amount:0,peers:new Set<string>()};
+    flow.amount+=(incoming?1:-1)*t.tokenAmount;flow.peers.add(incoming?t.fromUserAccount:t.toUserAccount);flows.set(t.mint,flow);
+  }
+  if(flows.size!==2)return null;
+  const sol=flows.get(WSOL_MINT),other=[...flows].find(([mint])=>mint!==WSOL_MINT);
+  if(!sol||!other||!Number.isFinite(sol.amount)||!Number.isFinite(other[1].amount)||sol.amount===0||other[1].amount===0||Math.sign(sol.amount)===Math.sign(other[1].amount)||![...sol.peers].some(peer=>other[1].peers.has(peer)))return null;
+  return {signature:tx.signature,wallet:tx.feePayer,mint:other[0],side:sol.amount<0?'BUY':'SELL',amountSol:Math.abs(sol.amount),tokenAmount:Math.abs(other[1].amount),slot:tx.slot,at:new Date(tx.timestamp*1000).toISOString()};
+}
+
 const lamportsToSol = (v: string | number) => Number(v) / LAMPORTS_PER_SOL;
 const tokenToUnits = (t: z.infer<typeof TokenLeg>) => Number(t.rawTokenAmount.tokenAmount) / 10 ** t.rawTokenAmount.decimals;
 
@@ -37,7 +60,8 @@ export interface ParseResult {
 /**
  * Turns a Helius enhanced-transaction webhook payload into normalized swap events.
  * Assumes the fee payer is the trading wallet and that one leg of the swap is SOL or wrapped SOL.
- * Anything else (token-to-token swaps, transfers, malformed items) is skipped, never guessed.
+ * Without events.swap, explicit wallet-owned wrapped-SOL/token transfers with a shared counterparty
+ * are supported. Anything else (token-to-token swaps, transfers, malformed items) is skipped, never guessed.
  * Verify these assumptions against real payloads from your Helius plan before relying on them.
  */
 export function parseHeliusSwaps(payload: unknown): ParseResult {
@@ -47,8 +71,9 @@ export function parseHeliusSwaps(payload: unknown): ParseResult {
 
   for (const item of items) {
     const parsed = HeliusTx.safeParse(item);
+    if(parsed.success&&parsed.data.transactionError!=null){skipped++;continue;}
     const swap = parsed.success ? parsed.data.events?.swap : undefined;
-    if (!parsed.success || !swap) { skipped++; continue; }
+    if (!parsed.success || !swap) { const fallback=transferSwap(item);if(fallback)events.push(fallback);else skipped++;continue; }
     const tx = parsed.data;
 
     const wsolIn = swap.tokenInputs?.find((t) => t.mint === WSOL_MINT);

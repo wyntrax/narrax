@@ -1,0 +1,26 @@
+/* Own portfolio: positions, results, trades and wallets. Scoped to the portfolio feature. */
+.pf-page{min-width:0}
+.paper-trading{padding:24px;border:1px solid var(--bd);border-radius:20px;background:var(--s1);margin:24px 0;scroll-margin-top:24px}.paper-trading-heading h2{font-size:24px;margin:12px 0 0}.paper-account{display:flex;flex-wrap:wrap;gap:18px 36px;padding:16px 0;border-block:1px solid var(--bd);margin:20px 0}.paper-account dt,.paper-review-facts dt{font-size:12px;color:var(--tx2)}.paper-account dd,.paper-review-facts dd{margin:4px 0 0;font-size:17px;color:var(--tx)}.paper-fields{border:0;padding:0;margin:20px 0;display:grid;grid-template-columns:minmax(150px,1fr) minmax(0,2fr) minmax(140px,1fr);gap:16px}.paper-fields label{display:grid;gap:8px;font-size:12px;color:var(--tx2)}.paper-fields :is(input,select){width:100%;min-width:0;min-height:44px;padding:10px;border:1px solid var(--bd);border-radius:12px;background:var(--bg);color:var(--tx);font-size:14px}.paper-fields:disabled{opacity:.65}.paper-review{margin-top:24px;padding:24px;border:1px solid var(--bd);border-radius:16px;background:var(--bg)}.paper-review h3{font-size:20px;margin:0 0 12px}.paper-review-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:24px 0}.paper-mint{display:block;font-size:11px;color:var(--tx2);overflow-wrap:anywhere}.paper-ack{display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.7;margin:20px 0}.paper-ack input{width:18px;height:18px;flex:none;margin-top:3px;accent-color:var(--tx)}.paper-actions{display:flex;flex-wrap:wrap;gap:12px}.paper-error,.paper-success{padding:16px;border:1px solid var(--bd);border-radius:12px;color:var(--tx);font-size:13px;line-height:1.7;overflow-wrap:anywhere}.paper-error code,.paper-success code{font-size:11px}.paper-error{border-inline-start:3px solid var(--tx2)}
+@media(max-width:700px){.paper-trading{padding:18px}.paper-fields{grid-template-columns:1fr}.paper-review{padding:16px}.paper-actions{flex-direction:column}.paper-actions button{width:100%}.paper-review-facts{grid-template-columns:1fr}}
+.pf-page .research-filters{align-items:end}
+.pf-badge{font:10px/1.4 var(--font-workspace-mono),monospace;text-transform:uppercase;letter-spacing:.08em;color:var(--tx2);border:1px solid var(--bd);border-radius:99px;padding:3px 9px;white-space:nowrap}
+.pf-up{color:var(--tx)}
+.pf-down{color:#cf6262}
+.pf-warn{color:#cf6262}
+.pf-evidence{display:grid;gap:4px;justify-items:start;font-size:12px;min-width:0}
+.pf-evidence b{font-weight:500}
+.pf-evidence small{color:var(--tx2);line-height:1.5;overflow-wrap:anywhere}
+.pf-evidence details{max-width:340px}
+.pf-evidence summary{cursor:pointer;color:var(--tx2);font-size:11px}
+.pf-evidence ul{margin:4px 0 0;padding-left:16px;color:var(--tx2);overflow-wrap:anywhere}
+.pf-evidence code{font-size:10px}
+.pf-export{display:flex;gap:6px;flex-wrap:wrap}
+.pf-caveats{color:var(--tx2);font-size:12px;line-height:1.6}
+.pf-chart{margin:0}
+.pf-chart svg{width:100%;height:auto}
+.pf-line{fill:none;stroke:var(--tx);stroke-width:2}
+.pf-point{fill:var(--tx)}
+.pf-chart text{font:10px var(--font-workspace-mono),monospace;fill:var(--tx2)}
+.pf-chart figcaption{color:var(--tx2);font-size:12px;line-height:1.6;margin-top:4px}
+.pf-chart-empty{display:grid;gap:8px;justify-items:center;padding:28px 0;color:var(--tx2);font-size:12px}
+@media(max-width:900px){.pf-page .research-filters{align-items:stretch}.pf-evidence{font-size:11px}.pf-evidence details{max-width:none}}

@@ -7,6 +7,7 @@ import { createPrisma } from '@narra/database';
 import { createEventStream, type ServerMessage } from '@narra/realtime';
 import { buildApp } from './app';
 import { createPrivyVerifier } from './auth';
+import {seedTestPro,clearTestPro} from './test-membership';
 
 const dbUrl = process.env.DATABASE_URL ?? 'postgresql://narra:narra@localhost:5432/narra';
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
@@ -60,6 +61,7 @@ describe.skipIf(!up)('realtime gateway over a real WebSocket (needs Postgres and
   const prices = (c: Client) => c.events().filter((e) => e.event.type === 'market.sol').map((e) => (e.event.data as { priceUsd: number }).priceUsd);
 
   beforeAll(async () => {
+    for(const privyUserId of [alice,bob]){const user=await db.user.create({data:{privyUserId}});await seedTestPro(db,user.id);}
     keys = await generateKeyPair('ES256');
     app = await buildApp({
       account: { db, verifier: createPrivyVerifier({ appId: APP_ID, verificationKey: await exportSPKI(keys.publicKey) }) },
@@ -72,6 +74,7 @@ describe.skipIf(!up)('realtime gateway over a real WebSocket (needs Postgres and
   });
 
   afterAll(async () => {
+    await clearTestPro(db,(await db.user.findMany({where:{privyUserId:{in:[alice,bob]}}})).map(u=>u.id));
     for (const s of sockets) s.terminate();
     await app.close();
     await db.user.deleteMany({ where: { privyUserId: { in: [alice, bob] } } });

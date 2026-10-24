@@ -13,5 +13,5 @@
     "types": ["node"]
   },
   "include": ["apps/**/*.ts", "packages/**/*.ts", "workers/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "apps/web"]
 }

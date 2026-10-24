@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { LlmError } from '@narra/ai';
 import { GLOBAL_LIMITS } from '@narra/risk';
 import { AGENT_LIMITS, FALLBACK, SYSTEM_PROMPT, TOOLS, TOOL_NAMES, TIGHTENABLE, runAgent, sanitizeAssistantText, sanitizeUserText, validateTighten, type AgentRunResult } from './index';
 import { FORBIDDEN_TOOL_NAMES, INJECTION_PAYLOADS, MUTATING_CATEGORIES, type InjectionPayload } from './injection.corpus';
@@ -131,6 +132,12 @@ describe('the loop', () => {
     const r = await runAgent({ llm: { complete: async () => { throw new Error('secret key sk-123 leaked in message'); } }, model: 'm', temperature: 0, maxTokens: 10, ports: ports.ports, ctx: { userId: USER_A, now: NOW, conversationId: null }, userMessage: 'hi', history: [] });
     expect(r).toMatchObject({ stopReason: 'llm_error', text: FALLBACK.llmError });
     expect(JSON.stringify(r)).not.toContain('sk-123');
+  });
+  it('keeps the provider status for the operator, in llmError, while the user still sees only the fixed fallback', async () => {
+    const ports = fakePorts();
+    const r = await runAgent({ llm: { complete: async () => { throw new LlmError('Model request returned HTTP 401 (check AI_PROVIDER_API_KEY)'); } }, model: 'm', temperature: 0, maxTokens: 10, ports: ports.ports, ctx: { userId: USER_A, now: NOW, conversationId: null }, userMessage: 'hi', history: [] });
+    expect(r).toMatchObject({ stopReason: 'llm_error', text: FALLBACK.llmError, llmError: 'Model request returned HTTP 401 (check AI_PROVIDER_API_KEY)' });
+    expect(r.text).not.toContain('401');
   });
   it('a tool that throws shows the model only "tool_failed"', async () => {
     const ports = fakePorts();

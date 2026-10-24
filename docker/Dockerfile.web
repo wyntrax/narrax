@@ -1,0 +1,36 @@
+# Separate from the backend: never copy database credentials or backend launchers into the runtime image.
+FROM node:22-bookworm-slim AS build
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+COPY . .
+RUN npm ci --include=dev --no-audit --no-fund \
+ && DATABASE_URL=postgresql://build:build@localhost:5432/build npx prisma generate --schema packages/database/prisma/schema.prisma
+ARG NEXT_PUBLIC_SITE_URL
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_PRIVY_APP_ID
+ARG NEXT_PUBLIC_WYNTRAX_URL=""
+ARG NARRA_SEO_INDEXABLE=false
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_PRIVY_APP_ID=$NEXT_PUBLIC_PRIVY_APP_ID NEXT_PUBLIC_WYNTRAX_URL=$NEXT_PUBLIC_WYNTRAX_URL \
+    NARRA_SEO_INDEXABLE=$NARRA_SEO_INDEXABLE NEXT_TELEMETRY_DISABLED=1
+RUN node apps/web/scripts/check-deploy-config.cjs --write \
+ && npm run build -w @narra/web
+
+FROM node:22-bookworm-slim AS runtime
+WORKDIR /app/apps/web
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
+ARG WEB_REVISION
+ENV NARRA_WEB_REVISION=$WEB_REVISION
+LABEL org.opencontainers.image.revision=$WEB_REVISION
+COPY --from=build --chown=node:node /app/apps/web/.next/standalone /app
+COPY --from=build --chown=node:node /app/apps/web/.next/static ./.next/static
+COPY --from=build --chown=node:node /app/apps/web/public ./public
+COPY --from=build --chown=node:node /app/apps/web/scripts/check-deploy-config.cjs ./scripts/check-deploy-config.cjs
+COPY --from=build --chown=node:node /app/web-release-config.json /app/web-release-config.json
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 \
+ CMD node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+# Config must match the build-time public bundle before any request is served.
+CMD ["sh", "-c", "node scripts/check-deploy-config.cjs && exec node server.js"]
