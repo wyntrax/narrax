@@ -51,6 +51,10 @@ jobs:
     if: ${{ vars.GITLEAKS_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      # gitleaks-action@v2 lists the pull request's commits before scanning.
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
