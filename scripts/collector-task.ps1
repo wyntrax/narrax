@@ -63,7 +63,7 @@ switch($Action){
   $principal=New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
    $settings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
    if($Disabled){$settings.Enabled=$false}
-  Register-ScheduledTask -TaskName $taskName -Action $run -Trigger $trigger -Principal $principal -Settings $settings -Description "Scoped Narra $Worker collector; restart on exit; no executor or alert delivery." | Select-Object TaskName,State
+  Register-ScheduledTask -TaskName $taskName -Action $run -Trigger $trigger -Principal $principal -Settings $settings -Description "Scoped Narrax $Worker collector; restart on exit; no executor or alert delivery." | Select-Object TaskName,State
  }
  'Start' {Enable-ScheduledTask -TaskName $taskName | Out-Null; Start-ScheduledTask -TaskName $taskName}
   'Stop' {Stop-CollectorTask}

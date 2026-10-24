@@ -1,4 +1,33 @@
-# NARRA: status, gaps and continuation guide
+# NARRAX: status, gaps and continuation guide
+
+## Brand wording pass: NARRA -> NARRAX (2026-10-24)
+
+- Visible brand strings changed from `NARRA`/`Narra` to `NARRAX`/`Narrax` across documentation, code comments, UI copy, the AI system prompt, the health-check brand default, the backtest report header, Telegram alert headers, the CSV export filename (`narrax-trades.csv`), test fixtures and the approved prototype, which was renamed to `design/prototype/narrax-prototype.html` with `git mv`.
+- The wallet-link protocol line is now `NARRAX wallet link v1` in both the API challenge builder and the web parser. Because the text is compared literally, the API and web must be released together; a mixed-version window would reject new wallet-link challenges for up to five minutes. This was changed deliberately before launch, when no production users exist.
+- Deliberately unchanged technical identifiers: database names and users (`narra`, `narra_ent`, `narra_ci_*`, `narra_radar_test_*`), Redis stream/lock keys (`narra:events`, `narra:pipeline:worker`), npm workspace scope (`@narra/*`), `NARRA_*` environment variables, translation keys, Compose project/container/volume names, the Postgres advisory-lock namespace, `NarraCollector-*` and `NarraRadarStatus` scheduled task names, the GitHub repository and GHCR image paths, and the checkout folder `C:\dev\narra-entitlements`. Renaming these would require coordinated data, secret and deployment migrations.
+- Documentation-only host paths now use `/srv/narrax`; set `DEPLOY_PATH=/srv/narrax` when configuring the VPS. `PROJECT_NAME` defaults to `NARRAX` in `.env.example` and in the `getBrand` fallback.
+- Regenerated `docs/NARRAX_END_TO_END_SETUP.docx` from the updated Markdown.
+- No scoring, selection, publication, evidence, provider-budget, liquidity/holder, trading or deployment-flag behavior changed. The only functional strings touched are the wallet-link protocol line and the exported trade filename.
+- **Pending manual step:** the four committed visual baselines for the `challenge` state still contain the old protocol text. Regenerate them against the fixture server on port 4010 with `npx playwright test -c playwright.visual.config.ts -g challenge --update-snapshots` from `apps/web`. This suite is not part of CI and requires the local dev server to be free.
+
+## Full-pipeline handover and omission-reason diagnostics (2026-10-24, 09:01 UTC onward)
+
+- Owner started API/web/full workers and the Helius webhook. Observed one consumer per pipeline queue, no execution consumer, API `/health` and web `/en` HTTP 200, webhook sync active for ten desired tracked addresses, and fresh completed wallet events. At 09:08:13 UTC, 403 wallet trades had timestamps within ten minutes. Old wallet-event failures predated this handover. This confirms current ingestion, not complete history or wallet qualification.
+- Disabled the idle scheduled tasks `NarraCollector-market` and `NarraCollector-narratives` so they cannot relaunch alongside the full pipeline. No full pipeline/API/web/webhook process was stopped and no queues/history were purged. First full market cycle (08:59:38–09:04:13 UTC): 150 tokens, 18 info calls, 80 prices, zero errors. Across two retained full cycles, unpriced narrative yielded 1/52 attempts, discovery 4/30, social 24/24; these are not unique-token counts.
+- One separate read-only public DEX Screener request at 09:04 UTC sampled 30 valid mints: 18 no matching Solana base pair, eight missing liquidity, one missing cap and FDV, three usable. No probe data was written. A source gap must not be zero-filled or treated as qualification.
+- Added optional `getSnapshotsWithDiagnostics` and DEX Screener first-blocking reasons from the same HTTP response. Market collection persists only allowlisted aggregate reason counts per selection group; the coverage CLI reports partial reason instrumentation explicitly. Deepest-pool policy, gates, budgets, pacing and allocation are unchanged. Unsupported sources report UNSPECIFIED; malformed pairs envelopes now throw a shape error instead of appearing empty. No new recurring provider requests, raw-response retention or token-level cooldown state.
+- Verified 48 focused tests and root/web typechecks. Full isolated backend verification is in progress. The live full worker predates omission instrumentation: the real CLI correctly reports UNKNOWN until the owner restarts that worker with its existing environment. No live scheduled omission counters are claimed yet. Changes remain local on `feat/research-coverage-audit`.
+- See `docs/RESEARCH_COVERAGE_AUDIT_2026-10-24.md` for the exact probe and runtime observations. Next: finish verification, reload only the full worker, inspect normal-cycle reasons, then measure repeat misses before considering retry cooldown/allocation changes.
+
+## Candidate coverage audit and request diagnostics (2026-10-24)
+
+- GitHub confirmed PR #8 merged at **07:28:06 UTC**, merge commit `99f176c`. This follow-up is on `feat/research-coverage-audit`, based on that merged tree.
+- Read-only live audit at **07:30:34 UTC**: 447 active-narrative-linked/recent-social tokens, 87 source-backed fresh prices, 336 stale, 22 missing, two unverified; 85 fresh price + holder pairs. The recent social handoff had 53 tokens; a separate timestamp query found 52 fresh prices, one missing holder row among those, and no stale holder rows. The denominator is not publication-qualified tokens.
+- Latest completed cycle at audit: **150 tokens / 18 info calls**, 84 snapshots, 66 without data, 15 holder rows, zero errors. Narrative scan counters recorded 636 repeated MARKET_STALE skips in the partial UTC day. Twenty retained completed market starts had a maximum **24.6-minute** gap, and a recent failed job was a timeout. One consumer per queue did not establish uninterrupted collection.
+- Added `npm run research:coverage -- [--json]`: current read-only report, no provider calls or writes. Existing coverage now includes disjoint recent-social vs narrative-only groups; invalid non-finite prices cannot count as verified. New collector diagnostics separate written / no usable snapshot / request failed / not requested after throttling for outcomes, discovery, social, launches, unpriced and general groups. Old runs remain unknown, and daily instrumented-run counts show partial rollout. No schema migration, selection/scoring change, provider-budget increase or qualification change.
+- Verified: 20 focused database tests; **full isolated backend 1,518 tests / 134 files**, zero failures/skips/todo, checked with `scripts/check-test-results.mjs`; root/web typechecks; CLI help and real read-only application report. Tests use synthetic providers with real isolated PostgreSQL/Redis, not live quote-provider failures. Isolated Redis was stopped after testing.
+- Reloaded only the scoped market scheduled task after pausing new queue claims and allowing its active job to finish; queue resumed afterward. No queues/history were purged, no duplicate consumer or full pipeline was started. **Live verification:** normal cycle 07:40:57–07:45:59 UTC completed with one consumer, 150 tokens, 18 info calls, 80 prices and zero errors. Written/selected: outcomes 33/35, discovery 1/15, social 11/12, launches 19/20, unpriced narrative 0/25, general 16/43. All 70 misses were completed requests without usable snapshots, not failed/unrequested batches. The CLI confirmed persisted counters at 07:46:11 UTC and explicitly reported only 1/61 day runs instrumented. This identifies availability gaps but not their underlying provider cause; do not change selection based on one cycle.
+- See `docs/RESEARCH_COVERAGE_AUDIT_2026-10-24.md` for the dated audit, interpretation and next measurement. No improvement in predictive performance or sustained freshness is claimed from diagnostics alone.
 
 ## PR #8 browser CI repair (2026-10-24)
 
@@ -441,7 +470,7 @@ Owner selected all four follow-ups from the `PAPER_BUY_EVIDENCE_REQUIRED` / empt
 
 ## Membership webhook continuation (2026-10-09)
 
-Wyntrax reports independent token-gated memberships by signed webhook. Narra accepts MEMBER/PRO/ELITE keys for Solana and resolves the highest active, unexpired key across verified linked wallets. See `docs/ENTITLEMENTS.md` for setup, migration and continuous eligibility age.
+Wyntrax reports independent token-gated memberships by signed webhook. Narrax accepts MEMBER/PRO/ELITE keys for Solana and resolves the highest active, unexpired key across verified linked wallets. See `docs/ENTITLEMENTS.md` for setup, migration and continuous eligibility age.
 
 Next: copy the creator's new signing secret into receiver configuration, schedule standalone expiry cleanup, and verify a real holder's grant, renewal and revocation through the deployment HTTPS endpoint. Local tests use fixtures for holdings and do not verify live deployment delivery.
 
@@ -449,7 +478,7 @@ Current cleanup verification is recorded in `docs/MEMBERSHIP_WEBHOOK_CLEANUP.md`
 
 This file is for whoever (or whatever assistant) continues the build. It says what exists, what has been verified, what is still missing, and gives ready-to-paste prompts for the next sessions.
 
-"NARRA" is a placeholder brand name, set by `PROJECT_NAME`.
+"NARRAX" is a placeholder brand name, set by `PROJECT_NAME`.
 
 ---
 
@@ -521,7 +550,7 @@ An opt-in Treg provider now connects X, Reddit and TikTok watchlist searches to 
 | AI: provider interface, prompts, schemas, pipeline, guardrails | `packages/ai` | Done, tested with scripted models only |
 | Workers: market data refresh (B1), wallet events, wallet intelligence, narrative ingestion, token resolution, AI analysis, execution (no executor), Postgres stores, chain ports | `workers/pipeline` | Done except the executor |
 | API: health, Helius webhook, Privy auth, account controls, read routes, admin AI settings | `apps/api` | Partial, see section 3 |
-| UI | `design/prototype/narra-prototype.html` | A mock-data HTML prototype only, not the real frontend |
+| UI | `design/prototype/narrax-prototype.html` | A mock-data HTML prototype only, not the real frontend |
 
 **API routes that exist**
 - `GET /health`

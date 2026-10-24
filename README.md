@@ -1,4 +1,6 @@
-# NARRA (placeholder name)
+# NARRAX
+
+Public product name: **Narrax** (configurable through `PROJECT_NAME`). Technical identifiers still use `narra`.
 
 ## Web Phase 1
 
@@ -27,6 +29,10 @@ Narrax now includes public English/Indonesian research guides and methodology pa
 ### Research coverage & discovery reliability (October 21)
 
 Social candidates missing holder evidence now get a bounded handoff to market collection within the existing **150-token / 18-info-call** budgets. Admin → Data Health shows price/holder/risk freshness, coverage gaps, stage liveness and persisted rejection counters. `npm run radar:daily` pairs a trailing-24h outcome scorecard with current collection diagnostics; counts are repeated attempts, not unique missed signals. No scoring gate was relaxed. See [coverage details](docs/EARLY_RADAR.md#research-coverage-and-discovery-reliability) and [verification](docs/CONTINUATION.md).
+
+**Coverage audit (October 24):** `npm run research:coverage -- [--json]` reads the current database without provider calls or writes. It separates recent social handoffs from other active-narrative links and reports market request results by selection group: written, no usable snapshot, request failed, or never requested after throttling. New collector runs persist these counters within the existing budgets; historical runs remain unknown. See [audit findings and limitations](docs/RESEARCH_COVERAGE_AUDIT_2026-10-24.md).
+
+**Omission diagnosis (October 24):** DEX Screener's normal batch reads now report the first blocking reason for each omitted snapshot (no matching validated pair, invalid pair, price/liquidity/volume/market-value unavailable). These are aggregate diagnostics from the same HTTP responses, with no extra requests or substitution of a thinner pool. `research:coverage` reports reason coverage separately from older counters. Restart the pipeline worker to activate new instrumentation; keep scoped collector tasks disabled while the full pipeline owns those queues.
 
 ### CI/CD (October 21)
 
@@ -58,11 +64,11 @@ Tokens and Opportunities now use recent, source-linked DEX Screener snapshots wi
 
 ## Wyntrax membership webhooks
 
-Configure each Solana membership on Wyntrax with this API's public HTTPS `/v1/integrations/wyntrax/events` URL and a MEMBER, PRO or ELITE integration key. Copy the creator signing secret into `WYNTRAX_WEBHOOK_SECRET`; `WYNTRAX_WEBHOOK_SECRET_PREVIOUS` supports rotation. Narra requires wallet-link proof and resolves the highest active, unexpired key across independent membership grants.
+Configure each Solana membership on Wyntrax with this API's public HTTPS `/v1/integrations/wyntrax/events` URL and a MEMBER, PRO or ELITE integration key. Copy the creator signing secret into `WYNTRAX_WEBHOOK_SECRET`; `WYNTRAX_WEBHOOK_SECRET_PREVIOUS` supports rotation. Narrax requires wallet-link proof and resolves the highest active, unexpired key across independent membership grants.
 
 Schedule `npm run entitlements:expire` every minute for local grant/challenge cleanup, independently of the pipeline. See [docs/ENTITLEMENTS.md](docs/ENTITLEMENTS.md) for the event contract and migration.
 
-**Start with [docs/CONTINUATION.md](docs/CONTINUATION.md):** what exists, what is verified, what is missing, and ready-to-paste prompts for continuing the backend and building the frontend. `design/prototype/narra-prototype.html` is the approved UI prototype (mock data).
+**Start with [docs/CONTINUATION.md](docs/CONTINUATION.md):** what exists, what is verified, what is missing, and ready-to-paste prompts for continuing the backend and building the frontend. `design/prototype/narrax-prototype.html` is the approved UI prototype (mock data).
 
 > **Working on this repo with Claude Code or another assistant?** Read [`CLAUDE.md`](CLAUDE.md) first (rules, architecture, gotchas, state), then [`docs/CLAUDE_CODE_PROMPT.md`](docs/CLAUDE_CODE_PROMPT.md) for ready-to-paste session prompts, and [`docs/CONTINUATION.md`](docs/CONTINUATION.md) for the full status and backlog.
 

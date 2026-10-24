@@ -98,6 +98,41 @@ describe('DexScreenerSource', () => {
     expect((await new DexScreenerSource({ ...fast, fetch: reply(body) }).getReferencePrices([WSOL_MINT])).get(WSOL_MINT)).toBe(101);
   });
 
+  it('diagnoses the selected deepest pool without extra requests or substituting a thinner complete pool', async () => {
+    let calls = 0;
+    const src = new DexScreenerSource({ ...fast, fetch: async () => {
+      calls++;
+      return new Response(JSON.stringify([pair({ pairAddress: 'thin', liquidity: { usd: 1000 } }), pair({ pairAddress: 'deep', volume: null })]));
+    } });
+    const result = await src.getSnapshotsWithDiagnostics([M1, M1, M2]);
+    expect(calls).toBe(1);
+    expect(result.snapshots.size).toBe(0);
+    expect([...result.omissions]).toEqual([[M1, 'VOLUME_UNAVAILABLE'], [M2, 'NO_MATCHING_PAIR']]);
+  });
+
+  it.each([
+    [{ priceUsd: null }, 'PRICE_UNAVAILABLE'],
+    [{ priceUsd: '1e999' }, 'PRICE_UNAVAILABLE'],
+    [{ liquidity: null }, 'LIQUIDITY_UNAVAILABLE'],
+    [{ liquidity: { usd: -1 } }, 'LIQUIDITY_UNAVAILABLE'],
+    [{ volume: null }, 'VOLUME_UNAVAILABLE'],
+    [{ marketCap: null, fdv: null }, 'MARKET_VALUE_UNAVAILABLE'],
+    [{ liquidity: { usd: 'invalid' } }, 'INVALID_PAIR'],
+    [{ chainId: 'base' }, 'NO_MATCHING_PAIR'],
+    [{ baseToken: { address: M2 } }, 'NO_MATCHING_PAIR'],
+  ])('reports omission reason %s as %s without manufacturing a snapshot', async (over, reason) => {
+    const src = new DexScreenerSource({ ...fast, fetch: reply([pair(over as Record<string, unknown>)]) });
+    const result = await src.getSnapshotsWithDiagnostics([M1]);
+    expect(result.snapshots.size).toBe(0);
+    expect(result.omissions.get(M1)).toBe(reason);
+  });
+
+  it('does not count an invalid sibling as an omission when a valid matching pair exists', async () => {
+    const result = await new DexScreenerSource({ ...fast, fetch: reply([pair({ priceUsd: {} }), pair()]) }).getSnapshotsWithDiagnostics([M1]);
+    expect(result.snapshots.get(M1)?.priceUsd).toBe(0.00000412);
+    expect(result.omissions.size).toBe(0);
+  });
+
   it('does not relax liquidity, volume, chain or mint binding for reference prices', async () => {
     for (const over of [{ liquidity: null }, { liquidity: { usd: -1 } }, { volume: null }, { volume: { h24: -1 } }, { chainId: 'base' }, { baseToken: { address: M2 } }, { priceUsd: '1e999' }]) {
       const src = new DexScreenerSource({ ...fast, fetch: reply([pair({ marketCap: null, fdv: null, ...over })]) });
@@ -130,6 +165,8 @@ describe('DexScreenerSource', () => {
     expect(await kind(reply({}, 500))).toBe('http');
     expect(await kind((async () => { throw new Error('down'); }) as unknown as typeof fetch)).toBe('network');
     expect(await kind(reply({ weird: 1 }))).toBe('shape');
+    expect(await kind(reply({ pairs: 'unexpected' }))).toBe('shape');
+    expect(await kind(reply({ pairs: {} }))).toBe('shape');
   });
 });
 

@@ -1,4 +1,4 @@
-// NARRA data model. Money and prices use Decimal. Scores and ratios use Float.
+// NARRAX data model. Money and prices use Decimal. Scores and ratios use Float.
 // Private keys are never stored. Wallets hold public addresses and delegated-signing references only.
 
 generator client {

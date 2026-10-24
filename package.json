@@ -15,6 +15,7 @@
     "radar:scorecard": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/radar-scorecard.ts",
     "radar:daily": "npm run radar:scorecard -- --days 1",
     "radar:status": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/radar-status.ts",
+    "research:coverage": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/research-coverage.ts",
     "telegram:send": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/telegram-send.ts",
     "wallets:audit": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/audit-tracked-wallets.ts",
     "wallets:scorecard": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/wallet-research-scorecard.ts",

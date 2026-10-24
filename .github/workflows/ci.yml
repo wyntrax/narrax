@@ -1,4 +1,4 @@
-# Continuous integration for NARRA (API, workers, executor, shared packages, web app).
+# Continuous integration for NARRAX (API, workers, executor, shared packages, web app).
 #
 # Called two ways: on every pull request, and by release.yml on pushes to main (so main is tested exactly once, and an
 # image is only published after these jobs pass). Branch protection should require the single "CI passed" check at the end.

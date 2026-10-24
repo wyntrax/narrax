@@ -4,5 +4,5 @@ export interface Brand {
 }
 
 export function getBrand(env: Record<string, string | undefined> = process.env): Brand {
-  return { name: env.PROJECT_NAME?.trim() || 'NARRA' };
+  return { name: env.PROJECT_NAME?.trim() || 'NARRAX' };
 }

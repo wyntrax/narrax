@@ -29,7 +29,7 @@ async function user(isAdmin = false) {
   const row = await db.user.create({ data: { privyUserId: `${tag}-${++seq}`, isAdmin } }); users.push(row.id); return row.id;
 }
 async function linkedUser() { const id = await user(); await db.linkedWallet.create({ data: { userId: id, chain: 'solana', address: address(), verifiedAt: now } }); return id; }
-async function configure(cap = 100) { await updateLocalSettings(db, admin, { 'early_access.enabled': true, 'early_access.seat_cap': cap, 'early_access.invite_required': false, 'entitlements.wallet_link_domain': 'https://narra.example' }, 'test configuration'); }
+async function configure(cap = 100) { await updateLocalSettings(db, admin, { 'early_access.enabled': true, 'early_access.seat_cap': cap, 'early_access.invite_required': false, 'entitlements.wallet_link_domain': 'https://narrax.example' }, 'test configuration'); }
 async function clearGrants() { await db.accessGrant.deleteMany({ where: { userId: { in: users } } }); }
 const grant = (id: string, actor: string | null = null, tier = 'EARLY_ACCESS') => grantEarlyAccess(db, id, { tier, validUntil: actor ? later : null, reason: 'test join' }, actor, now);
 async function challenge(id: string, addr = address()) { return { ...(await createWalletChallenge(db, id, { chain: 'solana', address: addr }, clock)), address: addr }; }
@@ -53,7 +53,7 @@ afterAll(async () => {
 describe('wallet linking on real scratch PostgreSQL (proof success is a fake; crypto vectors tested separately)', () => {
   it('binds domain, nonce, user, address and timestamps; rejects wrong user/message/address/signature and expiry', async () => {
     const id = await user(), other = await user(), c = await challenge(id);
-    for (const text of ['https://narra.example', id, c.address, 'Nonce:', now.toISOString(), new Date(+now + 300_000).toISOString()]) expect(c.message).toContain(text);
+    for (const text of ['https://narrax.example', id, c.address, 'Nonce:', now.toISOString(), new Date(+now + 300_000).toISOString()]) expect(c.message).toContain(text);
     await expect(verifyWalletChallenge(db, other, verification(c), clock)).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(verifyWalletChallenge(db, id, { ...verification(c), message: c.message.replace(c.address, address()) }, clock)).rejects.toMatchObject({ code: 'INVALID_WALLET_PROOF' });
     await expect(verifyWalletChallenge(db, id, verification(c), clock)).rejects.toMatchObject({ code: 'INVALID_WALLET_PROOF' });

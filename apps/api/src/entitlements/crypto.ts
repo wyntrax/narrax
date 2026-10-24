@@ -14,7 +14,7 @@ export function verifyWalletProof(message: string, signature: string, address: s
   try { return ed25519.verify(sig, Buffer.from(message, 'utf8'), publicKey, { zip215: false }); } catch { return false; }
 }
 export function challengeMessage(v: { domain: string; userId: string; address: string; nonce: string; issuedAt: Date; expiresAt: Date }): string {
-  return ['NARRA wallet link v1', 'This proves wallet control for research access only. It authorizes no transaction.',
+  return ['NARRAX wallet link v1', 'This proves wallet control for research access only. It authorizes no transaction.',
     `Domain: ${v.domain}`, `User: ${v.userId}`, 'Chain: solana', `Address: ${v.address}`, `Nonce: ${v.nonce}`,
     `Issued at: ${v.issuedAt.toISOString()}`, `Expires at: ${v.expiresAt.toISOString()}`].join('\n');
 }

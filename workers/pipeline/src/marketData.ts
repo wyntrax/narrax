@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@narra/database';
 import { sanitizeUntrusted } from '@narra/shared';
-import { MarketDataError, WSOL_MINT, tokenRisk, type LaunchSource, type MarketQuoteSource, type MarketSnapshot, type TokenInfo, type TokenInfoSource } from '@narra/market-data';
+import { MarketDataError, WSOL_MINT, tokenRisk, type LaunchSource, type MarketQuoteSource, type MarketSnapshot, type TokenInfo, type TokenInfoSource, type SnapshotOmissionReason } from '@narra/market-data';
 import type { DeveloperHoldingSource } from './developerHoldings';
 import {refreshTokenMetadata,type MetadataSource} from './tokenMetadata';
 import {discoveryPriceCandidates} from './walletDiscovery';
@@ -33,6 +33,15 @@ export const GENERAL_PRICE_CURSOR_KEY = 'market.generalPriceCursor';
 export const INFO_CURSOR_KEY = 'market.infoCursor';
 export const SOCIAL_PRICE_CURSOR_KEY = 'market.socialPriceCursor';
 
+export type PriceCoverageLane = 'outcomes' | 'discovery' | 'social' | 'launches' | 'unpriced' | 'general';
+export interface PriceCoverageCounts {
+  selected: number;
+  written: number;
+  unavailable: number;
+  failed: number;
+  notRequested: number;
+}
+
 export interface MarketDataDeps {
   metadata?: MetadataSource | null;
   developerHoldings?: DeveloperHoldingSource | null;
@@ -52,8 +61,10 @@ export interface MarketDataSummary {
   socialTokensSelected: number;
   socialInfoCalls: number;
   tokensWithPrice: number;
-  /** Requested but the source had no complete, usable data. Nothing was written for these. */
+  /** Legacy total: includes unavailable data, failed requests and unrequested batches. See priceCoverage. */
   tokensWithoutData: number;
+  priceCoverage: Record<PriceCoverageLane, PriceCoverageCounts>;
+  priceOmissions: Partial<Record<PriceCoverageLane, Partial<Record<SnapshotOmissionReason, number>>>>;
   metricsWritten: number;
   fdvUsedAsMarketCap: number;
   infoCalls: number;
@@ -78,7 +89,8 @@ export async function refreshMarketData(
   opts: { maxTokens?: number; maxInfoCalls?: number } = {},
 ): Promise<MarketDataSummary> {
   const L = MARKET_DATA_LIMITS;
-  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, riskRowsWritten: 0, solUsd: null, errors: [] };
+  const emptyCoverage = (): PriceCoverageCounts => ({ selected: 0, written: 0, unavailable: 0, failed: 0, notRequested: 0 });
+  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, priceCoverage: { outcomes: emptyCoverage(), discovery: emptyCoverage(), social: emptyCoverage(), launches: emptyCoverage(), unpriced: emptyCoverage(), general: emptyCoverage() }, priceOmissions: {}, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, riskRowsWritten: 0, solUsd: null, errors: [] };
   if(deps.metadata){try{await refreshTokenMetadata(db,deps.metadata,now);}catch(e){out.errors.push(errText('token metadata',e));}}
 
   // 1. SOL/USD, kept in one settings row so every later consumer reads the same number.
@@ -200,17 +212,43 @@ export async function refreshMarketData(
   // 4. Prices. One batch failing does not lose the others, and a 429 stops the step.
   const snaps = new Map<string, MarketSnapshot>();
   const attempted = new Set<string>();
+  // Diagnostic request state is separate from cursor advancement (throttled batches must retry).
+  const requests = new Map<string, 'completed' | 'failed'>();
+  const omissions = new Map<string, SnapshotOmissionReason>();
   const mints = tokens.map((t) => t.mint);
   for (let i = 0; i < mints.length; i += L.quoteBatch) {
+    const batch = mints.slice(i, i + L.quoteBatch);
     try {
-      for (const [k, v] of await deps.quotes.getSnapshots(mints.slice(i, i + L.quoteBatch))) snaps.set(k, v);
+      const read = deps.quotes.getSnapshotsWithDiagnostics
+        ? await deps.quotes.getSnapshotsWithDiagnostics(batch)
+        : { snapshots: await deps.quotes.getSnapshots(batch), omissions: new Map<string, SnapshotOmissionReason>() };
+      for (const [k, v] of read.snapshots) snaps.set(k, v);
+      for (const [mint, reason] of read.omissions) omissions.set(mint, reason);
+      for (const mint of batch) requests.set(mint, 'completed');
     } catch (e) {
+      for (const mint of batch) requests.set(mint, 'failed');
       out.errors.push(errText(deps.quotes.name, e));
       if (e instanceof MarketDataError && e.kind === 'rate_limited') break;
     }
     // Missing quotes and token-specific failures must not pin the cursor forever;
     // provider throttling leaves this batch and all unattempted batches in place.
     for (const mint of mints.slice(i, i + L.quoteBatch)) attempted.add(mint);
+  }
+  const lanes = { outcomes: priority, discovery, social, launches, unpriced, general: rest };
+  for (const lane of Object.keys(lanes) as PriceCoverageLane[]) {
+    const counts = out.priceCoverage[lane];
+    counts.selected = lanes[lane].length;
+    for (const token of lanes[lane]) {
+      if (snaps.has(token.mint)) counts.written++;
+      else if (requests.get(token.mint) === 'completed') {
+        counts.unavailable++;
+        const reasons = out.priceOmissions[lane] ??= {};
+        const reason = omissions.get(token.mint) ?? 'UNSPECIFIED';
+        reasons[reason] = (reasons[reason] ?? 0) + 1;
+      }
+      else if (requests.get(token.mint) === 'failed') counts.failed++;
+      else counts.notRequested++;
+    }
   }
   for (const t of tokens) {
     const s = snaps.get(t.mint);

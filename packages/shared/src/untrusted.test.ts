@@ -29,7 +29,7 @@ describe('AgentDecisionSchema', () => {
 
 describe('brand', () => {
   it('is configurable', () => {
-    expect(getBrand({}).name).toBe('NARRA');
+    expect(getBrand({}).name).toBe('NARRAX');
     expect(getBrand({ PROJECT_NAME: 'Foo' }).name).toBe('Foo');
   });
 });

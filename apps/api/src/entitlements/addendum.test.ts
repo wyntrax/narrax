@@ -20,11 +20,11 @@ const tag = `add-${randomUUID()}`, users: string[] = [], members: string[] = [],
 let seq = 0, now = new Date();
 let app: Awaited<ReturnType<typeof buildApp>>, original: Awaited<ReturnType<typeof db.systemSetting.findUnique>>;
 const jwtKeys = await generateKeyPair('ES256');
-const verifier = createPrivyVerifier({ appId: 'narra-test', verificationKey: await exportSPKI(jwtKeys.publicKey) });
+const verifier = createPrivyVerifier({ appId: 'narrax-test', verificationKey: await exportSPKI(jwtKeys.publicKey) });
 const key = () => { const secret = ed25519.utils.randomPrivateKey(); return { secret, address: bs58.encode(ed25519.getPublicKey(secret)) }; };
 async function actor() {
   const sub = `${tag}-${++seq}`; const u = await db.user.create({ data: { privyUserId: sub } }); users.push(u.id);
-  const token = await new SignJWT({}).setProtectedHeader({ alg: 'ES256' }).setIssuer('privy.io').setAudience('narra-test').setSubject(sub).setIssuedAt().setExpirationTime('1h').sign(jwtKeys.privateKey);
+  const token = await new SignJWT({}).setProtectedHeader({ alg: 'ES256' }).setIssuer('privy.io').setAudience('narrax-test').setSubject(sub).setIssuedAt().setExpirationTime('1h').sign(jwtKeys.privateKey);
   return { id: u.id, headers: { authorization: `Bearer ${token}` } };
 }
 function event(address: string, version = 1, member = `${tag}-member-${++seq}`) {
@@ -45,7 +45,7 @@ async function tier(userId: string) {
 }
 beforeAll(async () => {
   original = await db.systemSetting.findUnique({ where: { key: 'entitlements.wallet_link_domain' } });
-  await db.systemSetting.upsert({ where: { key: 'entitlements.wallet_link_domain' }, create: { key: 'entitlements.wallet_link_domain', value: 'https://narra.example' }, update: { value: 'https://narra.example' } });
+  await db.systemSetting.upsert({ where: { key: 'entitlements.wallet_link_domain' }, create: { key: 'entitlements.wallet_link_domain', value: 'https://narrax.example' }, update: { value: 'https://narrax.example' } });
   app = await buildApp({ account: { db, verifier, now: () => now }, wyntrax: { db, secret: VECTOR_SECRET, now: () => now } });
 }, 20000);
 afterAll(async () => {
@@ -73,7 +73,7 @@ describe('Checkpoint B addendum: real signatures and persistence', () => {
     expect((await verify(u, c, signature(key(), c.message))).statusCode).toBe(401);
     expect((await verify(u, c, signature(k, c.message + 'modified'))).statusCode).toBe(401);
     expect((await verify(other, c, signature(k, c.message))).statusCode).toBe(404);
-    for (const message of [c.message.replace('https://narra.example', 'https://evil.example'), c.message.replace(k.address, key().address)]) expect((await verify(u, { ...c, message }, signature(k, message))).statusCode).toBe(401);
+    for (const message of [c.message.replace('https://narrax.example', 'https://evil.example'), c.message.replace(k.address, key().address)]) expect((await verify(u, { ...c, message }, signature(k, message))).statusCode).toBe(401);
     const before = now; now = new Date(+now + 300000);
     try { expect((await verify(u, c, signature(k, c.message))).statusCode).toBe(409); } finally { now = before; }
     expect(await db.linkedWallet.count({ where: { userId: u.id } })).toBe(0);

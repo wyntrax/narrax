@@ -1,6 +1,6 @@
 # Narrax web — Phases 1–2
 
-The owner approved `design/prototype/narra-prototype.html` and the existing API contracts as the Phase 2 specification. The current brand is **Narrax**, using only black, white and neutral grayscale with the owner's supplied symbol. Marketing uses 16–20px corners, restrained monochrome glow and motion. Product surfaces use the prototype's 6px corners, dense layouts and no glow/pulsing. See [the brand update](docs/NARRAX_BRAND.md) and [the Phase 2 handoff](docs/PHASE2_HANDOFF.md) for scope, integration gaps and verification.
+The owner approved `design/prototype/narrax-prototype.html` and the existing API contracts as the Phase 2 specification. The current brand is **Narrax**, using only black, white and neutral grayscale with the owner's supplied symbol. Marketing uses 16–20px corners, restrained monochrome glow and motion. Product surfaces use the prototype's 6px corners, dense layouts and no glow/pulsing. See [the brand update](docs/NARRAX_BRAND.md) and [the Phase 2 handoff](docs/PHASE2_HANDOFF.md) for scope, integration gaps and verification.
 
 ## Windows development
 

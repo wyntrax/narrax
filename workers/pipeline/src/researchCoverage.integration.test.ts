@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createPrisma, type Prisma } from '@narra/database';
-import { FixtureMarketData, MarketDataError, snapshot, info } from '@narra/market-data';
+import { DexScreenerSource, RateLimiter, FixtureMarketData, MarketDataError, snapshot, info } from '@narra/market-data';
 import { scanSocialTokens } from './socialTokens';
 import { refreshMarketData, GENERAL_PRICE_CURSOR_KEY, INFO_CURSOR_KEY, SOCIAL_PRICE_CURSOR_KEY } from './marketData';
 import { COVERAGE_LIMITS, RESEARCH_DIAGNOSTICS_PREFIX, readSocialPriority, saveSocialPriority, saveResearchDiagnostics, readResearchDiagnostics, SOCIAL_INFO_CURSOR_KEY, SOCIAL_INFO_PRIORITY_KEY } from './researchDiagnostics';
-import { researchCoverage } from './researchCoverage';
+import { researchCoverage, renderResearchCoverage } from './researchCoverage';
 import { storeMarketSnapshot } from './marketSnapshot';
 import { ResearchCoverageSchema } from '../../../apps/web/src/features/admin/contracts';
 
@@ -113,4 +113,62 @@ it('reports missing/future/stale rows separately and requires exact price proven
   expect(report.holders.stale).toBeGreaterThan(0);
   expect(report.holders.missing).toBeGreaterThan(0);
   expect(report.socialPriorityCount).toBe(4);
+  expect(report.cohorts.recentSocial).toEqual({ scanned: 4,
+    price: { fresh: 1, stale: 0, missing: 1, future: 1, unverified: 1 },
+    holders: { fresh: 0, stale: 1, missing: 3, future: 0 },
+    risk: { fresh: 0, stale: 0, missing: 4, future: 0 }, freshPriceAndHolders: 0 });
+  expect(report.cohorts.recentSocial.scanned + report.cohorts.narrativeOnly.scanned).toBe(report.scanned);
+  for (const state of ['fresh', 'stale', 'missing', 'future', 'unverified'] as const) {
+    expect(report.cohorts.recentSocial.price[state] + report.cohorts.narrativeOnly.price[state]).toBe(report.price[state]);
+  }
+  expect(renderResearchCoverage(report)).toContain('UNKNOWN: the latest market run has no per-group request telemetry');
+});
+
+it.each(['rate_limited', 'network'] as const)('separates missing snapshots, %s failures and unrequested batches without extra requests', async (kind) => {
+  await saveSocialPriority(db, [], now);
+  for (let i = 0; i < 70; i++) await token(`requests-${kind}-${i}`);
+  const batches: string[][] = [];
+  const quotes = { name: 'dexscreener',
+    getReferencePrices: async () => new Map(),
+    getSnapshots: async (mints: string[]) => {
+      batches.push(mints);
+      if (batches.length === 2) throw new MarketDataError(kind, 'private provider detail');
+      return new Map((batches.length === 1 ? mints.slice(0, 10) : []).map(mint => [mint, snapshot(mint)]));
+    } };
+  const result = await refreshMarketData(db, { quotes, info: null, launches: null }, now, { maxTokens: 70 });
+  expect(batches.map(b => b.length)).toEqual(kind === 'rate_limited' ? [30, 30] : [30, 30, 10]);
+  expect(result.tokensConsidered).toBe(70);
+  expect(result.infoCalls).toBe(0);
+  const total = { selected: 0, written: 0, unavailable: 0, failed: 0, notRequested: 0 };
+  for (const counts of Object.values(result.priceCoverage)) {
+    expect(counts.selected).toBe(counts.written + counts.unavailable + counts.failed + counts.notRequested);
+    for (const field of Object.keys(total) as (keyof typeof total)[]) total[field] += counts[field];
+  }
+  expect(total).toEqual({ selected: 70, written: 10, unavailable: kind === 'rate_limited' ? 20 : 30, failed: 30, notRequested: kind === 'rate_limited' ? 10 : 0 });
+  expect(total.written).toBe(result.metricsWritten);
+  expect(total.unavailable + total.failed + total.notRequested).toBe(result.tokensWithoutData);
+  const market = (await readResearchDiagnostics(db, now)).find(s => s.stage === 'market')!;
+  expect(market.latest?.counters['priceCoverage.runs']).toBe(1);
+  expect(market.latest?.counters['price.general.failed']).toBe(30);
+  expect(market.latest?.counters['omission.general.UNSPECIFIED']).toBe(total.unavailable);
+  expect(Object.values(result.priceOmissions).reduce((sum, reasons) => sum + Object.values(reasons).reduce((n, count) => n + count, 0), 0)).toBe(total.unavailable);
+  expect(JSON.stringify(market)).not.toContain('private provider detail');
+  expect(renderResearchCoverage(await researchCoverage(db, now))).toContain('No usable snapshot means a completed request returned none');
+});
+
+it('persists reasons from the same quote batch without issuing a fallback request', async () => {
+  await token('diagnosed-a'); await token('diagnosed-b');
+  const requests: string[][] = [];
+  const quotes = new DexScreenerSource({ limiter: new RateLimiter(0), fetch: async input => {
+    const mints = String(input).split('/').at(-1)!.split(','); requests.push(mints);
+    return new Response(JSON.stringify(mints.map((mint, i) => ({ chainId: 'solana', pairAddress: 'pair', baseToken: { address: mint }, priceUsd: '1', liquidity: i === 0 ? { usd: 20000 } : null, volume: { h24: 10 }, marketCap: 50000 }))));
+  } });
+  const result = await refreshMarketData(db, { quotes, info: null, launches: null }, now, { maxTokens: 2 });
+  expect(requests.map(batch => batch.length)).toEqual([1, 2]); // SOL reference, then one token batch.
+  expect(result.metricsWritten).toBe(1);
+  expect(result.tokensWithoutData).toBe(1);
+  expect(Object.values(result.priceOmissions)).toEqual([{ LIQUIDITY_UNAVAILABLE: 1 }]);
+  const report = await researchCoverage(db, now);
+  expect(renderResearchCoverage(report)).toContain('LIQUIDITY_UNAVAILABLE: 1');
+  expect(report.stages.find(s => s.stage === 'market')?.latest?.counters['priceOmissions.runs']).toBe(1);
 });

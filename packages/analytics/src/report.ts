@@ -69,7 +69,7 @@ export function summarizeFindings(strategies: StrategyResult[], comparisons: Str
 export function renderMarkdown(r: BacktestReport): string {
   const L: string[] = [];
   const cov = r.coverage;
-  L.push('# NARRA backtest report', '', `Generated ${r.generatedAt}. History from ${cov.from} to ${cov.to}.`, '');
+  L.push('# NARRAX backtest report', '', `Generated ${r.generatedAt}. History from ${cov.from} to ${cov.to}.`, '');
   L.push('## Read this first', '', `A verdict needs at least ${GATES.minSample} independent events across ${GATES.minDistinctTokens} tokens in each group. Below that the numbers are printed but marked INSUFFICIENT and nothing is concluded from them.`, '');
   L.push(...LIMITATIONS.map((x) => `- ${x}`), '');
   L.push('## Data coverage', '', `- Tokens with price history: ${cov.tokens}`, `- Stored readings: ${cov.metricPoints}${cov.firstPointAt ? ` (${cov.firstPointAt} to ${cov.lastPointAt})` : ''}`,

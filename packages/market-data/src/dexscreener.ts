@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { tokenImageUrl } from '@narra/shared';
 import { getJson, toNumber, type HttpOptions } from './http';
 import { RateLimiter } from './limiter';
-import { MarketDataError, type MarketQuoteSource, type MarketSnapshot } from './types';
+import { MarketDataError, type MarketQuoteSource, type MarketSnapshot, type SnapshotRead, type SnapshotOmissionReason } from './types';
 
 /** Documented limit is 300 requests a minute for these endpoints. 250 ms spacing stays well under it. */
 export const DEXSCREENER_MIN_INTERVAL_MS = 250;
@@ -41,39 +41,51 @@ export class DexScreenerSource implements MarketQuoteSource {
     this.limiter = opts.limiter ?? new RateLimiter(DEXSCREENER_MIN_INTERVAL_MS);
   }
 
-  private async pairs(chunk: string[]): Promise<Pair[]> {
+  private async pairs(chunk: string[]): Promise<{ pairs: Pair[]; invalidMints: Set<string> }> {
     const { body } = await getJson(`${this.baseUrl}/tokens/v1/solana/${chunk.join(',')}`, { ...this.opts, limiter: this.limiter });
     const raw = Array.isArray(body) ? body : body && typeof body === 'object' && 'pairs' in body && Array.isArray((body as { pairs: unknown }).pairs) ? (body as { pairs: unknown[] }).pairs : null;
     if (!raw) {
       // The API may answer { pairs: null } for tokens it has never seen. Anything else is a shape change.
-      if (body && typeof body === 'object' && 'pairs' in body) return [];
+      if (body && typeof body === 'object' && 'pairs' in body && body.pairs === null) return { pairs: [], invalidMints: new Set() };
       throw new MarketDataError('shape', 'dexscreener returned an unexpected body');
     }
-    return raw.flatMap(item => {
+    const invalidMints = new Set<string>();
+    const pairs = raw.flatMap(item => {
       const p = Pair.safeParse(item);
+      if (!p.success && item?.chainId === 'solana' && typeof item?.baseToken?.address === 'string' && chunk.includes(item.baseToken.address)) invalidMints.add(item.baseToken.address);
       return p.success && p.data.chainId === 'solana' ? [p.data] : [];
     });
+    return { pairs, invalidMints };
   }
 
   async getSnapshots(mints: string[]): Promise<Map<string, MarketSnapshot>> {
+    return (await this.getSnapshotsWithDiagnostics(mints)).snapshots;
+  }
+
+  async getSnapshotsWithDiagnostics(mints: string[]): Promise<SnapshotRead> {
     const out = new Map<string, MarketSnapshot>();
+    const omissions = new Map<string, SnapshotOmissionReason>();
     const unique = [...new Set(mints)];
     for (let i = 0; i < unique.length; i += DEXSCREENER_BATCH) {
       const chunk = unique.slice(i, i + DEXSCREENER_BATCH);
       const best = new Map<string, Pair>();
-      for (const p of await this.pairs(chunk)) {
+      const response = await this.pairs(chunk);
+      for (const p of response.pairs) {
         const mint = p.baseToken.address;
         if (!chunk.includes(mint)) continue; // pools where the token is only the quote side price the other asset
         const liq = p.liquidity?.usd ?? -1;
         const cur = best.get(mint);
         if (!cur || liq > (cur.liquidity?.usd ?? -1)) best.set(mint, p);
       }
-      for (const [mint, p] of best) {
+      for (const mint of chunk) {
+        const p = best.get(mint);
+        if (!p) { omissions.set(mint, response.invalidMints.has(mint) ? 'INVALID_PAIR' : 'NO_MATCHING_PAIR'); continue; }
         const snap = toSnapshot(mint, p);
         if (snap) out.set(mint, snap);
+        else omissions.set(mint, snapshotOmission(p) ?? 'UNSPECIFIED');
       }
     }
-    return out;
+    return { snapshots: out, omissions };
   }
 
   async getReferencePrices(mints: string[]): Promise<Map<string, number>> {
@@ -82,7 +94,7 @@ export class DexScreenerSource implements MarketQuoteSource {
     for (let i = 0; i < unique.length; i += DEXSCREENER_BATCH) {
       const chunk = unique.slice(i, i + DEXSCREENER_BATCH);
       const best = new Map<string, { price: number; liquidity: number }>();
-      for (const p of await this.pairs(chunk)) {
+      for (const p of (await this.pairs(chunk)).pairs) {
         const mint = p.baseToken.address;
         if (!chunk.includes(mint)) continue;
         const price = toNumber(p.priceUsd);
@@ -100,14 +112,23 @@ export class DexScreenerSource implements MarketQuoteSource {
   }
 }
 
+/** First failing requirement of the selected deepest pool; do not substitute another pool or fill absent fields. */
+function snapshotOmission(p: Pair): SnapshotOmissionReason | null {
+  const price = toNumber(p.priceUsd);
+  if (price == null || price <= 0) return 'PRICE_UNAVAILABLE';
+  if (p.liquidity?.usd == null || p.liquidity.usd < 0) return 'LIQUIDITY_UNAVAILABLE';
+  if (p.volume?.h24 == null || p.volume.h24 < 0) return 'VOLUME_UNAVAILABLE';
+  if (p.marketCap == null && p.fdv == null) return 'MARKET_VALUE_UNAVAILABLE';
+  return null;
+}
+
 function toSnapshot(mint: string, p: Pair): MarketSnapshot | null {
   const price = toNumber(p.priceUsd);
   const liquidity = p.liquidity?.usd ?? null;
   const volume = p.volume?.h24 ?? null;
   const cap = p.marketCap ?? null;
   const fdv = p.fdv ?? null;
-  if (price == null || price <= 0 || liquidity == null || liquidity < 0 || volume == null || volume < 0) return null;
-  if (cap == null && fdv == null) return null;
+  if (snapshotOmission(p) || price == null || liquidity == null || volume == null) return null;
   return {
     mint,
     symbol: p.baseToken.symbol ?? '',

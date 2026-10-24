@@ -11,7 +11,7 @@ it('the real Next build entry refuses any production test-auth value before comp
  }
 },30000);
 it('the production scan fails on fixture code and accepts a clean bundle',()=>{
- const dir=mkdtempSync(path.join(tmpdir(),'narra-auth-scan-'));
+ const dir=mkdtempSync(path.join(tmpdir(),'narrax-auth-scan-'));
  const run=()=>execFileSync(process.execPath,['-e',`require('./scripts/check-production-auth.cjs').checkProductionAuth(${JSON.stringify(dir)})`],{encoding:'utf8',stdio:'pipe'});
  try {
   expect(run).toThrow();writeFileSync(path.join(dir,'BUILD_ID'),'test-build');
