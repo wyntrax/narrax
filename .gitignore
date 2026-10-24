@@ -1,3 +1,11 @@
+# Internal documentation, research reports and engineering notes (kept locally; not published).
+/docs/
+/reports/
+/CLAUDE.md
+/apps/web/docs/
+/apps/web/PHASE1-REPORT.md
+/apps/web/DEPENDENCY-REPORT.md
+
 # Local environment and credentials (only the public template is tracked).
 .env
 .env.*
