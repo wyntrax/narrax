@@ -22,12 +22,13 @@ export const ALWAYS_OPEN_HTTP = [
   'GET /v1/admin/wallets/sync-status', 'POST /v1/admin/wallets/sync', 'GET /v1/admin/wallet-candidates', 'POST /v1/admin/wallet-candidates/:address/approve', 'POST /v1/admin/wallet-candidates/:address/reject',
   'GET /v1/admin/system-limits', 'PUT /v1/admin/system-limits', 'POST /v1/admin/system-limits/reset', 'GET /v1/admin/trading-pause', 'PUT /v1/admin/trading-pause',
   'GET /v1/admin/blacklist', 'PUT /v1/admin/tokens/:mint/blacklist', 'GET /v1/admin/audit',
-  'GET /v1/admin/status', 'GET /v1/admin/costs', 'GET /v1/admin/ai-pricing', 'PUT /v1/admin/ai-pricing',
+  'GET /v1/admin/status', 'GET /v1/admin/data-health', 'GET /v1/admin/costs', 'GET /v1/admin/ai-pricing', 'PUT /v1/admin/ai-pricing',
   'GET /v1/analytics/backtests', 'GET /v1/analytics/backtests/:id',
   'POST /v1/me/linked-wallets/challenge', 'POST /v1/me/linked-wallets/verify', 'GET /v1/me/linked-wallets', 'DELETE /v1/me/linked-wallets/:id',
 ] as const;
+import { assertTestDatabase } from '../../../../scripts/test-database';
 const target = new URL(process.env.DATABASE_URL ?? 'invalid:');
-if (target.hostname !== 'localhost' || target.port !== '5432' || target.pathname !== '/narra_ent') throw new Error('Require scratch database');
+assertTestDatabase(target);
 const db = createPrisma(target.toString());
 const privyUserId = `open-${randomUUID()}`;
 const keys = ['entitlements.enforced', 'entitlements.shadow_log'];

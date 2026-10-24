@@ -1,3 +1,9 @@
 import type {MetadataRoute} from 'next';
-import {siteOrigin} from '@/config/site';
-export default function sitemap():MetadataRoute.Sitemap {const origin=siteOrigin();return [{url:origin,alternates:{languages:{en:origin,id:`${origin}/id`}}},{url:`${origin}/id`,alternates:{languages:{en:origin,id:`${origin}/id`}}}];}
+import {SEO_LOCALES,languageAlternates,publicUrl,searchIndexable} from '@/lib/seo';
+import {researchGuides} from '@/content/research-guides';
+export const dynamic='force-dynamic';
+export default function sitemap():MetadataRoute.Sitemap {
+ if(!searchIndexable())return [];
+ const paths=['','/research','/methodology',...researchGuides.en.map(guide=>`/research/${guide.slug}`)];
+ return paths.flatMap(path=>SEO_LOCALES.map(locale=>({url:publicUrl(locale,path),alternates:{languages:languageAlternates(path)}})));
+}

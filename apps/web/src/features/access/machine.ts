@@ -37,7 +37,7 @@ export function transition(state:AccessState,event:Event):AccessState {
  case 'SYNC_TIMEOUT':return {...state,name:'syncExpired'};
  case 'UNLINK':return {...state,name:'unlinking',challenge:undefined};
  case 'LEAVE':return {...state,name:'leaving'};
- case 'FAIL':return {...state,challenge:undefined,name:event.error==='EARLY_ACCESS_DISABLED'?'disabled':event.error==='EARLY_ACCESS_FULL'?'full':event.error==='INVITES_UNAVAILABLE'?'inviteOnly':'error',error:event.error,retryAt:event.retryAt,requiredTier:event.requiredTier};
+ case 'FAIL':return {...state,challenge:undefined,name:event.error==='EARLY_ACCESS_DISABLED'||event.error==='EARLY_ACCESS_CLOSED'?'disabled':event.error==='EARLY_ACCESS_FULL'?'full':event.error==='INVITES_UNAVAILABLE'?'inviteOnly':'error',error:event.error,retryAt:event.retryAt,requiredTier:event.requiredTier};
  }
 }
 export const busyStates:readonly StateName[]=['checking','connecting','signing','verifying','joining','unlinking','leaving'];

@@ -15,6 +15,8 @@ export interface MarketSnapshot {
   symbol: string;
   /** Untrusted. Sanitize before storing. */
   name: string;
+  /** Optional provider-supplied token artwork, never a verification badge. */
+  imageUrl?: string | null;
   priceUsd: number;
   marketCapUsd: number;
   /** True when the source gave no market cap and the fully diluted value was used instead. */
@@ -58,6 +60,11 @@ export interface NewPool {
 export interface MarketQuoteSource {
   readonly name: string;
   getSnapshots(mints: string[]): Promise<Map<string, MarketSnapshot>>;
+  /**
+   * Price-only read for reference assets such as wrapped SOL, whose deepest pool may legitimately carry no market
+   * cap or FDV. Sources without this method use `getSnapshots` for the reference instead.
+   */
+  getReferencePrices?(mints: string[]): Promise<Map<string, number>>;
 }
 
 export interface TokenInfoSource {

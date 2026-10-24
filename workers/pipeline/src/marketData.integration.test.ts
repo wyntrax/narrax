@@ -1,9 +1,11 @@
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPrisma } from '@narra/database';
 import { FixtureMarketData, MarketDataError, WSOL_MINT, info, snapshot, type LaunchSource } from '@narra/market-data';
 import { readSolUsd, refreshMarketData } from './marketData';
 import { resolveTokens } from './tokenResolution';
+// The end-to-end case scans accumulated shared PostgreSQL fixtures; files run serially but can exceed 5 s.
+vi.setConfig({ testTimeout: 30_000 });
 
 const url = process.env.DATABASE_URL ?? 'postgresql://narra:narra@localhost:5432/narra';
 async function dbUp() {
@@ -120,6 +122,19 @@ describe.skipIf(!up)('market data refresh on a real Postgres', () => {
     expect(await readSolUsd(db, NOW)).toBe(142.5);
   });
 
+  it('refreshes SOL/USD from a reference price when its pool has no market cap', async () => {
+    const at = new Date(NOW.getTime() + 30 * 60_000);
+    const quotes = {
+      name: 'reference-only',
+      getSnapshots: async () => new Map(),
+      getReferencePrices: async (mints: string[]) => new Map(mints.map((mint) => [mint, 150.25])),
+    };
+    const r = await refreshMarketData(db, { quotes, info: null, launches: null }, at, ROOMY);
+    expect(r.errors).toEqual([]);
+    expect(r.solUsd).toBe(150.25);
+    expect(await readSolUsd(db, at)).toBe(150.25);
+  });
+
   it('reuses token info for 30 minutes instead of spending the slow source budget again', async () => {
     const before = fixture.infoCalls.length;
     const r = await refreshMarketData(db, { quotes: fixture, info: fixture, launches: fixture }, new Date(NOW.getTime() + 10 * 60_000), ROOMY);
@@ -137,7 +152,8 @@ describe.skipIf(!up)('market data refresh on a real Postgres', () => {
     expect(r.errors.some((e) => e.includes('broken'))).toBe(true);
     expect(r.errors.some((e) => e.includes('failing'))).toBe(true);
     expect(r.metricsWritten).toBeGreaterThan(0);
-    expect(r.infoCalls).toBe(0);
+    // An attempted HTTP call still spends the budget when the provider throttles it.
+    expect(r.infoCalls).toBe(1);
     expect(r.riskRowsWritten).toBe(0);
   });
 
@@ -152,5 +168,29 @@ describe.skipIf(!up)('market data refresh on a real Postgres', () => {
     expect(await db.narrativeTokenRelation.count({ where: { narrativeId, tokenId: (await tok(M.HONEY)).id } })).toBe(1);
     expect(await opp(M.HONEY)).toBe(0);
     expect((await tok(M.HONEY)).risk[0]).toMatchObject({ riskScore: 100, flags: ['HONEYPOT'] });
+  });
+  it('writes measured issuer holdings and removes UNKNOWN only with evidence', async () => {
+    const testMint = mint('ISSUER');
+    const token = await db.token.create({ data: { mint: testMint, symbol: 'UNKNOWN', name: 'Unknown' } });
+    const measured = new FixtureMarketData({ snapshots: [snapshot(testMint)], info: [info(testMint, { holders: 100, top10Pct: 20 })] });
+    await refreshMarketData(db, { quotes: measured, info: measured, launches: null, developerHoldings: { getHolding: async () => ({ wallet: '11111111111111111111111111111111', signature: 'creation', source: 'INITIAL_MINT_AUTHORITY', holdingPct: 7.5 }) } }, NOW, ROOMY);
+    const holding = await db.tokenHolderMetric.findFirstOrThrow({ where: { tokenId: token.id } });
+    expect(holding.devHoldingPct).toBe(7.5);
+    const risk = await db.tokenRiskMetric.findFirstOrThrow({ where: { tokenId: token.id } });
+    expect(risk.flags).not.toContain('DEV_HOLDING_UNKNOWN');
+    const evidence = await db.systemSetting.findUniqueOrThrow({ where: { key: `research.developerHolding.${token.id}` } });
+    expect(evidence.value).toMatchObject({ holdingPct: 7.5, relatedWalletsIncluded: false });
+  });
+  it('prices an unpriced narrative candidate before the id-ordered cap can starve it', async () => {
+    // A narrative has linked this token but it has never had a price row, so it is invisible to resolution.
+    const candidate = await db.token.create({ data: { mint: mint('CAND'), symbol: `CAND${tag}`, name: 'Candidate' } });
+    await db.narrativeTokenRelation.create({ data: { narrativeId, tokenId: candidate.id, relation: 'DERIVATIVE', matchScore: 0.5, ogScore: 10, confidence: 0.5 } });
+    // Leave room for exactly one token after the early-radar priority group, mirroring the worker's own arithmetic.
+    // An id-ordered set alone would spend that slot on an older token and skip the candidate.
+    const waiting = await db.earlyRadarMeasurement.findMany({ where: { status: 'PENDING' }, select: { outcome: { select: { tokenId: true } } } });
+    const cap = Math.min(new Set(waiting.map((w) => w.outcome.tokenId)).size, 100) + 1;
+    const quotes = { name: 'probe', getSnapshots: async (mints: string[]) => new Map(mints.map((m) => [m, snapshot(m, { liquidityUsd: 300_000, priceUsd: 0.05 })])) };
+    await refreshMarketData(db, { quotes: quotes as never, info: null, launches: null }, new Date(NOW.getTime() + 3 * H), { maxTokens: cap });
+    expect((await tok(candidate.mint)).metrics).toHaveLength(1);
   });
 });

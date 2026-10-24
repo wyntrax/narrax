@@ -107,6 +107,13 @@ describe.skipIf(!up)('tracked wallets on a real Postgres', () => {
       const ev = { signature: `${tag}-sig`.padEnd(64, 'x'), wallet: addr('S2'), mint: addr('MINTX'), side: 'BUY' as const, amountSol: 1, tokenAmount: 5, at: NOW.toISOString() };
       expect(await store.saveWalletTrade(ev)).toBe('untracked');
     });
+    it('keeps concurrent deliveries for a newly seen mint and deduplicates retries', async () => {
+      const store = makeWalletEventStore(db);
+      const events = Array.from({ length: 8 }, (_, i) => ({ signature: `${tag}-concurrent-${i}`.padEnd(64, 'x'), wallet: addr('S1'), mint: addr('RACE'), side: 'BUY' as const, amountSol: 1, tokenAmount: 5, at: NOW.toISOString() }));
+      expect(await Promise.all(events.map(e => store.saveWalletTrade(e)))).toEqual(Array(8).fill('created'));
+      expect(await Promise.all(events.map(e => store.saveWalletTrade(e)))).toEqual(Array(8).fill('duplicate'));
+      expect(await db.walletTrade.count({ where: { signature: { in: events.map(e => e.signature) } } })).toBe(8);
+    });
   });
 
   // ---------- funding graph and consensus ----------
@@ -304,7 +311,7 @@ describe.skipIf(!up)('tracked wallets on a real Postgres', () => {
       expect(r).toMatchObject({ scanned: 2, complete: 1, tooLong: 1, errors: [] });
       const row1 = await db.tokenEarlyBuyers.findUniqueOrThrow({ where: { tokenId: young.id } });
       expect(row1.complete).toBe(true);
-      expect(row1.buyers).toEqual([{ wallet: A, rank: 1 }, { wallet: B, rank: 2 }]);
+      expect(row1.buyers).toEqual([{ wallet: A, rank: 1, signature:'x1', at:'1970-01-01T00:00:01.000Z' }, { wallet: B, rank: 2, signature:'x3', at:'1970-01-01T00:00:01.000Z' }]);
       expect(await db.tokenEarlyBuyers.findUniqueOrThrow({ where: { tokenId: busy.id } })).toMatchObject({ complete: false, buyers: [] });
       expect(await db.tokenEarlyBuyers.findUnique({ where: { tokenId: old.id } })).toBeNull(); // outside the scan window
       const callsBefore = calls.length;

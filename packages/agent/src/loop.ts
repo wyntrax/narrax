@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { extractJson, type LlmProvider } from '@narra/ai';
+import { LlmError, extractJson, type LlmProvider } from '@narra/ai';
 import { AGENT_LIMITS, FALLBACK } from './constants';
 import { buildStepMessage, SYSTEM_PROMPT, type StepInput } from './prompt';
 import type { AgentPorts, ProposalView } from './ports';
@@ -34,6 +34,8 @@ export interface AgentRunResult {
   stopReason: StopReason;
   inputTokens: number;
   outputTokens: number;
+  /** Set when stopReason is llm_error. Fixed provider text such as an HTTP status, never the provider's body or any key. For logs, not for the user. */
+  llmError?: string;
 }
 
 /**
@@ -56,8 +58,8 @@ export async function runAgent(i: AgentRunInput): Promise<AgentRunResult> {
     try {
       const r = await i.llm.complete({ model: i.model, system: SYSTEM_PROMPT, user: buildStepMessage({ userMessage, history, toolResults: results, stepsLeft }), temperature: i.temperature, maxTokens: i.maxTokens });
       raw = r.text; out.inputTokens += r.inputTokens; out.outputTokens += r.outputTokens;
-    } catch {
-      return { ...out, text: FALLBACK.llmError, stopReason: 'llm_error' };
+    } catch (e) {
+      return { ...out, text: FALLBACK.llmError, stopReason: 'llm_error', llmError: e instanceof LlmError ? e.message.slice(0, 200) : 'unexpected error' };
     }
     const step = StepSchema.safeParse(extractJson(raw));
     if (!step.success) {

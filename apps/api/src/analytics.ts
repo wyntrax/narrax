@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { marketTokenImages } from './marketEvidence';
 import { z } from 'zod';
 import type { PrismaClient } from '@narra/database';
 import {
@@ -101,13 +102,14 @@ export function registerAnalyticsRoutes(app: FastifyInstance, deps: Pick<Account
         ...(q.data.final ? { isFinal: q.data.final === 'true' } : {}),
       },
       orderBy: [{ decision: { createdAt: 'desc' } }, { decisionId: 'desc' }], take: q.data.limit + 1,
-      include: { decision: { select: { id: true, action: true, confidence: true, createdAt: true, analysis: { select: { opportunity: { select: { token: { select: { mint: true, symbol: true } } } } } } } } },
+      include: { decision: { select: { id: true, action: true, confidence: true, createdAt: true, analysis: { select: { opportunity: { select: { token: { select: { id: true, mint: true, symbol: true, name:true } } } } } } } } },
     });
     const page = rows.slice(0, q.data.limit), last = page[page.length - 1];
+    const images=await marketTokenImages(db,page.map(r=>r.decision.analysis.opportunity.token));
     return {
       items: page.map((r) => ({
         decisionId: r.decisionId, action: r.decision.action, confidence: r.decision.confidence, decidedAt: r.decision.createdAt,
-        token: { mint: r.decision.analysis.opportunity.token.mint, symbol: r.decision.analysis.opportunity.token.symbol }, // symbol is untrusted text
+        token: { mint: r.decision.analysis.opportunity.token.mint, symbol: r.decision.analysis.opportunity.token.symbol, name:r.decision.analysis.opportunity.token.name, imageUrl:images.get(r.decision.analysis.opportunity.token.id)??null }, // symbol is untrusted text
         label: r.label, return1hPct: r.returnPct1h, return24hPct: r.returnPct24h, maxGainPct: r.maxGainPct, maxDrawdownPct: r.maxDrawdownPct,
         leadTimeSeconds: r.leadTimeSeconds, isFinal: r.isFinal, unknownReason: r.unknownReason, measuredAt: r.measuredAt,
       })),

@@ -7,7 +7,12 @@ const testAuth = process.env.NARRA_WEB_TEST_AUTH === '1';
 /** @type {import('next').NextConfig} */
 const config = {
   transpilePackages: ['@narra/shared'],
+  output: 'standalone',
+  outputFileTracingRoot: path.resolve('..', '..'),
   poweredByHeader: false,
+  // Emit metadata in <head> for every client, including link unfurlers and HTML-only auditors.
+  // Public editorial pages favor a complete initial document over streamed metadata.
+  htmlLimitedBots: /.*/,
   devIndicators: false,
   distDir: testAuth ? '.next-e2e' : '.next',
   webpack(config) {

@@ -8,8 +8,9 @@ import {grantEarlyAccess} from './grants';
 import {entitlementTrace} from './access';
 import type {checkPrivyKey} from '../privy-key';
 
+import { assertTestDatabase } from '../../../../scripts/test-database';
 const url=new URL(process.env.DATABASE_URL??'invalid:');
-if(url.hostname!=='localhost'||url.port!=='5432'||url.pathname!=='/narra_ent')throw Error('Scratch only');
+assertTestDatabase(url);
 const db=createPrisma(url.toString()),tag=`runtime-${randomUUID()}`;
 const keys=['auth.privy_app_id','auth.privy_verification_key','api.cors_origins','early_access.enabled','early_access.seat_cap','early_access.invite_required'];
 let saved:Awaited<ReturnType<typeof db.systemSetting.findMany>>,pem:string;

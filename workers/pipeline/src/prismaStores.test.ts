@@ -18,6 +18,8 @@ describe('wallet event store', () => {
       token: { upsert: vi.fn(async () => ({ id: 't1' })) },
       walletTrade: { create },
       walletProfile: { findFirst: vi.fn(async () => ({ score: 88 })) },
+      tokenMetric: { findFirst: vi.fn(async () => null) },
+      systemSetting: { findUnique: vi.fn(async () => null) },
       ...over,
     } as unknown as PrismaClient;
     return { db, create };
@@ -51,6 +53,17 @@ describe('wallet event store', () => {
     expect(await s.getWalletScore('x')).toBe(88);
     expect(await s.isTracked('x')).toBe(true);
     expect(await makeWalletEventStore(mk({ walletProfile: { findFirst: vi.fn(async () => null) } }).db).getWalletScore('x')).toBeNull();
+  });
+  it('recovers a concurrent mint insert without losing the swap, but propagates other failures', async () => {
+    const findUniqueOrThrow = vi.fn(async () => ({ id: 'winner' }));
+    const upsert = vi.fn().mockRejectedValue(Object.assign(new Error('mint race'), { code: 'P2002' }));
+    const { db, create } = mk({ token: { upsert, findUniqueOrThrow } });
+    expect(await makeWalletEventStore(db).saveWalletTrade(EVENT)).toBe('created');
+    expect(findUniqueOrThrow).toHaveBeenCalledWith({ where: { mint: EVENT.mint }, select: { id: true } });
+    expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ tokenId: 'winner', signature: EVENT.signature }) });
+    upsert.mockRejectedValueOnce(new Error('database unavailable'));
+    await expect(makeWalletEventStore(db).saveWalletTrade(EVENT)).rejects.toThrow('database unavailable');
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -7,10 +7,12 @@ import {PageLoader} from '@/components/page-loader';
 import {GateShell} from '@/features/research/gate';
 import {Availability} from '@/features/access/availability';
 import {fetchPrivyAppId} from './public-config';
+import {AlertCircle} from 'lucide-react';
+import './feedback.css';
 const FallbackLandmark=createContext(false);
 function Fallback({children}:{children:ReactNode}){return useContext(FallbackLandmark)?<GateShell>{children}</GateShell>:children;}
-function Panel({role,children}:{role:'status'|'alert';children:ReactNode}){return useContext(FallbackLandmark)?<div role={role} className="gate-message">{children}</div>:<div className="card access-card" role={role}>{children}</div>;}
-function AuthLoading(){const [timedOut,setTimedOut]=useState(false);const t=useTranslations('common'),landmark=useContext(FallbackLandmark);useEffect(()=>{const timer=setTimeout(()=>setTimedOut(true),10000);return()=>clearTimeout(timer);},[]);if(!timedOut)return <PageLoader landmark={landmark}/>;return <Fallback><Panel role="alert"><p>{t('errorBody')}</p><button className="button button-ghost" onClick={()=>window.location.reload()}>{t('retry')}</button></Panel></Fallback>;}
+function Panel({role,children}:{role:'status'|'alert';children:ReactNode}){const landmark=useContext(FallbackLandmark);return <div role={role} className={landmark?'gate-message auth-feedback':'card access-card auth-feedback'}>{role==='alert'&&<span className="auth-feedback-icon"><AlertCircle size={24} aria-hidden="true"/></span>}{children}</div>;}
+function AuthLoading(){const [timedOut,setTimedOut]=useState(false);const t=useTranslations('common'),landmark=useContext(FallbackLandmark);useEffect(()=>{const timer=setTimeout(()=>setTimedOut(true),10000);return()=>clearTimeout(timer);},[]);if(!timedOut)return <PageLoader landmark={landmark}/>;return <Fallback><Panel role="alert"><h2>{t('error')}</h2><p>{t('errorBody')}</p><button type="button" className="button button-ghost" onClick={()=>window.location.reload()}>{t('retry')}</button></Panel></Fallback>;}
 const Privy = dynamic(() => import('@/components/auth/privy'), {ssr:false, loading: AuthLoading});
 class ProviderError extends Component<{children:ReactNode; fallback:ReactNode}, {failed:boolean}> {state={failed:false}; static getDerivedStateFromError(){return {failed:true};} render(){return this.state.failed ? this.props.fallback : this.props.children;}}
 export function AuthBoundary({children,landmark=false}: {children: ReactNode;landmark?:boolean}) {

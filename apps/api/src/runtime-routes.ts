@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { PrivyAppId, PrivyVerificationKey } from '@narra/shared';
-import { makeAuthenticate, type AccountDeps } from './account';
-import { AccessError, requireAdminActor } from './entitlements/common';
+import { makeRequireAdmin, type AccountDeps } from './account';
+import { AccessError } from './entitlements/common';
 import { checkPrivyKey } from './privy-key';
 import type { RuntimeSettingsResolver } from './runtime-settings';
 
@@ -17,10 +17,7 @@ export function registerRuntimeRoutes(app: FastifyInstance, settings?: RuntimeSe
     }
   });
   if (!account || !settings) return;
-  const opts = { bodyLimit: 8192, config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, preHandler: [makeAuthenticate(account), async (req: FastifyRequest, reply: FastifyReply) => {
-    try { await requireAdminActor(account.db, req.userId!); }
-    catch { return reply.code(403).send({ error: 'FORBIDDEN', requestId: req.requestId }); }
-  }] };
+  const opts = { bodyLimit: 8192, config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, preHandler: makeRequireAdmin(account) };
   // Keep these errors value-free, including provider/network and schema failures.
   const handle = (work: (req: FastifyRequest) => Promise<unknown>) => async (req: FastifyRequest, reply: FastifyReply) => {
     try { return await work(req); } catch (e) {

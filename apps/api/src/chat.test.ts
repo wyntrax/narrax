@@ -6,6 +6,7 @@ import type { LlmProvider, LlmRequest } from '@narra/ai';
 import { AGENT_LIMITS } from '@narra/agent';
 import { buildApp } from './app';
 import { createPrivyVerifier } from './auth';
+import {seedTestPro,clearTestPro} from './test-membership';
 
 const APP_ID = 'test-app-id';
 const { publicKey, privateKey } = await generateKeyPair('ES256');
@@ -44,6 +45,7 @@ describe.skipIf(!up)('agent chat routes (needs Postgres)', () => {
   const use = (s: typeof script) => { requests = []; script = s; delayMs = 0; };
 
   afterAll(async () => {
+    await clearTestPro(db,cleanupUsers);
     await db.user.deleteMany({ where: { id: { in: cleanupUsers } } }); // cascades conversations, messages, proposals, positions, profiles
     await db.token.deleteMany({ where: { mint: MINT } });
     await db.$disconnect();
@@ -54,6 +56,7 @@ describe.skipIf(!up)('agent chat routes (needs Postgres)', () => {
   beforeAll(async () => {
     app = await buildApp({ account: { db, verifier, now: () => now }, chatLlm: llm, chatQuestionsPerMinute: 10_000 });
     offApp = await buildApp({ account: { db, verifier, now: () => now } });
+    for(const sub of [alice,bob,ghost])await seedTestPro(db,await uid(sub));
   });
   const http = async (method: 'GET' | 'POST', path: string, sub: string | null, body?: unknown, a?: Awaited<ReturnType<typeof buildApp>>) => {
     const res = await (a ?? app).inject({ method, url: path, headers: sub ? { authorization: `Bearer ${await sign(sub)}` } : {}, ...(body !== undefined ? { payload: body as object } : {}) });

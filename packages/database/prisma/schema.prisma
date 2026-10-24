@@ -178,6 +178,29 @@ model User {
   linkedWallets  LinkedWallet[]
   walletLinkChallenges WalletLinkChallenge[]
   accessGrants   AccessGrant[]
+  manualSwaps    ManualSwap[]
+}
+
+/// User-signed mainnet swaps. Separate from automated orders and the paper PnL ledger.
+model ManualSwap {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet String
+  mint String
+  side TradeSide
+  status String @default("PREPARED")
+  transaction String
+  quote Json
+  review Json
+  lastValidBlockHeight Int
+  signature String? @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status, updatedAt])
 }
 
 /// Per-user preferences. A user without a row gets the defaults named in packages/shared (alerts.ts).
@@ -248,6 +271,11 @@ model TrackedWallet {
   source    String               @default("MANUAL")
   /// Inactive wallets are removed from webhook tracking and ignored by scoring. History is kept.
   active    Boolean              @default(true)
+  /// Operator review is separate from automatic evidence qualification. Never grants trading authority.
+  researchReview String          @default("PROVISIONAL")
+  researchReviewedAt DateTime?
+  researchReviewedBy String?
+  researchReviewReason String?
   createdAt DateTime             @default(now())
   funding   WalletFunding?
   profile   WalletProfile?
@@ -346,6 +374,8 @@ model WalletTrade {
   amountUsd    Decimal?
   marketCapUsd Decimal?
   signature    String        @unique
+  /// Frozen, contemporaneous market/SOL evidence. Historical ingestion never substitutes a later observation.
+  evidence     Json?
   at           DateTime
 
   @@index([tokenId, at])
@@ -466,6 +496,28 @@ model NarrativeMention {
   @@index([narrativeId, at])
 }
 
+/// A token reference (mint address or $CASHTAG) found in a social post. Only the extracted reference and hashes are
+/// stored. Raw post text is never stored. Rows older than the retention window are pruned by the social-token scan.
+model TokenMention {
+  id             String   @id @default(cuid())
+  /// 'MINT' (strong: names one token) or 'CASHTAG' (weak: any token can use any symbol)
+  refKind        String
+  /// the mint address, or the symbol upper-cased without the dollar sign
+  ref            String
+  platform       String
+  externalId     String
+  creatorId      String?
+  textHash       String
+  simhash        String
+  creatorAgeDays Int?
+  engagement     Int      @default(0)
+  at             DateTime
+
+  @@unique([refKind, ref, platform, externalId])
+  @@index([ref, at])
+  @@index([at])
+}
+
 model NarrativeCreator {
   id          String      @id @default(cuid())
   narrativeId String
@@ -511,6 +563,7 @@ model Token {
   narratives       NarrativeTokenRelation[]
   walletTrades     WalletTrade[]
   smartSignals     SmartMoneySignal[]
+  walletResearchSignals WalletResearchSignal[]
   consensus        ConsensusSignal[]
   opportunities    Opportunity[]
   positions        Position[]
@@ -818,9 +871,98 @@ model Alert {
   /// Set once the dispatcher has turned the alert into notifications and published it. Null means not yet handled.
   dispatchedAt  DateTime?
   notifications Notification[]
+  earlyRadarOutcome EarlyRadarOutcome?
 
   @@index([userId, createdAt])
   @@index([dispatchedAt, createdAt])
+}
+
+/// Research-only token flow. Independent of ConsensusSignal and trading/Telegram alerts.
+model WalletResearchSignal {
+  id String @id @default(cuid())
+  tokenId String
+  token Token @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  dedupeKey String @unique
+  side TradeSide
+  walletCount Int
+  independentEntities Int
+  netFlowSol Decimal
+  entryPriceUsd Decimal
+  entryMetricId String
+  entryAt DateTime
+  evidence Json
+  createdAt DateTime @default(now())
+  measurements WalletResearchMeasurement[]
+
+  @@index([tokenId, createdAt])
+  @@index([createdAt])
+}
+
+model WalletResearchMeasurement {
+  id String @id @default(cuid())
+  signalId String
+  signal WalletResearchSignal @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  horizonHours Int
+  dueAt DateTime
+  status String @default("PENDING")
+  priceUsd Decimal?
+  priceAt DateTime?
+  metricId String?
+  returnPct Float?
+  reason String?
+  measuredAt DateTime?
+
+  @@unique([signalId, horizonHours])
+  @@index([status, dueAt])
+}
+
+/// Research-only frozen cohort. Legacy alerts retain UNKNOWN attribution and a missing entry snapshot.
+model EarlyRadarOutcome {
+  id                    String   @id @default(cuid())
+  alertId               String   @unique
+  alert                 Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  tokenId               String
+  mint                  String?
+  alertedAt             DateTime
+  profile               String
+  tier                  String
+  route                 String
+  matchKind             String
+  score                 Float?
+  entryMetricId         String?
+  entryAt               DateTime?
+  entryPriceUsd         Float?
+  entryMarketCapUsd     Float?
+  entryMarketCapIsFdv   Boolean?
+  entrySource           String?
+  entryUnknownReason    String?
+  measurements          EarlyRadarMeasurement[]
+
+  @@index([alertedAt, id])
+  @@index([tokenId, alertedAt])
+}
+
+/// A missing horizon becomes UNKNOWN after its observation window closes; it is never a zero return.
+model EarlyRadarMeasurement {
+  id                 String   @id @default(cuid())
+  outcomeId          String
+  outcome            EarlyRadarOutcome @relation(fields: [outcomeId], references: [id], onDelete: Cascade)
+  horizonHours       Int
+  targetAt           DateTime
+  nextCheckAt        DateTime
+  status             String   @default("PENDING")
+  metricId           String?
+  observedAt         DateTime?
+  priceUsd           Float?
+  marketCapUsd       Float?
+  marketCapIsFdv     Boolean?
+  source             String?
+  returnPct          Float?
+  unknownReason      String?
+  measuredAt         DateTime?
+
+  @@unique([outcomeId, horizonHours])
+  @@index([status, nextCheckAt, id])
 }
 
 model Notification {

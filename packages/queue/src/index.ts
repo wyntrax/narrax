@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AgentDecisionSchema } from '@narra/shared';
 
 export interface QueueCounts { waiting: number; active: number; failed: number; delayed: number; /** Workers connected to this queue right now. 0 with jobs waiting means nothing is consuming it. */ consumers?: number }
+export interface QueueHealth {lastCompletedAt:string|null;lastFailedAt:string|null;lastRun:{analyzed?:number;providerFailures?:number;providerErrors?:number;mentionsStored?:number;narrativesUpdated?:number;topicsSeen?:number;tokensUsed?:number;skipped?:string;rateLimited?:boolean}|null}
 
 export const QUEUE_NAMES = {
   walletEvents: 'wallet-events',
@@ -24,6 +25,7 @@ export const QUEUE_NAMES = {
   outcomeTracking: 'outcome-tracking',
   notificationDispatch: 'notification-dispatch',
   realtimePublish: 'realtime-publish',
+  telegramDelivery: 'telegram-delivery',
 } as const;
 
 /** A normalized on-chain swap by a wallet. Produced from provider payloads, never from raw text. */
@@ -101,6 +103,7 @@ export function createQueues(connection: Redis) {
   const outcomeTracking = new Queue(QUEUE_NAMES.outcomeTracking, { connection });
   const notificationDispatch = new Queue(QUEUE_NAMES.notificationDispatch, { connection });
   const realtimePublish = new Queue(QUEUE_NAMES.realtimePublish, { connection });
+  const telegramDelivery = new Queue(QUEUE_NAMES.telegramDelivery, { connection });
 
   return {
     walletEvents,
@@ -123,6 +126,7 @@ export function createQueues(connection: Redis) {
       outcomeTracking.upsertJobScheduler('track', { every: everyMs }, { name: 'track', data: {}, opts: { attempts: 1, ...RETAIN } }),
     notificationDispatch,
     realtimePublish,
+    telegramDelivery,
     scheduleEntryFanOut: (everyMs = 60_000) =>
       entryFanOut.upsertJobScheduler('fan-out', { every: everyMs }, { name: 'fan-out', data: {}, opts: { attempts: 1, ...RETAIN } }),
     scheduleExitFanOut: (everyMs = 60_000) =>
@@ -135,6 +139,9 @@ export function createQueues(connection: Redis) {
     /** Appends new rows to the realtime event stream. */
     scheduleRealtimePublish: (everyMs = 2_000) =>
       realtimePublish.upsertJobScheduler('publish', { every: everyMs }, { name: 'publish', data: {}, opts: { attempts: 1, ...RETAIN_SHORT } }),
+    /** Posts eligible global Early Radar alerts to the configured Telegram chat. */
+    scheduleTelegramDelivery: (everyMs = 30_000) =>
+      telegramDelivery.upsertJobScheduler('deliver', { every: everyMs }, { name: 'deliver', data: {}, opts: { attempts: 1, ...RETAIN_SHORT } }),
     scheduleWalletSync: (everyMs = 10 * 60_000) =>
       walletSync.upsertJobScheduler('sync', { every: everyMs }, { name: 'sync', data: {}, opts: { attempts: 1, ...RETAIN } }),
     /** Asks for a sync now. At most one request per minute is queued, so a burst of edits makes one sync. */
@@ -172,7 +179,7 @@ export function createQueues(connection: Redis) {
     /** Waiting, active, failed and delayed job counts for every queue, for the admin status view. */
     counts: async (): Promise<Record<string, QueueCounts>> => {
       const out: Record<string, QueueCounts> = {};
-      for (const q of [walletEvents, aiScreening, execution, walletIntelligence, narrativeIngestion, tokenResolution, aiAnalysis, marketData, walletSync, walletFunding, walletDiscovery, positionMonitor, entryFanOut, exitFanOut, portfolioSnapshots, outcomeTracking, notificationDispatch, realtimePublish]) {
+      for (const q of [walletEvents, aiScreening, execution, walletIntelligence, narrativeIngestion, tokenResolution, aiAnalysis, marketData, walletSync, walletFunding, walletDiscovery, positionMonitor, entryFanOut, exitFanOut, portfolioSnapshots, outcomeTracking, notificationDispatch, realtimePublish, telegramDelivery]) {
         const c = await q.getJobCounts('waiting', 'active', 'failed', 'delayed');
         let consumers: number | undefined;
         try { consumers = (await q.getWorkers()).length; } catch { consumers = undefined; } // unknown, not zero, when Redis will not say
@@ -180,7 +187,23 @@ export function createQueues(connection: Redis) {
       }
       return out;
     },
-    close: async () => { await Promise.all([walletEvents.close(), aiScreening.close(), execution.close(), walletIntelligence.close(), narrativeIngestion.close(), tokenResolution.close(), aiAnalysis.close(), marketData.close(), walletSync.close(), walletFunding.close(), walletDiscovery.close(), positionMonitor.close(), entryFanOut.close(), exitFanOut.close(), portfolioSnapshots.close(), outcomeTracking.close(), notificationDispatch.close(), realtimePublish.close()]); },
+    /** Small retained-job sample. Never return job payloads, raw error messages or credentials. */
+    health:async():Promise<Record<string,QueueHealth>>=>{
+      const out:Record<string,QueueHealth>={};
+      await Promise.all([walletEvents,walletIntelligence,walletSync,marketData,aiAnalysis,narrativeIngestion].map(async q=>{
+        const [completed,failed]=await Promise.all([q.getJobs(['completed'],0,0),q.getJobs(['failed'],0,0)]);
+        const job=completed[0];let value:unknown=job?.returnvalue;
+        if(typeof value==='string'){try{value=JSON.parse(value);}catch{value=null;}}
+        const object=value&&typeof value==='object'?value as Record<string,unknown>:null;
+        const run:NonNullable<QueueHealth['lastRun']>={};
+        for(const key of ['analyzed','providerFailures','providerErrors','mentionsStored','narrativesUpdated','topicsSeen','tokensUsed'] as const)if(typeof object?.[key]==='number'&&Number.isInteger(object[key])&&object[key]>=0)run[key]=object[key];
+        if(typeof object?.skipped==='string'&&['disabled','budget','no_provider'].includes(object.skipped))run.skipped=object.skipped;
+        const summary=object?.summary&&typeof object.summary==='object'?object.summary as Record<string,unknown>:object;
+        if(Array.isArray(summary?.errors))run.rateLimited=summary.errors.some(e=>typeof e==='string'&&/rate_limited|HTTP 429/.test(e));
+        out[q.name]={lastCompletedAt:job?.finishedOn?new Date(job.finishedOn).toISOString():null,lastFailedAt:failed[0]?.finishedOn?new Date(failed[0].finishedOn).toISOString():null,lastRun:Object.keys(run).length?run:null};
+      }));return out;
+    },
+    close: async () => { await Promise.all([walletEvents.close(), aiScreening.close(), execution.close(), walletIntelligence.close(), narrativeIngestion.close(), tokenResolution.close(), aiAnalysis.close(), marketData.close(), walletSync.close(), walletFunding.close(), walletDiscovery.close(), positionMonitor.close(), entryFanOut.close(), exitFanOut.close(), portfolioSnapshots.close(), outcomeTracking.close(), notificationDispatch.close(), realtimePublish.close(), telegramDelivery.close()]); },
   };
 }
 export type Queues = ReturnType<typeof createQueues>;

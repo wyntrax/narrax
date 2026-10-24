@@ -1,5 +1,5 @@
 import {afterEach,describe,it,expect,vi} from 'vitest';
-import {ApiError,createApi,errorKey,ERROR_CODES} from './api';
+import {ApiError,createApi,createDownloadTransport,errorKey,ERROR_CODES} from './api';
 import en from '../../messages/en.json';
 import id from '../../messages/id.json';
 import {empty,status} from '@/test/fixtures';
@@ -12,4 +12,17 @@ describe('API boundary',()=>{
  it('refuses a missing bearer before transport',async()=>{const fetch=vi.fn();await expect(createApi('http://localhost:4000',async()=>null,fetch).entitlements()).rejects.toMatchObject({code:'UNAUTHORIZED'});expect(fetch).not.toHaveBeenCalled();});
  it.each(ERROR_CODES)('has EN and ID next-action copy for %s',code=>{expect(errorKey(new ApiError(code))).toBe(code);expect(en.errors[code].length).toBeGreaterThan(20);expect(id.errors[code].length).toBeGreaterThan(20);});
  it('maps arbitrary thrown values and unknown backend codes to a safe fallback',()=>{expect(errorKey(Error('private details'))).toBe('UNKNOWN');expect(errorKey(new ApiError('NEW_CODE'))).toBe('UNKNOWN');});
+ it('downloads an authenticated file body as text and keeps a failed export an ApiError',async()=>{
+  const fetch=vi.fn<typeof globalThis.fetch>().mockResolvedValueOnce(new Response('tradeId,side\r\nt1,BUY\r\n')).mockResolvedValueOnce(new Response(JSON.stringify({error:'RATE_LIMITED'}),{status:429,headers:{'retry-after':'30'}}));
+  const download=createDownloadTransport('http://localhost:4000',async()=>'fixture',fetch);
+  expect(await download('/v1/trades/export?format=csv')).toBe('tradeId,side\r\nt1,BUY\r\n');
+  expect(String(fetch.mock.calls[0]?.[0])).toBe('http://localhost:4000/v1/trades/export?format=csv');
+  expect(fetch.mock.calls[0]?.[1]?.headers).toEqual({Authorization:'Bearer fixture'});
+  await expect(download('/v1/trades/export?format=csv')).rejects.toMatchObject({code:'RATE_LIMITED',retryAfter:30});
+ });
+ it('refuses a file download without a bearer token before transport',async()=>{
+  const fetch=vi.fn();
+  await expect(createDownloadTransport('http://localhost:4000',async()=>null,fetch)('/v1/trades/export')).rejects.toMatchObject({code:'UNAUTHORIZED'});
+  expect(fetch).not.toHaveBeenCalled();
+ });
 });

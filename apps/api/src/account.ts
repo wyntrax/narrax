@@ -5,9 +5,10 @@ import { GLOBAL_LIMITS, PROFILES } from '@narra/risk';
 import { TradingMode } from '@narra/shared';
 import { describeAuthFailure, type AuthVerifier } from './auth';
 import { rejectedTokenMetadata } from './auth-token';
+import { adminAllowlist, adminAllowlistConfigured, decideIsAdmin } from './adminAccess';
 
 declare module 'fastify' {
-  interface FastifyRequest { userId?: string }
+  interface FastifyRequest { userId?: string; /** Set only from a Privy-signed identity token, never from the request body. */ userEmail?: string | null }
 }
 
 export interface AccountDeps {
@@ -32,19 +33,41 @@ const RiskBody = z.object({
 /**
  * Finds the user for a verified Privy id, creating it on first sight. Database trouble throws, so an outage is a 500 and
  * does not look like a logout. Shared by the HTTP pre-handler and the WebSocket gateway.
+ *
+ * `email` is only ever passed after a Privy identity token verified it (see `makeAuthenticate`); it is stored so the
+ * env-configured admin allowlist can match on address. A caller with no verified email leaves the stored value alone.
  */
-export async function resolveUserId(db: PrismaClient, privyUserId: string): Promise<string> {
-  const find = () => db.user.findUnique({ where: { privyUserId }, select: { id: true } });
+export async function resolveUserId(db: PrismaClient, privyUserId: string, email?: string | null): Promise<string> {
+  const find = () => db.user.findUnique({ where: { privyUserId }, select: { id: true, email: true } });
   let user = await find();
   if (!user) {
     try {
-      user = await db.user.create({ data: { privyUserId }, select: { id: true } });
+      user = await db.user.create({ data: { privyUserId, ...(email ? { email } : {}) }, select: { id: true, email: true } });
     } catch (e) {
       if ((e as { code?: string }).code !== 'P2002') throw e; // two first requests raced; the other one created it
       user = await find();
     }
   }
+  // Reconcile only on a real change, so a signed-in session does not write on every request.
+  if (user && email && user.email !== email) await db.user.update({ where: { id: user.id }, data: { email } });
   return user!.id;
+}
+
+/**
+ * Pre-handler that requires a signed-in admin. Lives here because `/v1/me` already owns the admin decision and the
+ * entitlement and runtime admin routes are only allowed to depend on this module.
+ *
+ * The ADMIN_* environment wins when it is set (fail closed: a leftover database admin is ignored), and the database flag
+ * decides only when neither variable is configured. Same rule as `/v1/me`.
+ */
+export function makeRequireAdmin(deps: Pick<AccountDeps, 'db' | 'verifier'>) {
+  const authenticate = makeAuthenticate(deps);
+  return async (req: FastifyRequest, reply: FastifyReply) => {
+    const denied = await authenticate(req, reply);
+    if (denied || reply.sent) return denied;
+    const u = await deps.db.user.findUnique({ where: { id: req.userId! }, select: { isAdmin: true, privyUserId: true, email: true } });
+    if (!decideIsAdmin(u)) return reply.code(403).send({ error: 'FORBIDDEN' });
+  };
 }
 
 /** Pre-handler that verifies the bearer token and resolves (or creates) the user. Sets req.userId. */
@@ -62,7 +85,18 @@ export function makeAuthenticate(deps: Pick<AccountDeps, 'verifier' | 'db'>) {
       req.log.warn({ reason: describeAuthFailure(e), token: rejectedTokenMetadata(token) }, 'access token rejected');
       return reply.code(401).send({ error: 'UNAUTHORIZED' });
     }
-    req.userId = await resolveUserId(db, privyUserId);
+    // The identity token is optional. When present it must be signed by Privy and belong to the same user, and it is the
+    // only thing that can vouch for an email; a bad or mismatched one is ignored rather than failing the sign-in.
+    const identityToken = req.headers['x-privy-identity-token'];
+    let email: string | null = null;
+    if (verifier.verifyIdentity && typeof identityToken === 'string' && identityToken) {
+      try {
+        const identity = await verifier.verifyIdentity(identityToken);
+        if (identity.privyUserId === privyUserId) email = identity.email;
+      } catch { /* no verified email available this request */ }
+    }
+    req.userEmail = email;
+    req.userId = await resolveUserId(db, privyUserId, email);
   };
 }
 
@@ -82,7 +116,13 @@ export function registerAccountRoutes(app: FastifyInstance, deps: AccountDeps): 
 
   app.get('/v1/me', routeOpts, async (req) => {
     const user = await db.user.findUniqueOrThrow({ where: { id: req.userId! }, include: { permission: true, riskProfile: true } });
-    return { id: user.id, mode: user.mode, aiTradingEnabled: aiEnabled(user.permission), agentPaused: user.permission?.agentPaused ?? false, riskPreset: user.riskProfile?.preset ?? null };
+    // Admin comes from the ADMIN_* environment when it is set; `admin` reports the caller's own identifiers so the
+    // operator can copy the right value into the environment without hunting for it.
+    const list = adminAllowlist();
+    return {
+      id: user.id, isAdmin: decideIsAdmin(user), mode: user.mode, aiTradingEnabled: aiEnabled(user.permission), agentPaused: user.permission?.agentPaused ?? false, riskPreset: user.riskProfile?.preset ?? null,
+      admin: { configured: adminAllowlistConfigured(list), privyUserId: user.privyUserId, email: user.email },
+    };
   });
 
   app.put('/v1/mode', routeOpts, async (req, reply) => {

@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPrisma } from '@narra/database';
 import { buildApp } from './app';
 import { createPrivyVerifier } from './auth';
+import {seedTestPro,clearTestPro} from './test-membership';
 
 const APP_ID = 'test-app-id';
 const { publicKey, privateKey } = await generateKeyPair('ES256');
@@ -49,8 +50,9 @@ describe.skipIf(!up)('analytics endpoints (needs Postgres)', () => {
     return d;
   }
 
-  beforeAll(async () => { app = await buildApp({ account: { db, verifier, now: () => NOW } }); });
+  beforeAll(async () => { app = await buildApp({ account: { db, verifier, now: () => NOW } });for(const sub of [alice,bob,boss])await seedTestPro(db,await uid(sub)); });
   afterAll(async () => {
+    await clearTestPro(db,userIds);
     await db.user.deleteMany({ where: { id: { in: userIds } } });
     await db.agentDecision.deleteMany({ where: { id: { in: decisionIds } } });
     await db.backtestRun.deleteMany({ where: { id: { in: runIds } } });

@@ -12,6 +12,10 @@ export class FixtureMarketData implements MarketQuoteSource, TokenInfoSource, La
     const wanted = new Set(mints);
     return new Map((this.data.snapshots ?? []).filter((s) => wanted.has(s.mint)).map((s) => [s.mint, s]));
   }
+  async getReferencePrices(mints: string[]) {
+    const wanted = new Set(mints);
+    return new Map((this.data.snapshots ?? []).filter((s) => wanted.has(s.mint) && s.priceUsd > 0).map((s) => [s.mint, s.priceUsd]));
+  }
   async getTokenInfo(mint: string) {
     this.infoCalls.push(mint);
     return (this.data.info ?? []).find((i) => i.mint === mint) ?? null;

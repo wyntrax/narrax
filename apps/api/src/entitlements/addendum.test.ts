@@ -12,8 +12,9 @@ import { applyWyntraxEvent } from './membershipStore';
 import { hash } from './crypto';
 import { VECTOR_BODY, VECTOR_SECRET } from './fixtures.test-support';
 
+import { assertTestDatabase } from '../../../../scripts/test-database';
 const target = new URL(process.env.DATABASE_URL ?? 'invalid:');
-if (target.hostname !== 'localhost' || target.port !== '5432' || target.pathname !== '/narra_ent') throw Error('Scratch database required');
+assertTestDatabase(target);
 const db = createPrisma(target.toString());
 const tag = `add-${randomUUID()}`, users: string[] = [], members: string[] = [], events: string[] = [];
 let seq = 0, now = new Date();

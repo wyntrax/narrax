@@ -1,0 +1,23 @@
+import {render,screen,cleanup,within} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import {afterEach,it,expect,vi} from 'vitest';
+import {NextIntlClientProvider} from 'next-intl';
+import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
+import messages from '../../../messages/research/en.json';
+import {WalletResearchCard} from './wallet-research-card';
+import type {AdminApi} from './api';
+vi.mock('@/i18n/navigation',()=>({useRouter:()=>({push:vi.fn()}),Link:()=>null}));
+afterEach(cleanup);
+it('requires a reason and saves an explicit review while qualification stays provisional',async()=>{
+ const user=userEvent.setup(),reviewResearch=vi.fn(async()=>({ok:true}));
+ const api={researchHealth:vi.fn(async()=>({enabled:false,discovery:null})),researchWallets:vi.fn(async()=>({nextCursor:null,items:[{address:'wallet',label:'Seed',source:'MANUAL',researchReview:'PROVISIONAL',qualification:{status:'PROVISIONAL',eligible:false,reasons:['HISTORY_INCOMPLETE_OR_STALE'],rulesVersion:1}}]})),walletCandidates:vi.fn(async()=>({items:[],nextCursor:null})),reviewResearch} as unknown as AdminApi;
+ const client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});
+ render(<QueryClientProvider client={client}><NextIntlClientProvider locale="en" messages={{workspace:messages}}><WalletResearchCard api={api} queryKey={['test','wallet-research']}/></NextIntlClientProvider></QueryClientProvider>);
+ expect(api.researchWallets).not.toHaveBeenCalled();await user.click(screen.getByRole('button',{name:'Open review panel'}));
+ const save=await screen.findByRole('button',{name:'Save review'});expect(save).toBeDisabled();
+ const form=save.closest('form')!;await user.selectOptions(within(form).getByLabelText('Decision'),'APPROVED');
+ await user.type(within(form).getByLabelText('Review reason'),'Reviewed source history');await user.click(save);
+ expect(reviewResearch).toHaveBeenCalledWith('wallet','APPROVED','Reviewed source history');
+ expect(await screen.findByText(messages.smartResearch.saved)).toBeVisible();
+ client.clear();
+});

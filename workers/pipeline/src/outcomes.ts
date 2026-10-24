@@ -208,6 +208,14 @@ async function markError(db: PrismaClient, job: ExecutionJob, e: unknown, now: D
  * One attempt only. A thrown error is recorded and rethrown, never retried.
  */
 export async function runExecution(db: PrismaClient, job: ExecutionJob, deps: ExecutionDeps): Promise<ExecutionOutcome> {
+  // Serialize account checks/fills with manual paper confirmations as well as other execution workers.
+  // This guard holds a DB lock only; existing routing, risk checks and fill behavior are unchanged.
+  return db.$transaction(async guard=>{
+    await guard.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`execution:${job.userId}`},0))`;
+    return runLockedExecution(db,job,deps);
+  },{timeout:60_000,maxWait:10_000});
+}
+async function runLockedExecution(db:PrismaClient,job:ExecutionJob,deps:ExecutionDeps):Promise<ExecutionOutcome>{
   const now = deps.now ?? (() => new Date());
   try {
     const outcome = await processExecution(job, deps);

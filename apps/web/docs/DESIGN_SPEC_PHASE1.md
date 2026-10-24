@@ -1,5 +1,7 @@
 # Narra Phase 1 — unified marketing design specification
 
+**Current brand amendment:** the owner's subsequent **Narrax** name, supplied symbol and black/white-only palette supersede the earlier Narra/lime/cyan brand decisions below. See [NARRAX_BRAND.md](NARRAX_BRAND.md). The original reference interpretation and its verification remain historical evidence.
+
 Source images opened at native resolution before design: `design/reference/early-access-design.png` (1011 × 735), `landing-page-design.png` (963 × 717). Reference files are read-only. Labels: **R** = from reference, **I** = inferred for responsive/useful product implementation, **E** = enhancement. Status describes the planned implementation; final review records any differences.
 
 ## One-page visual language

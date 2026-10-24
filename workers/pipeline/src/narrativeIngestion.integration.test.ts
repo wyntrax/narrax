@@ -1,7 +1,7 @@
 import pg from 'pg';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createPrisma } from '@narra/database';
-import { StaticProvider, type NarrativeProvider, type RawMention } from '@narra/narrative';
+import { StaticProvider, TregNarrativeProvider, type NarrativeProvider, type RawMention } from '@narra/narrative';
 import { ingestNarratives } from './narrativeIngestion';
 
 const url = process.env.DATABASE_URL ?? 'postgresql://narra:narra@localhost:5432/narra';
@@ -13,7 +13,13 @@ const up = await dbUp();
 
 describe.skipIf(!up)('narrative ingestion on a real Postgres', () => {
   const db = createPrisma(url);
-  afterAll(async () => { await db.$disconnect(); });
+  afterAll(async () => {
+    const records = await db.narrative.findMany({ where: { slug: { endsWith: `-${tag}` } }, select: { id: true } });
+    await db.alert.deleteMany({ where: { refId: { in: records.map(n => n.id) }, refType: 'NARRATIVE' } });
+    await db.narrative.deleteMany({ where: { id: { in: records.map(n => n.id) } } });
+    await db.creator.deleteMany({ where: { handle: { endsWith: tag } } });
+    await db.$disconnect();
+  });
   const tag = `ni${Date.now()}`.replace(/[^a-z0-9]/g, '');
   const NOW = new Date('2026-09-30T12:00:00Z');
   const slug = `quantum-lobster-${tag}`;
@@ -63,9 +69,11 @@ describe.skipIf(!up)('narrative ingestion on a real Postgres', () => {
 
   it('keeps going when one provider fails', async () => {
     const broken: NarrativeProvider = { name: 'broken', getTrendingTopics: async () => { throw new Error('api down'); }, getTopicActivity: async () => [] };
-    const r = await ingestNarratives(db, [broken, provider], NOW);
+    const failures: string[] = [];
+    const r = await ingestNarratives(db, [broken, provider], NOW, { onProviderError: name => { failures.push(name); } });
     expect(r.providerErrors).toBe(1);
     expect(r.narrativesUpdated).toBe(1);
+    expect(failures).toEqual(['broken']);
   });
 
   it('moves the narrative to decaying once activity falls off, with a decay alert', async () => {
@@ -86,5 +94,32 @@ describe.skipIf(!up)('narrative ingestion on a real Postgres', () => {
     const r = await ingestNarratives(db, [junk], NOW);
     expect(r.topicsSeen).toBe(1);
     expect(r.mentionsStored).toBe(0);
+    expect(await db.narrative.findUnique({ where: { slug: `future-topic-${tag}` } })).toBeNull();
+  });
+
+  it('does not create phantom narratives from empty or stale watchlist searches', async () => {
+    const provider = new StaticProvider('empty-search', [
+      { topic: { name: `Empty Topic ${tag}`, externalId: 'empty' }, mentions: [] },
+      { topic: { name: `Old Topic ${tag}`, externalId: 'old' }, mentions: [mention(9200, 60 * 72)] },
+    ]);
+    expect(await ingestNarratives(db, [provider], NOW)).toMatchObject({ mentionsStored: 0, narrativesUpdated: 0 });
+    expect(await db.narrative.count({ where: { slug: { in: [`empty-topic-${tag}`, `old-topic-${tag}`] } } })).toBe(0);
+  });
+
+  it('maps Treg records into the same hash-only narrative, preserves source provenance and re-ingests without duplicate mentions', async () => {
+    const topic = { name: `Treg Social ${tag}`, query: 'solana' }, timestamp = NOW.getTime() / 1000 - 60;
+    const payloads = {
+      x: { items: [{ id: `${tag}-social-x`, authorUsername: `alice${tag}`, text: 'social observation x', createdUtc: timestamp, likeCount: 3, replyCount: 1, retweetCount: 1, quoteCount: 0 }] },
+      reddit: { posts: [{ id: `${tag}-social-reddit`, author: `bob${tag}`, title: 'social observation reddit', selftext: 'source text', createdUtc: timestamp, score: 2, numComments: 3 }] },
+      tiktok: { videos: [{ id: `${tag}-social-tiktok`, author: `carol${tag}`, caption: 'social observation tiktok', createdUtc: timestamp, likes: 3, comments: 1, shares: 1 }] },
+    };
+    const providers = (['x', 'reddit', 'tiktok'] as const).map(platform => new TregNarrativeProvider({ platform, topics: [topic], now: NOW,
+      call: async () => ({ output: { found: true, data: payloads[platform] } }) }));
+    expect(await ingestNarratives(db, providers, NOW)).toMatchObject({ narrativesUpdated: 1, mentionsStored: 3, providerErrors: 0 });
+    expect(await ingestNarratives(db, providers, NOW)).toMatchObject({ narrativesUpdated: 1, mentionsStored: 0, providerErrors: 0 });
+    const record = await db.narrative.findUniqueOrThrow({ where: { slug: `treg-social-${tag}` }, include: { sources: true, mentions: true, creators: true } });
+    expect(record.sources.map(s => s.provider).sort()).toEqual(['treg:anyapi:reddit', 'treg:anyapi:tiktok', 'treg:anyapi:x']);
+    expect(record.mentions).toHaveLength(3);
+    for (const mention of record.mentions) { expect(mention.textHash).toMatch(/^[a-f0-9]{64}$/); expect(mention.creatorAgeDays).toBeNull(); expect(mention).not.toHaveProperty('text'); }
   });
 });

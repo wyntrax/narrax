@@ -19,5 +19,5 @@ function Placeholder({auth}:{auth:AuthAdapter}){
  const userId=auth.ready&&auth.authenticated?auth.userId:null;
  const query=useEntitlements(api,userId);
  if((!auth.ready||auth.authenticated&&(!userId||query.isPending))&&!timedOut)return <Skeleton/>;
- return <><h1>NARRA</h1>{userId&&query.data&&query.data.effectiveTier!=='NONE'?<p>{t('coming')}</p>:<Link className="button button-primary" href="/early-access">{t('getAccess')}</Link>}</>;
+ return <><h1>NARRAX</h1>{userId&&query.data&&query.data.effectiveTier!=='NONE'?<p>{t('coming')}</p>:<Link className="button button-primary" href="/early-access">{t('getAccess')}</Link>}</>;
 }

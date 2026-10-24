@@ -1,7 +1,24 @@
 import {getLocale,getTranslations} from 'next-intl/server';
-import {Instrument_Serif} from 'next/font/google';
 import {AuthBoundary} from '@/components/auth/boundary';
 import {AccessFlow} from '@/features/access/controller';
+import {BrandMark} from '@/components/brand-mark';
+import {ShieldCheck,ArrowLeft} from 'lucide-react';
+import {Link} from '@/i18n/navigation';
+import {HOLDING_TIERS} from '@narra/shared';
+import {fetchRequirements} from '@/lib/requirements';
+import {PoweredBy} from '@/components/powered-by';
+import {TokenAvatar} from '@/features/research/token-identity';
 import './access-design.css';
-const serif=Instrument_Serif({subsets:['latin'],weight:'400',style:'italic',display:'swap',variable:'--font-serif',preload:false});
-export default async function EarlyAccess(){const t=await getTranslations('access'),c=await getTranslations('common'),locale=await getLocale();const word=locale==='id'?'ramai':'crowd',[before,after]=t('headline').split(word);return <main id="main" className={`access-page container ${serif.variable}`}><div className="access-atmosphere" aria-hidden="true"><svg className="access-stars" viewBox="0 0 1200 1000" preserveAspectRatio="none">{[[110,240],[260,390],[870,210],[1020,470],[350,170],[920,690],[160,660],[640,120],[740,430],[480,720],[1120,330],[70,490]].map(([cx,cy],i)=><circle key={i} cx={cx} cy={cy} r={i%3===0?1.5:1} style={{animationDelay:`${i*-.7}s`}}/>)}</svg><div className="planet-horizon"/></div><div className="access-heading"><span className="badge access-eyebrow">{c('earlyAccess')}</span><h1>{before}<em>{word}</em>{after}</h1><p>{t('subcopy')}</p></div><div className="access-stage"><AuthBoundary><AccessFlow/></AuthBoundary></div></main>;}
+
+export default async function EarlyAccess(){
+ const t=await getTranslations('access'),c=await getTranslations('common'),l=await getTranslations('landing'),v=await getTranslations('visual'),locale=await getLocale(),requirements=await fetchRequirements();
+ return <main id="main" className="access-page container">
+  <div className="access-atmosphere" aria-hidden="true"/>
+  <div className="access-layout">
+   <div className="access-heading"><Link href="/" className="access-back"><ArrowLeft size={14}/>{v('back')}</Link><span className="badge access-eyebrow">{c('earlyAccess')}</span><h1>{l('headlineStart')}<br/><span>{l('headlineAccent')}</span></h1><p>{t('subcopy')}</p><div className="access-emblem" aria-hidden="true"><span/><span/><div className="core-emblem"><BrandMark/></div><i className="emblem-satellite satellite-one"/><i className="emblem-satellite satellite-two"/></div><p className="access-assurance"><ShieldCheck size={16}/>{l('messageOnly')}</p></div>
+   <div className="access-stage"><div className="access-panel-label"><span className="tiny-dot"/>{v('accountAccess')}<span>01 — 03</span></div><AuthBoundary><AccessFlow/></AuthBoundary></div>
+  </div>
+  {requirements&&<section className="access-levels" aria-label={l('accessTitle')}><ul>{HOLDING_TIERS.map(tier=><li key={tier}><span>{l(`tiers.${tier}`)}</span><b className="token-artwork-label"><TokenAvatar symbol={requirements.tokenSymbol} imageUrl={requirements.tokenImageUrl}/><span>{new Intl.NumberFormat(locale).format(requirements.tiers[tier])} {requirements.tokenSymbol}</span></b></li>)}</ul>{requirements.tokenMint&&<p className="access-mint"><span className="token-artwork-label"><TokenAvatar symbol={requirements.tokenSymbol} imageUrl={requirements.tokenImageUrl}/><span>{l('mintLabel',{symbol:requirements.tokenSymbol})}</span></span> <code>{requirements.tokenMint}</code></p>}{requirements.earlyAccess.closesAt&&<p>{l('earlyWindow',{date:new Intl.DateTimeFormat(locale,{dateStyle:'long',timeZone:'UTC'}).format(new Date(requirements.earlyAccess.closesAt))})}</p>}<p>{l('tierNoteLive')}</p></section>}
+  <PoweredBy className="powered-by-access"/>
+ </main>;
+}

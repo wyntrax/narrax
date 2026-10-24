@@ -77,10 +77,11 @@ describe('HTTP hardening', () => {
     expect(ok.headers['access-control-allow-origin']).toBe('https://app.example.com');
     const evil = await a.inject({ url: '/health', headers: { origin: 'https://evil.example' } });
     expect(evil.headers['access-control-allow-origin']).toBeUndefined();
-    const pre = await a.inject({ method: 'OPTIONS', url: '/v1/me', headers: { origin: 'https://app.example.com', 'access-control-request-method': 'PUT', 'access-control-request-headers': 'authorization,content-type' } });
+    const pre = await a.inject({ method: 'OPTIONS', url: '/v1/me', headers: { origin: 'https://app.example.com', 'access-control-request-method': 'PUT', 'access-control-request-headers': 'authorization,content-type,x-privy-identity-token' } });
     expect(pre.statusCode).toBe(204);
     expect(pre.headers['access-control-allow-origin']).toBe('https://app.example.com');
     expect(String(pre.headers['access-control-allow-headers'])).toContain('authorization');
+    expect(String(pre.headers['access-control-allow-headers'])).toContain('x-privy-identity-token');
     expect(pre.headers['access-control-allow-credentials']).toBeUndefined(); // bearer tokens only, never cookies
     await a.close();
   });

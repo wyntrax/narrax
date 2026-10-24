@@ -15,10 +15,12 @@ const Webhook = z.object({
   webhookID: z.string(),
   webhookURL: z.string(),
   transactionTypes: z.array(z.string()).default([]),
-  accountAddresses: z.array(z.string()).default([]),
+  accountAddresses: z.array(z.string()),
   active: z.boolean().optional(),
 }).passthrough();
 export type WebhookInfo = z.infer<typeof Webhook>;
+// The list endpoint may omit addresses. Missing is not an empty watchlist.
+const WebhookSummary = Webhook.extend({ accountAddresses: z.array(z.string()).optional() });
 
 export interface HeliusWebhookOptions { apiKey: string; baseUrl?: string; fetch?: typeof fetch; timeoutMs?: number }
 
@@ -54,7 +56,13 @@ export class HeliusWebhooks {
     return parsed.data;
   }
 
-  list(): Promise<WebhookInfo[]> { return this.request('GET', '/v0/webhooks', z.array(Webhook)); }
+  async list(): Promise<WebhookInfo[]> {
+    const rows = await this.request('GET', '/v0/webhooks', z.array(WebhookSummary));
+    const complete: WebhookInfo[] = [];
+    for (const row of rows) complete.push(row.accountAddresses === undefined ? await this.get(row.webhookID) : Webhook.parse(row));
+    return complete;
+  }
+  get(id: string): Promise<WebhookInfo> { return this.request('GET', `/v0/webhooks/${encodeURIComponent(id)}`, Webhook); }
   create(spec: WebhookSpec): Promise<WebhookInfo> { return this.request('POST', '/v0/webhooks', Webhook, spec); }
   update(id: string, spec: WebhookSpec): Promise<WebhookInfo> { return this.request('PUT', `/v0/webhooks/${encodeURIComponent(id)}`, Webhook, spec); }
 }

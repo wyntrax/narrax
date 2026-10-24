@@ -1,0 +1,5 @@
+# Reviewed public Solana AMM pool addresses, not signing or API credentials.
+# Exact historical finding fingerprints only; no directory or detector is disabled.
+78f9e7b950efdef641371dd952b5e9df67f4f24d:packages/tx-verify/src/captured-simulation-fixtures.ts:generic-api-key:34
+78f9e7b950efdef641371dd952b5e9df67f4f24d:packages/tx-verify/src/captured-simulation-fixtures.ts:generic-api-key:47
+78f9e7b950efdef641371dd952b5e9df67f4f24d:packages/tx-verify/src/captured-simulation-fixtures.ts:generic-api-key:771

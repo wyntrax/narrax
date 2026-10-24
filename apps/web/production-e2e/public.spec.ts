@@ -14,7 +14,13 @@ for(const path of ['/','/early-access'])for(const theme of ['dark','light'])test
  expect(await page.locator('script:not([src])').evaluateAll(nodes=>nodes.every(node=>!!(node as HTMLScriptElement).nonce))).toBe(true);
  await page.evaluate(()=>document.fonts.ready);expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
  await page.screenshot({path:`test-results/production-screenshots/${path==='/'?'landing':'access-unconfigured'}-${theme}.png`,fullPage:true});
- await page.getByRole('button',{name:'Bahasa Indonesia'}).click();await expect(page.locator('html')).toHaveAttribute('lang','id');expect(violations).toEqual([]);expect(errors).toEqual([]);
+ await page.getByRole('combobox',{name:'Language'}).selectOption('id');await expect(page.locator('html')).toHaveAttribute('lang','id');expect(violations).toEqual([]);expect(errors).toEqual([]);
+});
+for(const path of ['/app','/id/app/radar'])test(`production workspace fallback is accessible and private: ${path}`,async({page})=>{
+ const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
+ await page.route('http://localhost:4000/v1/early-access/status',route=>route.fulfill({headers:{'access-control-allow-origin':'http://localhost:4010'},json:{enabled:true,seatsLeft:12,inviteRequired:false}}));
+ await page.goto(path);await expect(page.locator('main')).toHaveCount(1);await expect(page.locator('main')).toContainText(path.startsWith('/id')?'Privy belum dikonfigurasi':'Privy not configured');await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content',/noindex/);
+ await expect(page.locator('main')).toHaveAttribute('id','main');expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);expect(errors).toEqual([]);
 });
 for(const [policy,copy] of [[{enabled:false,seatsLeft:null,inviteRequired:false},'Early access is not open yet.'],[{enabled:true,seatsLeft:0,inviteRequired:false},'Early access is currently full.']] as const)test(`public admission without Privy: ${copy}`,async({page})=>{
  await page.route('http://localhost:4000/v1/early-access/status',route=>route.fulfill({headers:{'access-control-allow-origin':'http://localhost:4010'},json:policy}));await page.goto('/early-access');await expect(page.getByRole('heading',{name:'Privy not configured'})).toBeVisible();await expect(page.getByText(copy)).toBeVisible();

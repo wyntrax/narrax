@@ -58,6 +58,8 @@ describe.skipIf(!up)('wallet intelligence on a real Postgres', () => {
     expect(b!.style).toBe('FOLLOWER');
     expect(c!.style).toBe('FOLLOWER');
     expect(d).toBeNull(); // one closed trade is not enough to score
+    const progress = await db.systemSetting.findUniqueOrThrow({ where: { key: `wallet.intelligence.${ids.D}` } });
+    expect(progress.value).toMatchObject({ status: 'INSUFFICIENT_HISTORY', closedTrades: 1, requiredClosedTrades: 5 });
 
     const m = await db.walletMetric.findFirst({ where: { walletId: ids.A! }, orderBy: { computedAt: 'desc' } });
     expect(m).toMatchObject({ window: '30D', closedTrades: 20 });

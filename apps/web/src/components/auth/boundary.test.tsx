@@ -32,5 +32,7 @@ it('shows the shared loader while fetching and an error instead of silently usin
  const view=render(<NextIntlClientProvider locale="en" messages={en}><AuthBoundary><p>private child</p></AuthBoundary></NextIntlClientProvider>);
  expect(view.container.querySelector('.route-loader')).not.toBeNull();expect(screen.queryByTestId('privy')).toBeNull();
  await waitFor(()=>expect(fail).toBeDefined());fail(new Response('{}',{status:503}));
- expect(await screen.findByText(en.auth.configError)).toBeInTheDocument();expect(screen.queryByTestId('privy')).toBeNull();expect(screen.getByRole('button',{name:en.auth.retry})).toBeInTheDocument();
+  expect(await screen.findByText(en.auth.configError)).toBeInTheDocument();expect(screen.queryByTestId('privy')).toBeNull();expect(screen.getByRole('button',{name:en.auth.retry})).toBeInTheDocument();
+  expect(screen.getByRole('alert')).toHaveClass('auth-feedback');
+  expect(screen.getByRole('alert').querySelector('.auth-feedback-icon')).not.toBeNull();
 });

@@ -5,6 +5,7 @@ import type { ExecutionDeps, PreTradeState } from './execution';
 import type { WalletEventDeps } from './walletEvent';
 import { makePaperPorts, type PaperPorts } from './paperLedger';
 import { loadSystemControls } from './systemConfig';
+import { walletTradeEvidence } from './walletResearchEvidence';
 
 type Db = PrismaClient;
 
@@ -30,10 +31,16 @@ export function makeWalletEventStore(db: Db): Pick<WalletEventDeps, 'saveWalletT
         create: { mint: e.mint, symbol: 'UNKNOWN', name: 'Unknown' },
         update: {},
         select: { id: true },
+      }).catch(async err => {
+        // Concurrent deliveries can both try to create the same newly seen mint.
+        // Prisma's empty-update upsert may use read/create rather than ON CONFLICT.
+        if (!isUniqueViolation(err)) throw err;
+        return db.token.findUniqueOrThrow({ where: { mint: e.mint }, select: { id: true } });
       });
       try {
+        const evidence = await walletTradeEvidence(db, token.id, new Date(e.at), e.amountSol);
         await db.walletTrade.create({
-          data: { walletId: wallet.id, tokenId: token.id, side: e.side, amountSol: e.amountSol, tokenAmount: e.tokenAmount, signature: e.signature, at: new Date(e.at) },
+          data: { walletId: wallet.id, tokenId: token.id, side: e.side, amountSol: e.amountSol, tokenAmount: e.tokenAmount, signature: e.signature, at: new Date(e.at), ...evidence },
         });
         return 'created';
       } catch (err) {

@@ -61,13 +61,22 @@ describe.skipIf(!up)('admin status and costs (needs Postgres)', () => {
   });
 
   it('is admin-only', async () => {
-    for (const [m, p] of [['GET', '/v1/admin/status'], ['GET', '/v1/admin/costs'], ['GET', '/v1/admin/ai-pricing'], ['PUT', '/v1/admin/ai-pricing']] as const) {
+    for (const [m, p] of [['GET', '/v1/admin/status'], ['GET', '/v1/admin/data-health'], ['GET', '/v1/admin/costs'], ['GET', '/v1/admin/ai-pricing'], ['PUT', '/v1/admin/ai-pricing']] as const) {
       expect((await http(m, p, null, {})).status, p).toBe(401);
       expect((await http(m, p, alice, {})).status, p).toBe(403);
     }
   });
 
   describe('status', () => {
+    it('serves bounded read-only ingestion diagnostics for admins',async()=>{
+      const r=await http('GET','/v1/admin/data-health',boss);
+      expect(r.status).toBe(200);expect(r.body.checkedAt).toBe(NOW.toISOString());
+      expect(r.body.queues).toHaveLength(8);expect(r.body.queues.map((q:{name:string})=>q.name)).toEqual(expect.arrayContaining(['wallet-discovery','token-resolution']));expect(r.body.market.scanned).toBeLessThanOrEqual(2000);
+      expect(r.body.coverage.scanned).toBeLessThanOrEqual(2000);
+      expect(r.body.coverage.stages.map((s:{stage:string})=>s.stage)).toEqual(['market','social','narrative']);
+      expect(r.body.webhook.configured).toBeNull();
+      expect(JSON.stringify(r.body)).not.toMatch(/postgres(ql)?:\/\/|api-key=|BEGIN PUBLIC KEY|authHeader/);
+    });
     it('reports database, redis, queues, controls, counts and budgets, and warns about what needs attention', async () => {
       counts = { execution: { waiting: 0, active: 1, failed: 2, delayed: 0 }, 'entry-fan-out': { waiting: 150, active: 0, failed: 0, delayed: 0 } };
       await db.systemSetting.upsert({ where: { key: TRADING_PAUSE_KEY }, create: { key: TRADING_PAUSE_KEY, value: { paused: true, reason: 'drill', at: NOW.toISOString(), by: bossId } }, update: { value: { paused: true, reason: 'drill', at: NOW.toISOString(), by: bossId } } });

@@ -12,8 +12,9 @@ import { applyWyntraxEvent } from './membershipStore';
 import { VECTOR_BODY } from './fixtures.test-support';
 
 // Unlike legacy tests, missing/wrong scratch services are failures, never skips or production fallbacks.
+import { assertTestDatabase } from '../../../../scripts/test-database';
 const url = new URL(process.env.DATABASE_URL ?? 'invalid:');
-if (url.hostname !== 'localhost' || url.port !== '5432' || url.pathname !== '/narra_ent') throw new Error('Entitlement tests require localhost:5432/narra_ent');
+assertTestDatabase(url);
 const db = createPrisma(url.toString());
 const tag = `ent-${randomUUID()}`;
 const now = new Date('2026-10-07T12:00:00Z'), later = new Date(+now + 3_600_000);

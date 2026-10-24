@@ -5,6 +5,7 @@ import { requireFeature } from './access';
 
 /** Only wholly shared surfaces. Mixed routes perform ownership/field checks in their handlers. */
 export const GATED_ROUTES: Record<string, FeatureKey> = {
+  'GET /v1/smart-money/flows': 'research.smart_money', 'GET /v1/smart-money/emerging': 'research.smart_money',
   'GET /v1/narratives': 'research.narratives', 'GET /v1/narratives/:slug': 'research.narratives',
   'GET /v1/narratives/rotation': 'research.rotation', 'GET /v1/tokens/:mint': 'research.tokens',
   'GET /v1/intelligence-bar': 'research.overview', 'GET /v1/smart-money/wallets': 'research.smart_money',

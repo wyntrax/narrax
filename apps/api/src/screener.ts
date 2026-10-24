@@ -10,6 +10,8 @@ const nonNeg = num.min(0);
 export const ScreenerQuery = z.object({
   limit: Limit,
   cursor: z.string().max(300).optional(),
+  verifiedOnly: z.enum(['true','false']).optional(),
+  marketCapOnly: z.enum(['true','false']).optional(),
   q: z.string().min(1).max(64).optional(),
   minMarketCapUsd: nonNeg.optional(), maxMarketCapUsd: nonNeg.optional(),
   minLiquidityUsd: nonNeg.optional(), maxLiquidityUsd: nonNeg.optional(),
@@ -36,7 +38,7 @@ export type ScreenerQuery = z.infer<typeof ScreenerQuery>;
 const FILTER_KEYS = ['minMarketCapUsd', 'maxMarketCapUsd', 'minLiquidityUsd', 'maxLiquidityUsd', 'minVolume24hUsd', 'minHolders', 'maxTop10Pct', 'maxDevHoldingPct', 'minSmartWalletHolders', 'maxRiskScore', 'minAgeMinutes', 'maxAgeMinutes', 'narrativeStage', 'narrative', 'minOgScore', 'excludeHoneypot', 'includeBlacklisted'] as const;
 
 /** True when the request needs the screener query. A plain list or text search stays on the simple path. */
-export const isScreenerRequest = (q: ScreenerQuery) => q.sort !== 'symbol' || q.order !== undefined || FILTER_KEYS.some((k) => q[k] !== undefined);
+export const isScreenerRequest = (q: ScreenerQuery) => q.sort !== 'symbol' || q.order !== undefined || q.marketCapOnly !== undefined || FILTER_KEYS.some((k) => q[k] !== undefined);
 
 // Sort keys map to fixed SQL fragments. User input never reaches the SQL text, only whitelisted names and bound parameters.
 const SORTS = {
@@ -52,19 +54,24 @@ const SORTS = {
 
 const CursorShape = z.tuple([z.union([z.string(), z.number()]), z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)]);
 
-export interface ScreenerRow { id: string; mint: string; symbol: string; name: string; blacklisted: boolean; createdOnChainAt: Date | null; priceUsd: unknown; marketCapUsd: unknown; liquidityUsd: unknown; volume24hUsd: unknown; holders: number | null; top10Pct: number | null; riskScore: number | null; ogScore: number | null }
+export interface ScreenerRow { id: string; metricId:string|null; poolCreatedAt:string|null; mint: string; symbol: string; name: string; blacklisted: boolean; createdOnChainAt: Date | null; priceUsd: unknown; marketCapUsd: unknown; liquidityUsd: unknown; volume24hUsd: unknown; holders: number | null; top10Pct: number | null; riskScore: number | null; ogScore: number | null }
 
 /**
  * Filters and sorts tokens by their latest readings. Returns null for a cursor that does not decode (the route answers 400).
  * Keyset pagination on (sort column, id): rows with an unknown sort value are excluded, so the order is total and stable.
  */
 export async function runScreener(db: PrismaClient, q: ScreenerQuery, now: Date): Promise<{ rows: ScreenerRow[]; nextCursor: string | null } | null> {
-  const spec = SORTS[q.sort];
+  // The current scan uses the quoted pool's creation time, never a retained token-age proxy.
+  // Collector timestamps are canonical ISO strings, so text ordering preserves chronology.
+  const poolAge = Prisma.sql`evidence."value"->>'pairCreatedAt'`;
+  const spec = q.verifiedOnly==='true'&&q.sort==='age' ? {col:poolAge,type:'text',dir:'desc'} as const : SORTS[q.sort];
   const dir = q.order ?? spec.dir;
   const where: Prisma.Sql[] = [];
   const add = (cond: Prisma.Sql) => where.push(cond);
 
   if (q.includeBlacklisted !== 'true') add(Prisma.sql`t."blacklisted" = false`);
+  if(q.verifiedOnly==='true') add(Prisma.sql`evidence."key" IS NOT NULL AND m."at" >= ${new Date(+now-15*60000)} AND m."at" <= ${now}`);
+  if(q.marketCapOnly==='true') add(Prisma.sql`evidence."value"->>'marketCapIsFdv' = 'false'`);
   if (q.q) {
     const like = `%${q.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     add(Prisma.sql`(t."symbol" ILIKE ${like} OR t."name" ILIKE ${like} OR t."mint" LIKE ${`${q.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`})`);
@@ -80,8 +87,11 @@ export async function runScreener(db: PrismaClient, q: ScreenerQuery, now: Date)
   if (q.minSmartWalletHolders !== undefined) add(Prisma.sql`h."smartWalletHolders" >= ${q.minSmartWalletHolders}`);
   if (q.maxRiskScore !== undefined) add(Prisma.sql`r."riskScore" <= ${q.maxRiskScore}`);
   // Age needs a known launch time. A token without one is excluded when an age filter is used.
-  if (q.minAgeMinutes !== undefined) add(Prisma.sql`t."createdOnChainAt" <= ${new Date(now.getTime() - q.minAgeMinutes * 60_000)}`);
-  if (q.maxAgeMinutes !== undefined) add(Prisma.sql`t."createdOnChainAt" >= ${new Date(now.getTime() - q.maxAgeMinutes * 60_000)}`);
+  const ageColumn=q.verifiedOnly==='true'?poolAge:Prisma.sql`t."createdOnChainAt"`;
+  const ageBoundary=(minutes:number)=>q.verifiedOnly==='true'?new Date(+now-minutes*60000).toISOString():new Date(+now-minutes*60000);
+  if (q.minAgeMinutes !== undefined) add(Prisma.sql`${ageColumn} <= ${ageBoundary(q.minAgeMinutes)}`);
+  if (q.maxAgeMinutes !== undefined) add(Prisma.sql`${ageColumn} >= ${ageBoundary(q.maxAgeMinutes)} AND ${ageColumn} <= ${ageBoundary(0)}`);
+  if(q.verifiedOnly==='true'&&q.sort==='age') add(Prisma.sql`${poolAge} IS NOT NULL`);
   if (q.excludeHoneypot === 'true') add(Prisma.sql`(r."tokenId" IS NOT NULL AND NOT ('HONEYPOT' = ANY(r."flags")))`); // no risk reading yet counts as unknown, so it is left out
   if (q.narrativeStage) add(Prisma.sql`EXISTS (SELECT 1 FROM "NarrativeTokenRelation" x JOIN "Narrative" nn ON nn."id" = x."narrativeId" WHERE x."tokenId" = t."id" AND nn."stage"::text = ${q.narrativeStage} AND x."relation"::text NOT IN ('UNRELATED', 'SUSPICIOUS'))`);
   if (q.narrative) add(Prisma.sql`EXISTS (SELECT 1 FROM "NarrativeTokenRelation" x JOIN "Narrative" nn ON nn."id" = x."narrativeId" WHERE x."tokenId" = t."id" AND nn."slug" = ${q.narrative} AND x."relation"::text NOT IN ('UNRELATED', 'SUSPICIOUS'))`);
@@ -105,11 +115,16 @@ export async function runScreener(db: PrismaClient, q: ScreenerQuery, now: Date)
 
   const orderDir = dir === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`;
   const rows = await db.$queryRaw<ScreenerRow[]>(Prisma.sql`
-    SELECT t."id", t."mint", t."symbol", t."name", t."blacklisted", t."createdOnChainAt",
+    SELECT t."id", m."id" AS "metricId", ${poolAge} AS "poolCreatedAt", t."mint", t."symbol", t."name", t."blacklisted", t."createdOnChainAt",
       m."priceUsd" AS "priceUsd", m."marketCapUsd" AS "marketCapUsd", m."liquidityUsd" AS "liquidityUsd", m."volume24hUsd" AS "volume24hUsd",
       h."holders" AS "holders", h."top10Pct" AS "top10Pct", r."riskScore" AS "riskScore", og."best" AS "ogScore"
     FROM "Token" t
     LEFT JOIN LATERAL (SELECT * FROM "TokenMetric" WHERE "tokenId" = t."id" ORDER BY "at" DESC LIMIT 1) m ON true
+    -- Evidence is one SystemSetting row per token, keyed 'research.market.<tokenId>'. It must stay a correlated lateral
+    -- so the planner probes the SystemSetting primary key once per token. The equivalent flat join
+    -- (evidence."key" = 'research.market.' || t."id") is not sargable, and with a few thousand tokens and settings rows
+    -- the planner turns it into a SystemSetting x Token nested loop that compares tens of millions of rows (~13s).
+    LEFT JOIN LATERAL (SELECT ev."key", ev."value" FROM "SystemSetting" ev WHERE ev."key" = 'research.market.' || t."id" AND ev."value"->>'metricId' = m."id" AND ev."value"->>'source' = 'dexscreener' LIMIT 1) evidence ON true
     LEFT JOIN LATERAL (SELECT * FROM "TokenHolderMetric" WHERE "tokenId" = t."id" ORDER BY "at" DESC LIMIT 1) h ON true
     LEFT JOIN LATERAL (SELECT * FROM "TokenRiskMetric" WHERE "tokenId" = t."id" ORDER BY "at" DESC LIMIT 1) r ON true
     LEFT JOIN LATERAL (SELECT MAX("ogScore") AS "best" FROM "NarrativeTokenRelation" WHERE "tokenId" = t."id" AND "relation"::text NOT IN ('UNRELATED', 'SUSPICIOUS')) og ON true
@@ -123,7 +138,7 @@ export async function runScreener(db: PrismaClient, q: ScreenerQuery, now: Date)
   if (rows.length > q.limit && last) {
     const dec = (v: unknown) => Number(String(v));
     const key: string | number = {
-      symbol: () => last.symbol, age: () => (last.createdOnChainAt as Date).toISOString(),
+      symbol: () => last.symbol, age: () => q.verifiedOnly==='true'?last.poolCreatedAt!:(last.createdOnChainAt as Date).toISOString(),
       marketCap: () => dec(last.marketCapUsd), liquidity: () => dec(last.liquidityUsd), volume24h: () => dec(last.volume24hUsd),
       holders: () => last.holders as number, risk: () => last.riskScore as number, og: () => last.ogScore as number,
     }[q.sort]();

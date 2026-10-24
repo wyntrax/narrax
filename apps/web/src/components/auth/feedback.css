@@ -1,0 +1,9 @@
+/* Keep auth feedback self-contained: the workspace's generic button rule aligns
+ * buttons left, which must not override a centered recovery message. */
+.auth-feedback{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;min-width:0;width:100%;text-align:center}
+.gate-card .auth-feedback[role=alert]{margin:0;font-size:inherit}
+.auth-feedback .auth-feedback-icon{display:grid;place-items:center;flex:none;width:48px;height:48px;border:1px solid var(--bd);border-radius:14px;background:var(--s2);color:var(--tx)}
+.auth-feedback h2,.gate-message.auth-feedback h2{margin:0;max-width:24ch;font-size:clamp(20px,4vw,26px);font-weight:500;line-height:1.25;letter-spacing:-.02em;overflow-wrap:anywhere}
+.auth-feedback p,.gate-message.auth-feedback p{margin:0;max-width:36ch;font-size:14px;line-height:1.65;overflow-wrap:anywhere}
+.workspace-gate .auth-feedback>.button,.auth-feedback>.button{align-self:center;justify-self:center;margin:6px 0 0;min-height:44px;max-width:100%;padding:11px 24px}
+@media(max-width:480px){.auth-feedback{gap:14px}.auth-feedback p{font-size:13px}.auth-feedback>.button{width:100%;justify-content:center}}

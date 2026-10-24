@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { tokenImageUrl } from '@narra/shared';
 import { getJson, toNumber, type HttpOptions } from './http';
 import { RateLimiter } from './limiter';
 import { MarketDataError, type MarketQuoteSource, type MarketSnapshot } from './types';
@@ -20,6 +21,7 @@ const Pair = z.object({
   marketCap: z.number().nullish(),
   fdv: z.number().nullish(),
   pairCreatedAt: z.number().nullish(),
+  info: z.object({ imageUrl: z.unknown().optional() }).nullish().catch(null),
 });
 type Pair = z.infer<typeof Pair>;
 
@@ -39,32 +41,60 @@ export class DexScreenerSource implements MarketQuoteSource {
     this.limiter = opts.limiter ?? new RateLimiter(DEXSCREENER_MIN_INTERVAL_MS);
   }
 
+  private async pairs(chunk: string[]): Promise<Pair[]> {
+    const { body } = await getJson(`${this.baseUrl}/tokens/v1/solana/${chunk.join(',')}`, { ...this.opts, limiter: this.limiter });
+    const raw = Array.isArray(body) ? body : body && typeof body === 'object' && 'pairs' in body && Array.isArray((body as { pairs: unknown }).pairs) ? (body as { pairs: unknown[] }).pairs : null;
+    if (!raw) {
+      // The API may answer { pairs: null } for tokens it has never seen. Anything else is a shape change.
+      if (body && typeof body === 'object' && 'pairs' in body) return [];
+      throw new MarketDataError('shape', 'dexscreener returned an unexpected body');
+    }
+    return raw.flatMap(item => {
+      const p = Pair.safeParse(item);
+      return p.success && p.data.chainId === 'solana' ? [p.data] : [];
+    });
+  }
+
   async getSnapshots(mints: string[]): Promise<Map<string, MarketSnapshot>> {
     const out = new Map<string, MarketSnapshot>();
     const unique = [...new Set(mints)];
     for (let i = 0; i < unique.length; i += DEXSCREENER_BATCH) {
       const chunk = unique.slice(i, i + DEXSCREENER_BATCH);
-      const { body } = await getJson(`${this.baseUrl}/tokens/v1/solana/${chunk.join(',')}`, { ...this.opts, limiter: this.limiter });
-      const raw = Array.isArray(body) ? body : body && typeof body === 'object' && 'pairs' in body && Array.isArray((body as { pairs: unknown }).pairs) ? (body as { pairs: unknown[] }).pairs : null;
-      if (!raw) {
-        // The API may answer { pairs: null } for tokens it has never seen. Anything else is a shape change.
-        if (body && typeof body === 'object' && 'pairs' in body) continue;
-        throw new MarketDataError('shape', 'dexscreener returned an unexpected body');
-      }
       const best = new Map<string, Pair>();
-      for (const item of raw) {
-        const p = Pair.safeParse(item);
-        if (!p.success || p.data.chainId !== 'solana') continue;
-        const mint = p.data.baseToken.address;
+      for (const p of await this.pairs(chunk)) {
+        const mint = p.baseToken.address;
         if (!chunk.includes(mint)) continue; // pools where the token is only the quote side price the other asset
-        const liq = p.data.liquidity?.usd ?? -1;
+        const liq = p.liquidity?.usd ?? -1;
         const cur = best.get(mint);
-        if (!cur || liq > (cur.liquidity?.usd ?? -1)) best.set(mint, p.data);
+        if (!cur || liq > (cur.liquidity?.usd ?? -1)) best.set(mint, p);
       }
       for (const [mint, p] of best) {
         const snap = toSnapshot(mint, p);
         if (snap) out.set(mint, snap);
       }
+    }
+    return out;
+  }
+
+  async getReferencePrices(mints: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    const unique = [...new Set(mints)];
+    for (let i = 0; i < unique.length; i += DEXSCREENER_BATCH) {
+      const chunk = unique.slice(i, i + DEXSCREENER_BATCH);
+      const best = new Map<string, { price: number; liquidity: number }>();
+      for (const p of await this.pairs(chunk)) {
+        const mint = p.baseToken.address;
+        if (!chunk.includes(mint)) continue;
+        const price = toNumber(p.priceUsd);
+        if (price == null || price <= 0) continue;
+        const liquidity = toNumber(p.liquidity?.usd);
+        const volume = toNumber(p.volume?.h24);
+        if (liquidity == null || liquidity < 0 || volume == null || volume < 0) continue;
+        const cur = best.get(mint);
+        // Reference assets have no market cap requirement, but still use the deepest pool for the price.
+        if (!cur || liquidity > cur.liquidity) best.set(mint, { price, liquidity });
+      }
+      for (const [mint, value] of best) out.set(mint, value.price);
     }
     return out;
   }
@@ -82,6 +112,7 @@ function toSnapshot(mint: string, p: Pair): MarketSnapshot | null {
     mint,
     symbol: p.baseToken.symbol ?? '',
     name: p.baseToken.name ?? '',
+    imageUrl: tokenImageUrl(p.info?.imageUrl),
     priceUsd: price,
     marketCapUsd: (cap ?? fdv)!,
     marketCapIsFdv: cap == null,

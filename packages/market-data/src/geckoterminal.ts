@@ -3,8 +3,14 @@ import { getJson, toNumber, type HttpOptions } from './http';
 import { RateLimiter } from './limiter';
 import { MarketDataError, USDC_MINT, WSOL_MINT, type LaunchSource, type NewPool, type TokenInfo, type TokenInfoSource } from './types';
 
-/** Documented free limit is 30 calls a minute. 2.2 s spacing leaves headroom. */
-export const GECKO_MIN_INTERVAL_MS = 2200;
+/**
+ * The documented free limit is 30 calls a minute, but bursts of about six calls
+ * (one pool call plus five token-info calls) are consistently rejected with HTTP 429.
+ * A controlled probe sustained 11/11 calls at 12 s spacing, so pace at 15 s
+ * (four calls a minute). That leaves headroom for launch discovery and keeps
+ * holder lookups from spending the whole run on throttling.
+ */
+export const GECKO_MIN_INTERVAL_MS = 15_000;
 
 const InfoBody = z.object({
   data: z.object({
@@ -60,7 +66,9 @@ export class GeckoTerminalSource implements TokenInfoSource, LaunchSource {
   private readonly baseUrl: string;
   private readonly limiter: RateLimiter;
   constructor(private readonly opts: GeckoOptions = {}) {
-    this.baseUrl = (opts.baseUrl || 'https://api.geckoterminal.com/api/v2').replace(/\/$/, '');
+    const base = (opts.baseUrl || 'https://api.geckoterminal.com/api/v2').replace(/\/$/, '');
+    // Operators commonly supply the public origin; its API is under /api/v2, not the website root.
+    this.baseUrl = base === 'https://api.geckoterminal.com' ? `${base}/api/v2` : base;
     this.limiter = opts.limiter ?? new RateLimiter(GECKO_MIN_INTERVAL_MS);
   }
   private get http(): HttpOptions {
@@ -92,7 +100,14 @@ export class GeckoTerminalSource implements TokenInfoSource, LaunchSource {
 
   /** Most recently created Solana pools (one page, about 20). Pools with no readable token or time are skipped. */
   async getNewPools(): Promise<NewPool[]> {
-    const { body } = await getJson(`${this.baseUrl}/networks/solana/new_pools?include=base_token&page=1`, this.http);
+    return this.getPools('new_pools');
+  }
+  /** A sampled discovery source, not a recommendation or paid ranking. */
+  async getTrendingPools(): Promise<NewPool[]> {
+    return this.getPools('trending_pools');
+  }
+  private async getPools(kind:'new_pools'|'trending_pools'): Promise<NewPool[]> {
+    const { body } = await getJson(`${this.baseUrl}/networks/solana/${kind}?include=base_token&page=1`, this.http);
     const parsed = PoolsBody.safeParse(body);
     if (!parsed.success) throw new MarketDataError('shape', 'new pools had an unexpected shape');
     const tokens = new Map<string, z.infer<typeof IncludedToken>>();

@@ -16,21 +16,25 @@ export async function getJson(url: string, opts: HttpOptions = {}): Promise<{ st
   await opts.limiter?.wait();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 8000);
-  let res: Response;
   try {
-    res = await (opts.fetch ?? fetch)(url, { method: 'GET', headers: { accept: 'application/json', ...opts.headers }, signal: ctrl.signal });
-  } catch (e) {
-    throw new MarketDataError('network', `request failed: ${(e as Error).name}`);
+    let res: Response;
+    try {
+      res = await (opts.fetch ?? fetch)(url, { method: 'GET', headers: { accept: 'application/json', ...opts.headers }, signal: ctrl.signal });
+    } catch (e) {
+      throw new MarketDataError('network', `request failed: ${(e as Error).name}`);
+    }
+    if (res.status === 429) throw new MarketDataError('rate_limited', 'rate limited (HTTP 429)');
+    if (res.status === 404) return { status: 404, body: null };
+    if (!res.ok) throw new MarketDataError('http', `HTTP ${res.status}`);
+    try {
+      return { status: res.status, body: await res.json() };
+    } catch {
+      if (ctrl.signal.aborted) throw new MarketDataError('network', 'response body timed out');
+      throw new MarketDataError('shape', 'response was not JSON');
+    }
   } finally {
+    // Keep the deadline active while streaming/parsing the body, not only until headers arrive.
     clearTimeout(timer);
-  }
-  if (res.status === 429) throw new MarketDataError('rate_limited', 'rate limited (HTTP 429)');
-  if (res.status === 404) return { status: 404, body: null };
-  if (!res.ok) throw new MarketDataError('http', `HTTP ${res.status}`);
-  try {
-    return { status: res.status, body: await res.json() };
-  } catch {
-    throw new MarketDataError('shape', 'response was not JSON');
   }
 }
 

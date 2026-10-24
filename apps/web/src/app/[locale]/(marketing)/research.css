@@ -1,0 +1,49 @@
+.research-public{padding-block:clamp(3rem,7vw,7rem);overflow-wrap:anywhere}
+.research-public header{max-width:860px;margin-bottom:3rem}
+.research-public h1{font-size:clamp(2.3rem,5.5vw,4.8rem);line-height:1.1;letter-spacing:-.025em;margin:.75rem 0 1.5rem}
+.research-public h2{font-size:clamp(1.4rem,3vw,2rem);line-height:1.25;margin:0 0 1rem}
+.research-public p,.research-public li{line-height:1.8;color:var(--tx2);font-size:1rem}
+.research-public .research-public-intro{font-size:1.15rem;line-height:1.8}
+.research-public a:not(.button){text-underline-offset:.25em;text-decoration:underline}
+.research-public a:not(.button):hover{opacity:.8}
+.research-breadcrumb{display:flex;flex-wrap:wrap;gap:.75rem;margin-bottom:2rem;font-size:.85rem}
+.research-public-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1.5rem}
+.research-public-grid article,.research-public-note{border:1px solid var(--bd);border-radius:12px;padding:clamp(1.25rem,3vw,2rem)}
+.research-public-grid article{display:flex;flex-direction:column;align-items:flex-start}
+.research-public-grid article p{flex:1}
+.research-public-article{max-width:800px}
+.research-public-article section{margin-block:2.75rem}
+.research-public-article p{margin-block:1rem}
+.research-public-article ul,.research-public-related ul{padding-left:1.25rem}
+.research-public-article li,.research-public-related li{margin-block:.7rem}
+.research-public-note{margin-block:3rem;max-width:860px}
+.research-public-byline{font-size:.9rem!important}
+.research-public-related{border-top:1px solid var(--bd);padding-top:2rem;max-width:800px}
+/* Landing research library: guide cards plus a methodology strip, matching the marketing surfaces. */
+.research-landing{position:relative}
+.research-landing-head{display:flex;align-items:flex-end;justify-content:space-between;gap:32px;margin-bottom:40px}
+.research-landing-head .section-heading{margin-bottom:0}
+.research-landing-all{display:inline-flex;align-items:center;gap:8px;flex:none;padding-bottom:6px;margin-bottom:4px;border-bottom:1px solid var(--bd);color:var(--tx2);font:12px/1.6 var(--font-mono),monospace;text-decoration:none;transition:color .25s,border-color .25s}
+.research-landing-all:hover{color:var(--tx);border-color:var(--control-border)}
+.research-landing-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;list-style:none;padding:0;margin:0}
+.research-landing-grid>li{display:flex}
+.research-landing-card{position:relative;display:flex;flex-direction:column;width:100%;padding:26px;border:1px solid var(--bd);border-radius:20px;background:radial-gradient(ellipse at top left,color-mix(in srgb,var(--tx) 4%,transparent),transparent 70%),var(--s1);transition:border-color .3s,transform .3s}
+.research-landing-card:hover{transform:translateY(-3px);border-color:var(--control-border)}
+.research-landing-meta{display:flex;align-items:center;justify-content:space-between;margin-bottom:34px;color:var(--tx2);font:12px/1.6 var(--font-mono),monospace}
+.research-landing-card h3{margin:0;font-size:20px;line-height:1.3}
+.research-landing-card h3 a{text-decoration:none}
+/* One card-wide target: the title link stretches over the card, so no nested links are needed. */
+.research-landing-card h3 a::after{content:'';position:absolute;inset:0;border-radius:20px}
+.research-landing-card p{flex:1;margin:14px 0 24px;font-size:14px;line-height:1.65}
+.research-landing-read{display:inline-flex;align-items:center;gap:8px;color:var(--tx2);font:12px/1.6 var(--font-mono),monospace;transition:color .25s}
+.research-landing-card:hover .research-landing-read,.research-landing-card:focus-within .research-landing-read{color:var(--tx)}
+.research-landing-methodology{display:flex;align-items:center;justify-content:space-between;gap:32px;margin-top:16px;padding:26px 28px;border:1px solid var(--bd);border-radius:20px;background:linear-gradient(160deg,var(--s1),var(--bg))}
+.research-landing-methodology h3{margin:0 0 8px;font-size:18px}
+.research-landing-methodology p{max-width:72ch;margin:0;font-size:14px}
+.research-landing-methodology .button{flex:none;white-space:nowrap}
+@media(max-width:900px){.research-landing-grid{grid-template-columns:1fr}.research-landing-card{padding:24px}.research-landing-meta{margin-bottom:24px}}
+@media(max-width:700px){.research-landing-head{display:block;margin-bottom:28px}.research-landing-all{margin-top:20px}.research-landing-methodology{flex-direction:column;align-items:flex-start}.research-landing-methodology .button{width:100%;justify-content:space-between}}
+@media(prefers-reduced-motion:reduce){.research-landing-card:hover{transform:none}}
+.footer-research-links a{text-decoration:underline;text-underline-offset:.25em}
+.footer-research-links{display:flex;gap:1rem 2rem;flex-wrap:wrap;margin-block:1.5rem}
+@media(max-width:760px){.research-public-grid{grid-template-columns:1fr}.research-public{padding-block:2.5rem}.research-public h1{font-size:2.4rem}}

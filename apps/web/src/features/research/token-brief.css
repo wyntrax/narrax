@@ -1,0 +1,12 @@
+.mint-lookup{padding:20px;border:1px solid var(--bd);background:var(--s1);border-radius:12px;margin-bottom:24px}
+.mint-lookup .research-note{margin:8px 0 14px}
+.mint-lookup input{min-width:0;font-family:monospace}
+.mint-lookup input[aria-invalid=true]{border-color:var(--tx)}
+.token-brief-status{display:grid;gap:8px;padding:16px;border-left:3px solid var(--tx);background:var(--s1);margin-bottom:18px}
+.token-brief-status span,.token-evidence-list span{color:var(--tx2);font-size:14px;overflow-wrap:anywhere}
+.token-evidence-list{list-style:none;padding:0;margin:16px 0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.token-evidence-list li{display:grid;gap:8px;padding:16px;border:1px solid var(--bd);border-radius:10px;min-width:0}
+.token-copy{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:12px 0}
+.token-copy [role=status]{font-size:13px;color:var(--tx2)}
+#token-narratives,#token-history{scroll-margin-top:100px}
+@media(max-width:600px){.token-evidence-list{grid-template-columns:1fr}.mint-lookup>div{flex-direction:column;align-items:stretch}.mint-lookup input{width:100%}}

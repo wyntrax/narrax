@@ -5,3 +5,4 @@ export * from './parse';
 export * from './prompts';
 export * from './openai';
 export * from './pipeline';
+export * from './fromEnv';

@@ -91,7 +91,7 @@ export async function registerHttpHardening(app: FastifyInstance, opts: HttpOpti
       opts.resolveCorsOrigins!().then(allowed => cb(null, allowed.includes(origin)), () => cb(null, origins.includes(origin)));
     } : origins.length ? origins : false,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['authorization', 'content-type', 'x-request-id'],
+    allowedHeaders: ['authorization', 'content-type', 'x-request-id', 'x-privy-identity-token'],
     exposedHeaders: ['x-request-id', 'retry-after', 'content-disposition'],
     credentials: false, // bearer tokens, never cookies
     maxAge: opts.resolveCorsOrigins ? 20 : HTTP_LIMITS.corsMaxAgeSeconds,

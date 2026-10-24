@@ -8,6 +8,7 @@ import {busyStates,transition,type Event} from './machine';
 import {AccessView} from './view';
 import {encodeSignature,validateAddress,validateChallenge} from './proof';
 import {watchMembership} from './sync';
+import {scheduleRefresh} from './refresh';
 
 export function AccessFlow(){
  const auth=useAuth();
@@ -68,7 +69,7 @@ function AccessController({auth}:{auth:AuthAdapter}){
   const own=scope.epoch,current=()=>scope.active&&own===scope.epoch;
   return watchMembership(api.entitlements,data=>{if(current())dispatch({type:'SYNC',data});},()=>{if(current())dispatch({type:'SYNC_TIMEOUT'});},error=>{if(current())fail(error);});
  },[state.name,api,scope]);
- useEffect(()=>{if(state.name!=='active'||!state.data?.nextExpiry)return;const timer=setTimeout(()=>retry(),Math.max(5000,Date.parse(state.data.nextExpiry)-Date.now()));return()=>clearTimeout(timer);
+ useEffect(()=>{if(state.name!=='active'||!state.data?.nextExpiry)return;return scheduleRefresh(state.data.nextExpiry,()=>retry());
  // Only an authoritative snapshot expiry schedules this refresh.
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[state.name,state.data?.nextExpiry]);

@@ -1,22 +1,15 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { PrismaClient } from '@narra/database';
 import { AiConfigSchema } from '@narra/ai';
 import { aiEnabled, loadAiConfig, saveAiConfig, setAiEnabled, tokensUsedToday } from '@narra/worker-pipeline';
 import { KILL_SWITCH_KEY, KillSwitchValue, interpretKillSwitch } from '@narra/trading';
-import { makeAuthenticate, type AccountDeps } from './account';
+import { makeRequireAdmin, type AccountDeps } from './account';
 import { IdCursor, Limit } from './paging';
 
-/** Pre-handler that requires a signed-in admin. Shared by every admin route. */
-export function makeRequireAdmin(deps: Pick<AccountDeps, 'db' | 'verifier'>) {
-  const authenticate = makeAuthenticate(deps);
-  return async (req: FastifyRequest, reply: FastifyReply) => {
-    const denied = await authenticate(req, reply);
-    if (denied || reply.sent) return denied;
-    const u = await deps.db.user.findUnique({ where: { id: req.userId! }, select: { isAdmin: true } });
-    if (!u?.isAdmin) return reply.code(403).send({ error: 'FORBIDDEN' });
-  };
-}
+/** Re-exported so every admin route keeps importing the gate from here. The implementation lives in `account.ts`, which is
+ * the only module the entitlement and runtime admin routes are allowed to depend on. */
+export { makeRequireAdmin };
 
 /** Admin-only settings. Model names and limits are editable. API keys are not settings and never pass through here. */
 export interface ConnectionStatus {

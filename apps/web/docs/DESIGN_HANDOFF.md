@@ -1,5 +1,7 @@
 # Web design handoff
 
+Historical handoff for `63a1613`. The subsequent owner-requested **Narrax monochrome rebrand** is documented in [NARRAX_BRAND.md](NARRAX_BRAND.md); the earlier captures and performance results below describe the pre-rebrand design.
+
 Branch `feat/web-design` from accepted `feat/web-phase1` (`35f792f`). No push. Phase 2 has not started.
 
 ## Scope

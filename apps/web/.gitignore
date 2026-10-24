@@ -1,0 +1,14 @@
+# dependencies and build output
+node_modules/
+.next/
+.next-e2e/
+*.tsbuildinfo
+
+# generated test output (regenerate with the commands in README.md)
+test-results/
+playwright-report/
+
+# never commit real environment files; .env.example stays tracked
+.env
+.env.*
+!.env.example

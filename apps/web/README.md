@@ -1,6 +1,6 @@
-# Narra web — Phase 1
+# Narrax web — Phases 1–2
 
-The owner's Phase 1 brief and subsequent decisions replace the missing product spec **for Phase 1 only**. Marketing uses 16–20px corners, restrained lime glow and motion. Product surfaces reserve the prototype's 6px corners, dense layouts and no glow/pulsing. Phase 2+ needs another decision for screens not covered by the prototype.
+The owner approved `design/prototype/narra-prototype.html` and the existing API contracts as the Phase 2 specification. The current brand is **Narrax**, using only black, white and neutral grayscale with the owner's supplied symbol. Marketing uses 16–20px corners, restrained monochrome glow and motion. Product surfaces use the prototype's 6px corners, dense layouts and no glow/pulsing. See [the brand update](docs/NARRAX_BRAND.md) and [the Phase 2 handoff](docs/PHASE2_HANDOFF.md) for scope, integration gaps and verification.
 
 ## Windows development
 
@@ -14,8 +14,8 @@ Supply public values through the inherited process environment. The Next scripts
 | NEXT_PUBLIC_PRIVY_APP_ID | Your public Privy app ID |
 | NEXT_PUBLIC_WYNTRAX_URL | Your HTTPS membership claim page |
 | NEXT_PUBLIC_SITE_URL | http://localhost:4010 (production: canonical HTTPS web origin) |
-| NEXT_PUBLIC_X_URL | Optional credential-free HTTPS Narra profile; no social button when absent/invalid |
-| NEXT_PUBLIC_TELEGRAM_URL | Optional credential-free HTTPS Narra community; no social button when absent/invalid |
+| NEXT_PUBLIC_X_URL | Optional credential-free HTTPS Narrax profile; no social button when absent/invalid |
+| NEXT_PUBLIC_TELEGRAM_URL | Optional credential-free HTTPS Narrax community; no social button when absent/invalid |
 | API CORS_ORIGINS | http://localhost:4010, exactly; API refuses `*` |
 | Admin entitlements.wallet_link_domain | http://localhost:4010 |
 | Privy dashboard allowed origin | http://localhost:4010 |
@@ -44,7 +44,7 @@ Locale detection remains disabled. Explicit locale URLs win; unprefixed URLs use
 
 ## Reference-led design branch
 
-`docs/DESIGN_HANDOFF.md` is the current design verification index; `docs/DESIGN_SPEC_PHASE1.md` records reference interpretation, intentional omissions and the EN/ID copy ledger. `docs/PERF_BASELINE.md` records five-run production medians. All before/after state/viewport/theme images are indexed in `docs/design-captures/README.md`; compact side-by-side reference comparisons are under `docs/design-review/`.
+`docs/DESIGN_HANDOFF.md` and `docs/DESIGN_SPEC_PHASE1.md` record the historical pre-rebrand redesign, reference interpretation and EN/ID copy ledger. `docs/PERF_BASELINE.md` records that work's five-run production medians. Its before/after images are indexed in `docs/design-captures/README.md`; reference comparisons are under `docs/design-review/`. Current research screenshots are indexed in `docs/phase2-captures/README.md`.
 
 Production builds **reject any set `NARRA_WEB_TEST_AUTH` value**, including `0`, and automatically scan `.next` for fixture auth/gallery leaks. Unset the variable for build/start. Test safety is documented in `docs/TEST_AUTH_SAFETY.md`. The design gallery is compile-time fixture code only, never a production route.
 

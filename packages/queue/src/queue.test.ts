@@ -74,6 +74,11 @@ describe.skipIf(!up)('wallet intelligence schedule (needs Redis)', () => {
     await queues.scheduleAiAnalysis(240_000);
     expect(await queues.aiAnalysis.getJobSchedulers()).toMatchObject([{ key: 'analyze', every: 240_000 }]);
     await queues.aiAnalysis.obliterate({ force: true });
+    await queues.telegramDelivery.obliterate({ force: true });
+    await queues.scheduleTelegramDelivery(60_000);
+    await queues.scheduleTelegramDelivery(60_000);
+    expect(await queues.telegramDelivery.getJobSchedulers()).toMatchObject([{ key: 'deliver', every: 60_000 }]);
+    await queues.telegramDelivery.obliterate({ force: true });
     await queues.close(); connection.disconnect();
   });
 });

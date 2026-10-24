@@ -17,9 +17,13 @@ const src = (dir: string) => walk(join(ROOT, dir)).filter((f) => !/\.test\.ts$/.
 const strip = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1'); // comments may describe what is forbidden
 
 /** Calls and names that send, sign or hold a key. */
-const SIGNING = [/sendTransaction/, /sendRawTransaction/, /sendAndConfirm/, /signTransaction/, /signAllTransactions/, /signMessage/, /\.sign\(/, /\bKeypair\b/, /secretKey/, /fromSecretKey/, /privy-authorization-signature/i, /signAndSend/i, /sign-and-send/i, /advanced-swap/i, /PRIVATE_KEY/, /AUTHORIZATION_KEY/, /APP_SECRET/, /jito/i, /sendBundle/i];
+const SIGNING = [/sendTransaction/, /sendRawTransaction/, /sendAndConfirm/, /signTransaction/, /signAllTransactions/, /signMessage/, /(?<!\bMath)\.sign\(/, /\bKeypair\b/, /secretKey/, /fromSecretKey/, /privy-authorization-signature/i, /signAndSend/i, /sign-and-send/i, /advanced-swap/i, /PRIVATE_KEY/, /AUTHORIZATION_KEY/, /APP_SECRET/, /jito/i, /sendBundle/i];
 
 describe('B5a isolation: nothing here can sign or send', () => {
+  it('distinguishes numeric Math.sign from signing calls without exempting transaction signers',()=>{
+    expect(SIGNING.some(re=>re.test('Math.sign(amount)'))).toBe(false);
+    for(const source of ['tx.sign(key)', 'wallet.sign(key)', 'fakeMath.sign(key)', 'Keypair.fromSecretKey(bytes)']) expect(SIGNING.some(re=>re.test(source))).toBe(true);
+  });
   it.each(['workers/executor/src', 'packages/tx-verify/src', 'packages/solana/src', 'packages/risk/src', 'packages/trading/src'])('%s contains no signing, sending or key handling', (dir) => {
     const hits: string[] = [];
     for (const f of src(dir)) {
@@ -61,12 +65,20 @@ describe('B5a isolation: nothing here can sign or send', () => {
     expect(body).toMatch(/db\.dryRun\.create/);
   });
 
-  it('the API, the pipeline worker, the AI package and the chat agent import neither the executor nor web3.js', () => {
+  it('the API, the pipeline worker, the AI package and the chat agent import neither the executor nor the swap builder, except the manual user-signed swap engine', () => {
     const bad: string[] = [];
+    // Manual trading is the one deliberate exception: the API builds an unsigned transaction, the user's own wallet
+    // signs it, and the API only re-verifies that signature before broadcasting. Automated execution still cannot
+    // reach it (the executor has no signer), and no other API file may import the Solana builder or verifier.
+    const manual = 'apps/api/src/manual-swap-engine.ts';
     for (const dir of ['apps/api/src', 'workers/pipeline/src', 'packages/ai/src', 'packages/agent/src']) {
-      for (const f of src(dir)) if (/@narra\/(worker-executor|tx-verify)|@solana\/web3\.js|workers\/executor/.test(strip(f.text))) bad.push(f.file);
+      for (const f of src(dir)) {
+        if (f.file === manual) continue;
+        if (/@narra\/(worker-executor|tx-verify)|@solana\/web3\.js|workers\/executor/.test(strip(f.text))) bad.push(f.file);
+      }
     }
     expect(bad).toEqual([]);
+    expect(src('apps/api/src').filter((f) => /@solana\/web3\.js|@narra\/tx-verify/.test(strip(f.text))).map((f) => f.file)).toEqual([manual]);
   });
 
   it('the pipeline worker no longer consumes the execution queue, and the executor does', () => {

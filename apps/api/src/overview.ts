@@ -6,6 +6,7 @@ import { sanitizeUntrusted } from '@narra/shared';
 import { SOL_PRICE_KEY } from '@narra/worker-pipeline';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { canReadFeature } from './entitlements/access';
+import { marketTokenImages } from './marketEvidence';
 
 const HOUR = 3_600_000;
 /** A SOL price older than this is returned with stale: true, so the UI never shows an old number as current. Matches readSolUsd. */
@@ -86,7 +87,7 @@ function composeBrief(top: { name: string; stage: string; score: number }[], bar
     out.push(`Attention is moving from ${from.name} (${Math.round(from.from)} to ${Math.round(from.to)}) to ${to.name} (${Math.round(to.from)} to ${Math.round(to.to)}) over ${rotation.window}.`);
   }
   if (bar.smartMoneyNetFlowSol24h !== null && bar.smartMoneyTokens24h > 0) {
-    out.push(`Tracked wallets have a net ${bar.smartMoneyNetFlowSol24h >= 0 ? 'inflow' : 'outflow'} of ${Math.abs(bar.smartMoneyNetFlowSol24h)} SOL across ${bar.smartMoneyTokens24h} token${bar.smartMoneyTokens24h === 1 ? '' : 's'} in the last 24 hours.`);
+    out.push('Stored wallet-flow calculations are unverified historical research; inspect their source history before using them.');
   } else out.push('There is no smart-money flow data for the last 24 hours.');
   if (!bar.solUsd) out.push('The SOL price is not available right now.');
   else if (bar.solUsd.stale) out.push('The SOL price is stale.');
@@ -98,6 +99,18 @@ export function registerOverviewRoutes(app: FastifyInstance, deps: Pick<AccountD
   const db: PrismaClient = deps.db;
   const now = deps.now ?? (() => new Date());
   const opts = { preHandler: makeAuthenticate(deps), config: { rateLimit: { max: 120, timeWindow: '1 minute' } } };
+
+  // Deliberately tier-independent, authenticated teaser. Never include identities, flows or detailed research.
+  app.get('/v1/market-preview', opts, async () => {
+    const at=now();
+    const [solUsd,top,trackedWallets,opportunities24h]=await Promise.all([
+      loadSolUsd(db,at),
+      db.narrative.findMany({where:{stage:{not:'DEAD'}},orderBy:[{score:'desc'},{id:'asc'}],take:5,select:{score:true}}),
+      db.trackedWallet.count({where:{active:true}}),
+      db.opportunity.count({where:{createdAt:{gte:new Date(+at-24*HOUR),lte:at}}}),
+    ]);
+    return {at,solUsd,narrativeHeat:top.length?Math.round(top.reduce((sum,row)=>sum+row.score,0)/top.length):null,trackedWallets,opportunities24h};
+  });
 
   // Light enough to poll. The global intelligence bar.
   app.get('/v1/intelligence-bar', opts, async () => {
@@ -114,20 +127,21 @@ export function registerOverviewRoutes(app: FastifyInstance, deps: Pick<AccountD
       rotationAccess ? loadRotation(db, '24h', at) : null,
       opportunityAccess ? db.opportunity.findFirst({
         where: { createdAt: { gte: new Date(at.getTime() - 24 * HOUR) } }, orderBy: [{ score: 'desc' }, { id: 'asc' }],
-        include: { token: { select: { mint: true, symbol: true, metrics: { orderBy: { at: 'desc' }, take: 1 } } }, narrative: { select: { name: true, slug: true } } },
+        include: { token: { select: { id: true, mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1 } } }, narrative: { select: { name: true, slug: true } } },
       }) : null,
       db.position.count({ where: { userId, status: 'OPEN' } }),
       db.pendingConfirmation.count({ where: { userId, status: 'PENDING', expiresAt: { gt: at } } }),
       db.notification.count({ where: { userId, readAt: null } }),
     ]);
     const m = hottest?.token.metrics[0];
+    const images=await marketTokenImages(db,hottest?[hottest.token]:[]);
     const bar = summary?.bar ?? null, top = narrativeAccess ? summary?.top ?? [] : [];
     return {
       at, bar,
       locked: { overview: !overviewAccess, narratives: !narrativeAccess, rotation: !rotationAccess, opportunities: !opportunityAccess },
       strip: {
         topNarratives: top.map((t) => ({ id: t.id, slug: t.slug, name: t.name, stage: t.stage, score: t.score, velocity: t.velocity })),
-        hottestOpportunity: hottest ? { id: hottest.id, createdAt: hottest.createdAt, score: hottest.score, token: { mint: hottest.token.mint, symbol: hottest.token.symbol, priceUsd: n(m?.priceUsd), marketCapUsd: n(m?.marketCapUsd) }, narrative: hottest.narrative } : null,
+        hottestOpportunity: hottest ? { id: hottest.id, createdAt: hottest.createdAt, score: hottest.score, token: { mint: hottest.token.mint, symbol: hottest.token.symbol, name:hottest.token.name, imageUrl:images.get(hottest.token.id)??null, priceUsd: n(m?.priceUsd), marketCapUsd: n(m?.marketCapUsd) }, narrative: hottest.narrative } : null,
       },
       rotation: rotation ? { detected: rotation.detected, window: rotation.window, falling: rotation.falling, rising: rotation.rising, unknown: rotation.unknown } : null,
       brief: { generated: 'rules', points: bar ? composeBrief(top, bar, rotation) : [] },

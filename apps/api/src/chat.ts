@@ -70,11 +70,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): void {
 
       await db.chatMessage.create({ data: { conversationId, userId, role: 'USER', content: message, createdAt: at } });
       const result = await runAgent({ llm: deps.llm, model: cfg.fastModel, temperature: cfg.temperature, maxTokens: cfg.maxTokensPerCall, ports: researchPorts(ports, db, userId, now, entry => req.log.info(entry, 'research access decision')), ctx: { userId, now: at, conversationId }, userMessage: message, history });
+      // The user sees a fixed fallback. The operator needs the reason (bad key, wrong base URL, unknown model id), so it is logged here: fixed provider text only, never a body or key.
+      if (result.llmError) req.log.warn({ llmError: result.llmError, model: cfg.fastModel }, 'chat model call failed');
       await db.$transaction([
         db.chatMessage.create({
           data: {
             conversationId, userId, role: 'ASSISTANT', content: result.text, inputTokens: result.inputTokens, outputTokens: result.outputTokens, model: cfg.fastModel, createdAt: new Date(now().getTime() + 1),
-            meta: { toolsUsed: result.toolsUsed, refusedCalls: result.refusedCalls, stopReason: result.stopReason, proposalIds: result.proposals.map((p) => p.id) } as Prisma.InputJsonValue,
+            meta: { toolsUsed: result.toolsUsed, refusedCalls: result.refusedCalls, stopReason: result.stopReason, ...(result.llmError ? { llmError: result.llmError } : {}), proposalIds: result.proposals.map((p) => p.id) } as Prisma.InputJsonValue,
           },
         }),
         db.chatConversation.update({ where: { id: conversationId }, data: { updatedAt: now() } }),

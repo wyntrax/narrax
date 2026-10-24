@@ -1,0 +1,20 @@
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { afterEach, it, expect, vi } from 'vitest';
+import { NextIntlClientProvider } from 'next-intl';
+import type { ReactNode } from 'react';
+import messages from '../../../messages/research/en.json';
+import { OpportunitiesPage } from './opportunities';
+vi.mock('@/i18n/navigation', () => ({ Link: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a> }));
+vi.mock('./session', () => ({ useResearchQuery: (path: string) => ({ isPending: false, isError: false, isFetching: false, refetch: vi.fn(), data: path.startsWith('tokens/') ? { observation: null, metrics: null } : { items: [{ id: 'idea', createdAt: '2026-10-18T00:00:00Z', score: 50, scores: { narrative: 50 }, token: { mint: 'mint', symbol: 'TOKEN', name: 'Token name' }, narrative: null, decision: null }], nextCursor: null } }) }));
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+it('review reveals, scrolls to and focuses the detail, including repeated clicks', () => {
+  const scroll = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll });
+  vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  render(<NextIntlClientProvider locale="en" messages={{ workspace: messages }}><OpportunitiesPage /></NextIntlClientProvider>);
+  fireEvent.click(screen.getByRole('button', { name: /Review this idea/ }));
+  expect(scroll).toHaveBeenCalledWith({ behavior: 'instant', block: 'start' });
+  expect(document.activeElement).toHaveClass('idea-detail');
+  fireEvent.click(screen.getByRole('button', { name: /Review this idea/ }));
+  expect(scroll).toHaveBeenCalledTimes(2);
+});

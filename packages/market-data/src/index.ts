@@ -3,5 +3,6 @@ export * from './limiter';
 export * from './http';
 export * from './dexscreener';
 export * from './geckoterminal';
+export * from './rugcheck';
 export * from './tokenRisk';
 export * from './fixture';

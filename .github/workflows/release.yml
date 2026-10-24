@@ -1,0 +1,267 @@
+# Continuous delivery for the backend plus an optional separate, verified frontend image on the same VPS.
+#
+#   push to main or a v*.*.* tag  ->  CI (ci.yml)  ->  publish image to GHCR  ->  deploy (optional, needs approval)
+#
+# Publishing only needs the built-in GITHUB_TOKEN. Deploying is OFF until the repository variable DEPLOY_ENABLED is 'true',
+# and even then it waits for the reviewers configured on the `production` environment. The separate frontend job is
+# enabled only with WEB_DEPLOY_ENABLED=true and the production-web environment; it builds for the configured public origins.
+# See docs/CI_CD.md.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  publish:
+    name: Publish image to GHCR
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.ref.outputs.image }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Registry paths must be lowercase, and a GitHub owner or repo name may not be.
+      - name: Image name
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.name.outputs.image }}
+          tags: |
+            type=sha,format=long
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Deploy by digest, never by a moving tag. This is a separate build of the same commit CI checked.
+      - name: Immutable image reference
+        id: ref
+        run: echo "image=${{ steps.name.outputs.image }}@${{ steps.push.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published"
+            echo '`${{ steps.ref.outputs.image }}`'
+            echo
+            echo "Tags: ${{ steps.meta.outputs.tags }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to production host
+    needs: publish
+    # Off by default. Set the repository variable DEPLOY_ENABLED=true once the host is prepared (docs/CI_CD.md).
+    if: ${{ vars.DEPLOY_ENABLED == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Add required reviewers to this environment in the repository settings: that is the approval gate.
+    environment:
+      name: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      # The host pulls the image with this job's token, so it must be allowed to read packages.
+      packages: read
+    # Secrets are passed through the environment and never pasted into script text.
+    env:
+      NARRA_IMAGE: ${{ needs.publish.outputs.image }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      REGISTRY_USER: ${{ github.actor }}
+      REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the deploy settings exist
+        run: |
+          for v in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH; do
+            if [ -z "${!v}" ]; then echo "::error::Missing secret $v"; exit 1; fi
+          done
+          for s in DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            if [ -z "$(printenv "$s")" ]; then echo "::error::Missing secret $s"; exit 1; fi
+          done
+          # These values become SSH config fields and remote shell arguments. Refuse shell/config metacharacters.
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]] || { echo '::error::Invalid DEPLOY_HOST'; exit 1; }
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo '::error::Invalid DEPLOY_USER'; exit 1; }
+          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ ]] || { echo '::error::DEPLOY_PATH must be an absolute path without spaces or shell metacharacters'; exit 1; }
+
+      # Host keys come from a secret (ssh-keyscan here would trust whatever answers first).
+      - name: SSH setup
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
+
+      - name: Ship the deploy files (the host's .env and base compose file are never touched or sent)
+        run: |
+          ssh deploy "mkdir -p '$DEPLOY_PATH/docker' '$DEPLOY_PATH/.deploy'"
+          scp docker/docker-compose.deploy.yml "deploy:$DEPLOY_PATH/docker/docker-compose.deploy.yml"
+          scp scripts/deploy-remote.sh "deploy:$DEPLOY_PATH/.deploy/deploy-remote.sh"
+
+      # The registry token is sent on stdin, so it never appears in a command line, a process list or the logs.
+      - name: Deploy (migrate, start, health check, roll back on failure)
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | ssh deploy \
+            "NARRA_IMAGE='$NARRA_IMAGE' DEPLOY_PATH='$DEPLOY_PATH' REGISTRY_USER='$REGISTRY_USER' bash '$DEPLOY_PATH/.deploy/deploy-remote.sh'"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Deploy" >> "$GITHUB_STEP_SUMMARY"
+          echo "Image: \`$NARRA_IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-web:
+    name: Build, verify and deploy frontend to the VPS
+    needs: ci
+    if: ${{ vars.WEB_DEPLOY_ENABLED == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: production-web
+    # Serialize with backend deployment: shared host registry login/logout must not race.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    env:
+      NEXT_PUBLIC_SITE_URL: ${{ vars.WEB_SITE_URL }}
+      NEXT_PUBLIC_API_URL: ${{ vars.WEB_API_URL }}
+      NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.WEB_PRIVY_APP_ID }}
+      NEXT_PUBLIC_WYNTRAX_URL: ${{ vars.WEB_WYNTRAX_URL }}
+      NARRA_SEO_INDEXABLE: ${{ vars.WEB_SEO_INDEXABLE || 'false' }}
+      WEB_REVISION: ${{ github.sha }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate public build and SSH configuration
+        run: |
+          node -e "require('./apps/web/scripts/check-deploy-config.cjs').validateConfig(process.env)"
+          for v in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            [ -n "${!v}" ] || { echo "::error::Missing secret $v"; exit 1; }
+          done
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]] || exit 1
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || exit 1
+          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ ]] || exit 1
+      - name: Frontend image name
+        id: web-image
+        run: echo "tag=ghcr.io/${GITHUB_REPOSITORY,,}-web:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build the production frontend image (not the placeholder CI bundle)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.web
+          load: true
+          tags: ${{ steps.web-image.outputs.tag }}
+          build-args: |
+            NEXT_PUBLIC_SITE_URL=${{ env.NEXT_PUBLIC_SITE_URL }}
+            NEXT_PUBLIC_API_URL=${{ env.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_PRIVY_APP_ID=${{ env.NEXT_PUBLIC_PRIVY_APP_ID }}
+            NEXT_PUBLIC_WYNTRAX_URL=${{ env.NEXT_PUBLIC_WYNTRAX_URL }}
+            NARRA_SEO_INDEXABLE=${{ env.NARRA_SEO_INDEXABLE }}
+            WEB_REVISION=${{ env.WEB_REVISION }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+      - name: Verify the exact frontend image before publishing
+        run: bash scripts/check-web-image.sh
+        env:
+          WEB_SMOKE_IMAGE: ${{ steps.web-image.outputs.tag }}
+      - name: Push the verified image and resolve its immutable registry reference
+        id: web-published
+        env:
+          TAG: ${{ steps.web-image.outputs.tag }}
+        run: |
+          docker push "$TAG"
+          image="$(docker image inspect --format '{{index .RepoDigests 0}}' "$TAG")"
+          [[ "$image" =~ ^ghcr[.]io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]] || exit 1
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+      - name: SSH setup
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
+      - name: Ship frontend deployment files (host .env and .env.web remain untouched)
+        run: |
+          ssh deploy "mkdir -p '$DEPLOY_PATH/docker' '$DEPLOY_PATH/.deploy/web'"
+          scp docker/docker-compose.web.yml "deploy:$DEPLOY_PATH/docker/docker-compose.web.yml"
+          scp scripts/deploy-web-remote.sh "deploy:$DEPLOY_PATH/.deploy/web/deploy-web-remote.sh"
+      - name: Deploy the frontend independently, with health checks and rollback
+        env:
+          IMAGE: ${{ steps.web-published.outputs.image }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | ssh deploy \
+            "NARRA_WEB_IMAGE='$IMAGE' WEB_REVISION='$WEB_REVISION' DEPLOY_PATH='$DEPLOY_PATH' REGISTRY_USER='$REGISTRY_USER' bash '$DEPLOY_PATH/.deploy/web/deploy-web-remote.sh'"
+      - name: Frontend summary
+        if: always()
+        env:
+          IMAGE: ${{ steps.web-published.outputs.image }}
+        run: |
+          printf '### Frontend release\nCommit: `%s`\n\nImage: `%s`\n\nBackend/database not modified by this job.\n' "$WEB_REVISION" "$IMAGE" >> "$GITHUB_STEP_SUMMARY"
