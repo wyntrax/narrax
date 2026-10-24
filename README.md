@@ -1,14 +1,127 @@
 # NARRAX
 
-Public product name: **Narrax** (configurable through `PROJECT_NAME`). Technical identifiers still use `narra`.
+Narrax is a Solana narrative and smart-money research workspace. It watches narratives forming online, links
+them to tokens, tracks what qualified wallets actually bought, and turns that into research it can defend line
+by line.
 
-## Web Phase 1
+Public product name: **Narrax** (configurable through `PROJECT_NAME`). Database names, Redis keys, the
+`@narra/*` workspace scope and `NARRA_*` environment variables keep the original `narra` spelling.
 
-`apps/web` is the Next.js 15 / React 19 frontend workspace. Run `npm run dev:web` on port 4010 with the API on 4000. See [web setup](apps/web/README.md) for public configuration, exact CORS and wallet-proof origin requirements, and verification. Phase 2 waits for owner approval.
+## What it does
 
-AI narrative and smart-money intelligence agent for Solana.
+- **Narrative radar.** Ingests social topics and posts, scores mention, creator and engagement velocity,
+  organic behaviour and manipulation risk, and follows each narrative through emerging, accelerating,
+  saturated and decaying stages. Sources are bounded and receipted; sampled search results are not treated
+  as global trend coverage.
+- **Token resolution.** Matches live narratives to Solana mints, scores how likely a token is the original
+  (OG score), flags copycats and serial deployers, and compares attention growth with price growth. A ticker
+  match can never create an order.
+- **Market evidence.** Reads price, liquidity, volume, market cap and pool age from DEX Screener, and holder
+  count, top-10 share, mint/freeze authority and honeypot flags from GeckoTerminal. Risk and tradeability
+  evidence (RugCheck, a live Jupiter quote for a small buy) is stored with its source and timestamp.
+- **Smart-money research.** Scores tracked wallets from observed history, infers timing and funding clusters,
+  and admits a wallet to research flows only after explicit qualification. Flows need independent wallets,
+  fresh trades and market/holder/risk evidence, and freeze their entry and signatures.
+- **Early Radar.** Publishes a call only when the exact price and holder rows behind its score are at most
+  15 and 60 minutes old. Entries are frozen and measured later at 1h, 24h and 7d.
+- **Research workspace.** Next.js app with overview, narratives, opportunities, tokens, radar, smart money,
+  portfolio, trade, alerts, analytics, backtests, agent chat, settings and admin. English and Indonesian,
+  dark and light themes, Privy sign-in and wallet-link proof.
+- **Manual mainnet swaps.** Off by default. The API assembles an unsigned Jupiter Swap V2 transaction from
+  stored research; the user's verified linked wallet signs it in the browser; the API simulates and verifies
+  the exact route, amounts and accounts before broadcasting. Private keys never reach the API.
+- **Research access.** Wyntrax membership webhooks plus wallet-link proof decide access per feature, and the
+  server enforces permissions even when a rollout flag is off.
+- **Public research.** English/Indonesian guides, methodology pages, structured data and a localized sitemap.
 
-## Current market dashboard
+## How a signal is made
+
+```
+social and narrative sources
+  -> narrative score, organic score, lifecycle stage
+  -> token resolution (OG score, copycat and risk filters)
+  -> stored market, holder and risk evidence with timestamps
+  -> opportunity and Early Radar scores
+  -> frozen call and alert
+  -> 1h / 24h / 7d outcomes and a scorecard
+```
+
+Three rules matter more than any threshold:
+
+1. **No evidence, no call.** A missing, invalid or stale observation is `UNKNOWN`. It is never zero-filled,
+   backfilled from a later price, or treated as positive buy evidence.
+2. **Freshness is part of the evidence.** Publication requires a price no older than 15 minutes and holder
+   rows no older than 60 minutes. Cached figures age on screen.
+3. **Budgets are fixed.** One market consumer refreshes up to 150 tokens and makes up to 18 info calls per
+   cycle. Coverage gaps are reported, not hidden with extra requests or thinner pools.
+
+## Safety model
+
+- No automated order can be signed or sent. `EXECUTOR_MODE=dry_run` is the only supported executor mode.
+- Manual mainnet swaps require `MANUAL_TRADING_ENABLED=true`, a verified linked wallet, complete stored
+  evidence and an explicit signature from the user's own wallet.
+- Paper trading is simulated end to end and marked `simulated`.
+- Telegram delivery is plain-text research for one group: global Early Radar only, no wallets, positions,
+  PnL or trading instructions. Delivery is bounded (15-minute age, 10 messages per run, 1.2 s spacing,
+  dedupe and 429 backoff).
+- Model output is untrusted: it must pass a schema and the deterministic Risk Governor, and it can only
+  tighten limits, never loosen them.
+
+## Current status
+
+| Area | State |
+| --- | --- |
+| Backend, workers, API | Implemented; 1,530 tests across 134 files pass on isolated Postgres and Redis |
+| Web workspace | Implemented; 644 tests across 47 files, typecheck and lint pass |
+| Remote CI | Types and lint pass; backend, web, browser and Docker jobs run on GitHub Actions. No production deploy has run |
+| Production deployment | Not run. `DEPLOY_ENABLED` and `WEB_DEPLOY_ENABLED` remain `false`; the VPS is not configured |
+| Live wallet ingestion | Webhook sync and fresh wallet events verified locally; public production delivery unverified |
+| Wallet qualification | No tracked wallet qualifies yet; the ten seed wallets are provisional |
+| Radar edge | Not demonstrated. The sample is below 30 events / 15 tokens, so the scorecard reports INSUFFICIENT |
+| Manual mainnet swap | Implemented but not exercised end to end with real funds |
+
+Honest reading: this is a working research system, not a validated trading edge. An earlier live cohort showed
+a short-lived 4h peak (+21.1% median) that closed at -6.0% and fell to -48.9% at 24h, which is why publication
+requires frozen entries and reports missing horizons as `UNKNOWN`. Every "verified" claim above refers to
+isolated local services and CI, not production traffic.
+
+## Quick start
+
+Requires Node 22+, Docker, and a Postgres 16 / Redis 7 pair (the Compose file provides both).
+
+```powershell
+npm install
+docker compose up -d
+cp .env.example .env             # fill in what you have; leave feature and deploy flags off
+npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
+npx prisma generate --schema packages/database/prisma/schema.prisma
+npm run dev:api                  # Fastify API on :4000
+npm run dev:workers              # pipeline workers
+npm run dev:web                  # Next.js on :4010
+```
+
+Run `npm test` and `npm run typecheck` for the backend; web tests run in `apps/web`. Integration tests skip
+when Postgres or Redis is unreachable, and a skipped test is not a pass.
+
+## Documentation
+
+| Start here | Why |
+| --- | --- |
+| [docs/CONTINUATION.md](docs/CONTINUATION.md) | Current state, gaps, verification history and next work |
+| [docs/NARRAX_END_TO_END_SETUP.md](docs/NARRAX_END_TO_END_SETUP.md) | VPS production runbook (also available as DOCX) |
+| [docs/CI_CD.md](docs/CI_CD.md) / [docs/FRONTEND_DEPLOYMENT.md](docs/FRONTEND_DEPLOYMENT.md) | Release, rollback and frontend delivery |
+| [docs/EARLY_RADAR.md](docs/EARLY_RADAR.md) | Scoring, publication gates and outcome tracking |
+| [docs/MANUAL_TRADING.md](docs/MANUAL_TRADING.md) | The manual swap flow and its limits |
+| [docs/TELEGRAM.md](docs/TELEGRAM.md) | Research-only delivery setup |
+| [docs/ENTITLEMENTS.md](docs/ENTITLEMENTS.md) | Membership, access tiers and wallet-link proof |
+| [docs/RESEARCH_COVERAGE_AUDIT_2026-10-24.md](docs/RESEARCH_COVERAGE_AUDIT_2026-10-24.md) | What current market collection actually covers |
+| [CLAUDE.md](CLAUDE.md) | Engineering rules, architecture and known traps |
+
+`design/prototype/narrax-prototype.html` is the approved UI prototype (mock data). If you are working on this
+repo with an assistant, read [`CLAUDE.md`](CLAUDE.md) first, then
+[`docs/CLAUDE_CODE_PROMPT.md`](docs/CLAUDE_CODE_PROMPT.md) for ready-to-paste session prompts.
+
+## Project log and verification history
 
 ### Evidence review follow-up (October 24)
 
@@ -58,54 +171,47 @@ Early-radar outcome tracking now records frozen alert-time prices/valuations and
 
 **Radar scorecard and liveness (October 20):** `npm run radar:scorecard` recomputes 15m/1h/4h/24h returns, peak capture and a fixed exit-rule replay from frozen alert entries and stored 5-minute closes. It prints medians first, subtracts a 3% round-trip cost and marks every bucket under 30 events / 15 tokens INSUFFICIENT. `npm run radar:status` reports the newest call, newest price and candidate supply, and exits 2 when stale; `scripts/radar-status.ps1` is the Task Scheduler wrapper and `scripts/radar-status-scheduled.ps1` adds timestamped logging for recurring checks. Both are read-only. The live cohort shows the edge is short-lived: the 4h peak median is +21.1% while the 4h close median is -6.0% and the 24h median is -48.9%. See [the dated status](docs/CONTINUATION.md).
 
-**Telegram Early Radar feed (October 20):** a read-only delivery layer posts global Early Radar alerts to one Telegram group. `powershell -File scripts\telegram-send.ps1` is a dry run that prints the exact messages; add `-Send` after setting `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the ignored `.env`. The pipeline worker schedules the same delivery every 30 seconds, skips calls older than 15 minutes, deduplicates by alert and backs off on a 429. It never sends user-owned alerts, orders, positions or P&L, needs no schema or migration, and is not a validated buy signal. See [Telegram setup](docs/TELEGRAM.md).
+**Telegram Early Radar feed (October 20):** a read-only delivery layer posts global Early Radar alerts to one Telegram group. `powershell -File scripts\telegram-send.ps1` is a dry run that prints the exact messages; add `-Send` after setting `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the ignored `.env`. The pipeline worker schedules the same delivery every 30 seconds and bounds it with `TELEGRAM_MAX_AGE_MIN=15`, `TELEGRAM_MAX_PER_RUN=10` (hard cap 20) and `TELEGRAM_SEND_DELAY_MS=1200`; it deduplicates by alert, backs off on a 429, and `TELEGRAM_ENABLED=false` disables delivery without removing the credentials. It never sends user-owned alerts, orders, positions or P&L, needs no schema or migration, and is not a validated buy signal. See [Telegram setup](docs/TELEGRAM.md).
 
 Tokens and Opportunities now use recent, source-linked DEX Screener snapshots with liquidity, volume, price change, pool age and valuation basis. Historical scores and unverified wallet performance are explicitly separated. The dashboard follows the landing's graphite/pill design in EN/ID and dark/light themes. Run the standalone collector with `npm run dev:market` using the supplied process environment; it shares the existing five-minute market scheduler and should be the only market queue consumer. See [verification and remaining data gaps](docs/DASHBOARD_MARKET_REFRESH_2026-10-16.md).
 
-## Wyntrax membership webhooks
+## Operations: Wyntrax membership webhooks
 
 Configure each Solana membership on Wyntrax with this API's public HTTPS `/v1/integrations/wyntrax/events` URL and a MEMBER, PRO or ELITE integration key. Copy the creator signing secret into `WYNTRAX_WEBHOOK_SECRET`; `WYNTRAX_WEBHOOK_SECRET_PREVIOUS` supports rotation. Narrax requires wallet-link proof and resolves the highest active, unexpired key across independent membership grants.
 
 Schedule `npm run entitlements:expire` every minute for local grant/challenge cleanup, independently of the pipeline. See [docs/ENTITLEMENTS.md](docs/ENTITLEMENTS.md) for the event contract and migration.
 
-**Start with [docs/CONTINUATION.md](docs/CONTINUATION.md):** what exists, what is verified, what is missing, and ready-to-paste prompts for continuing the backend and building the frontend. `design/prototype/narrax-prototype.html` is the approved UI prototype (mock data).
-
-> **Working on this repo with Claude Code or another assistant?** Read [`CLAUDE.md`](CLAUDE.md) first (rules, architecture, gotchas, state), then [`docs/CLAUDE_CODE_PROMPT.md`](docs/CLAUDE_CODE_PROMPT.md) for ready-to-paste session prompts, and [`docs/CONTINUATION.md`](docs/CONTINUATION.md) for the full status and backlog.
-
-## What is here
-- `packages/shared`: brand config, enums, Zod schemas for model output, untrusted-data helpers
-- `packages/risk`: the deterministic Risk Governor, system limits and risk profiles, with tests
-- `packages/database`: Prisma schema (45 models), initial migration, and a Prisma client that uses the pg driver adapter (no Rust query engine)
-- `apps/api`: Fastify API with `/health`, the Helius webhook, a dev Risk Governor endpoint, Privy token verification, account routes (mode, AI access, pause/resume/revoke, risk profile), all audited, and read routes for the UI (narratives, opportunities, tokens, smart-money wallets, positions, trades)
-- `packages/queue`: BullMQ queues, job schemas, dedupe by transaction signature, execution jobs never retried
-- `packages/solana`: Helius swap parser, webhook auth check, Jupiter quote client with freshness check, JSON-RPC client (balances, token holdings)
-- `packages/ai`: model provider interface (OpenAI-compatible client), prompts that separate trusted facts from untrusted text, Zod-validated agent outputs, the fast-screen to deep-analysis pipeline, guardrails
-- `packages/token-intel`: narrative-to-token matching, OG scoring and copycat detection, attention-price divergence, opportunity score (pure and tested)
-- `packages/narrative`: provider interface, topic and text normalization, velocity, organic score, lifecycle engine (pure and tested)
-- `packages/smart-money`: pure, tested wallet intelligence: cost-basis stats, wallet score, leader score, style rules, timing clusters, consensus
-- `workers/pipeline`: wallet-event processor, deterministic AI filter, execution pipeline (no executor wired), and Postgres-backed stores that build the Risk Governor's inputs from real rows
-- `packages/realtime`: the realtime event contract (Zod, one definition per event type), the Redis Streams helpers (publish, dedupe, range read, resume check), the WebSocket protocol, and the in-memory connection hub (pure, tested)
-- `packages/tx-verify`: B5a. Pure checks on an unsigned swap transaction and on a simulation's effects. No signing
-- `workers/executor`: B5a. The execution-queue consumer. Dry run only: it cannot sign or send
-- `docker-compose.yml`: Postgres and Redis for local development
-
-## Run
-    npm install
-    docker compose up -d
-    cp .env.example .env
-    npx prisma migrate deploy --schema packages/database/prisma/schema.prisma
-    npx prisma generate --schema packages/database/prisma/schema.prisma
-    npm test
-    npm run typecheck
-    npm run dev:api
-    npm run dev:workers
+## Repository layout
+- `apps/api`: Fastify API with Privy auth, research reads, admin and audited settings, Helius and Wyntrax
+  webhooks, entitlements, manual-swap build/verify/broadcast, alerts, exports and the realtime WebSocket.
+- `apps/web`: Next.js 15 / React 19 research workspace and public guides (English/Indonesian, dark/light).
+- `workers/pipeline`: narrative ingestion, token resolution, market, holder and risk refresh, wallet-event
+  processing, scoring, alert fan-out, outcome tracking, Telegram delivery and the realtime publisher.
+- `workers/executor`: execution-queue consumer. Dry run only; it cannot sign or send.
+- `packages/database`: Prisma schema (61 models), 18 migrations and the pg driver adapter (no Rust query
+  engine).
+- `packages/queue`: BullMQ queues and job schemas; dedupe by transaction signature, execution jobs are never
+  retried.
+- `packages/narrative`, `token-intel`, `smart-money`, `positions`, `risk`, `trading`, `analytics`: pure,
+  tested domain logic for scoring, lifecycle, OG/copycat detection, wallet intelligence, position rules, the
+  Risk Governor, paper trading and outcome maths.
+- `packages/market-data`: DEX Screener, GeckoTerminal and launch sources behind small interfaces, including
+  the snapshot eligibility and omission diagnostics.
+- `packages/solana`, `tx-verify`: Helius swap parsing and webhook auth, Jupiter quotes, JSON-RPC, and pure
+  checks on unsigned transactions and simulated effects.
+- `packages/agent`, `ai`: OpenAI-compatible provider, prompts that separate trusted facts from untrusted
+  text, schema-validated agent output and chat tools.
+- `packages/realtime`: the event contract, Redis Streams helpers and the WebSocket hub.
+- `packages/shared`: brand config, enums, Zod schemas and untrusted-data helpers.
+- `docker-compose.yml` and `docker/`: local Postgres/Redis plus the operator-owned production Compose files.
 
 ## Rules the code enforces
 - Model output is untrusted and must pass `AgentDecisionSchema`, then the Risk Governor.
 - The model can tighten slippage and price impact, never loosen them.
 - User limits can only be stricter than system limits.
 - Exits are allowed when entry limits are breached, but still check execution quality.
-- Nothing in this repo signs or sends transactions yet. That comes in a later phase behind the queue.
+- Nothing automated signs or sends. The executor stays in `dry_run`; a manual swap is signed by the user's own
+  wallet and broadcast only after the API verifies the exact route, amounts and accounts.
 
 ## Before real use
 - Confirm the Helius payload shape and the Jupiter base URL and price-impact format against live responses.
@@ -126,7 +232,7 @@ All require a Privy bearer token. Market data is shared; positions and trades ar
     GET /v1/opportunities?limit=               GET /v1/tokens?q=&limit=      GET /v1/tokens/:mint
     GET /v1/smart-money/wallets?limit=         GET /v1/positions             GET /v1/trades?limit=&cursor=
 
-Limits are capped at 100. Nothing writes to these tables yet except the wallet-event worker, so most lists are empty until ingestion and scoring exist.
+Limits are capped at 100. The pipeline and audited admin actions write these tables; lists contain only the rows the caller's access permits.
 
 ## Wallet intelligence
 ### Smart Money freshness and recovery (October 19)
