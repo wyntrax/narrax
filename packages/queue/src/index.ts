@@ -2,6 +2,7 @@ import { Queue, type JobsOptions } from 'bullmq';
 import { Redis } from 'ioredis';
 import { z } from 'zod';
 import { AgentDecisionSchema } from '@narra/shared';
+export { PERSONAL_RESEARCH_QUEUE, PersonalResearchJobSchema, createPersonalResearchQueue } from './personalResearch';
 
 export interface QueueCounts { waiting: number; active: number; failed: number; delayed: number; /** Workers connected to this queue right now. 0 with jobs waiting means nothing is consuming it. */ consumers?: number }
 export interface QueueHealth {lastCompletedAt:string|null;lastFailedAt:string|null;lastRun:{analyzed?:number;providerFailures?:number;providerErrors?:number;mentionsStored?:number;narrativesUpdated?:number;topicsSeen?:number;tokensUsed?:number;skipped?:string;rateLimited?:boolean}|null}

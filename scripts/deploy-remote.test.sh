@@ -23,13 +23,15 @@ echo "docker $*" >> "$CALLS"
 case "$*" in
   login*) cat >/dev/null ;;
   *" run "*) exit "${FAKE_MIGRATE_RC:-0}" ;;
-  *" ps "*) printf '%b' "${FAKE_RUNNING:-api\nworker\nexecutor\n}" ;;
+  *" ps "*) printf '%b' "${FAKE_RUNNING:-api\nworker\nexecutor\npersonal-research\n}" ;;
   *" up "*) if [ -n "${FAKE_UP_FAIL_FOR:-}" ] && [ "${NARRA_IMAGE:-}" = "$FAKE_UP_FAIL_FOR" ]; then exit 1; fi ;;
 esac
 exit 0
 FAKE
   printf '#!/usr/bin/env bash\necho "curl $*" >> "$CALLS"\nexit "${FAKE_CURL_RC:-0}"\n' > "$BIN/curl"
   chmod +x "$BIN/docker" "$BIN/curl"
+  printf '#!/usr/bin/env bash\necho "sleep $*" >> "$CALLS"\n' > "$BIN/sleep"
+  chmod +x "$BIN/sleep"
 }
 run() { # run <image> [registry_user]; the fake registry token is sent on stdin like the workflow does
   ( export PATH="$BIN:$PATH" CALLS DEPLOY_PATH="$DEP" NARRA_IMAGE="$1" HEALTH_TRIES=2 HEALTH_SLEEP=0
@@ -46,6 +48,8 @@ ok "success: the token is never on a command line" '! grep -q tok123 "$CALLS" "$
 ok "success: migrates before the app starts" 'm=$(grep -n " run --rm --no-deps migrate" "$CALLS" | head -1 | cut -d: -f1); u=$(grep -n "up -d --no-build --no-deps --pull never api worker executor" "$CALLS" | head -1 | cut -d: -f1); [ -n "$m" ] && [ -n "$u" ] && [ "$m" -lt "$u" ]'
 ok "success: explicitly loads the host env and preserves unrelated services" 'grep -q "compose --env-file .env" "$CALLS" && ! grep -q -- --remove-orphans "$CALLS"'
 ok "success: records the current image" '[ "$(cat "$DEP/.deploy/current_image")" = "ghcr.io/o/r@sha256:new" ]'
+ok "success: starts personal research and records rollback support" 'grep -q "up -d --no-build --no-deps --pull never api worker executor personal-research" "$CALLS" && [ "$(cat "$DEP/.deploy/personal_research_image")" = "ghcr.io/o/r@sha256:new" ]'
+ok "success: stops the pipeline and waits out its lease before starting" 's=$(grep -n " stop worker" "$CALLS" | head -1 | cut -d: -f1); w=$(grep -n "sleep 95" "$CALLS" | head -1 | cut -d: -f1); u=$(grep -n "up -d --no-build --no-deps" "$CALLS" | head -1 | cut -d: -f1); [ "$s" -lt "$w" ] && [ "$w" -lt "$u" ]'
 
 # 2. Second deploy remembers the first as "previous".
 printf 'ghcr.io/o/r@sha256:old\n' > "$DEP/.deploy/current_image"; run "ghcr.io/o/r@sha256:new2"
@@ -58,6 +62,14 @@ ok "unhealthy: exits non-zero" '[ "$RC" -ne 0 ]'
 ok "unhealthy: restarts the app without another registry pull" '[ "$(grep -c "up -d --no-build --no-deps --pull never api worker executor" "$CALLS")" -eq 2 ]'
 ok "unhealthy: says migrations are not reverted" 'grep -q "migrations are NOT reverted" "$HOST/out.log"'
 ok "unhealthy: current image record is unchanged" '[ "$(cat "$DEP/.deploy/current_image")" = "ghcr.io/o/r@sha256:old" ]'
+ok "first upgrade rollback: stops the new worker missing from the old image" 'grep -q " stop personal-research" "$CALLS" && [ "$(grep -c "up -d --no-build --no-deps --pull never api worker executor personal-research" "$CALLS")" -eq 1 ]'
+
+new_host; printf 'ghcr.io/o/r@sha256:old\n' > "$DEP/.deploy/current_image"
+cp "$DEP/.deploy/current_image" "$DEP/.deploy/personal_research_image"
+FAKE_CURL_RC=22 run "ghcr.io/o/r@sha256:bad"
+ok "later rollback: also restores the previous personal worker" '[ "$RC" -ne 0 ] && [ "$(grep -c "up -d --no-build --no-deps --pull never api worker executor personal-research" "$CALLS")" -eq 2 ]'
+new_host; FAKE_RUNNING='api\nworker\nexecutor\n' run "ghcr.io/o/r@sha256:x"
+ok "personal worker down: deployment fails rather than silently shipping broken refresh" '[ "$RC" -ne 0 ] && grep -q "personal-research is not running" "$HOST/out.log"'
 
 # 4. First deploy ever and unhealthy: nothing to roll back to, says so.
 new_host; FAKE_CURL_RC=22 run "ghcr.io/o/r@sha256:first"

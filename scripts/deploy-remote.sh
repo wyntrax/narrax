@@ -21,7 +21,7 @@ STATE_DIR=".deploy"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${API_PORT:-4000}/health}"
 HEALTH_TRIES="${HEALTH_TRIES:-45}"
 HEALTH_SLEEP="${HEALTH_SLEEP:-2}"
-SERVICES=(api worker executor)
+SERVICES=(api worker executor personal-research)
 
 cd "$DEPLOY_PATH"
 [ -f "$BASE_FILE" ] || die "missing $BASE_FILE: copy docker/docker-compose.prod.example.yml here, read and adapt it, and keep it on the host"
@@ -48,11 +48,27 @@ fi
 export NARRA_IMAGE
 compose=(docker compose --env-file .env -f "$BASE_FILE" -f "$OVERRIDE_FILE")
 PREVIOUS="$(cat "$STATE_DIR/current_image" 2>/dev/null || true)"
+PREVIOUS_PERSONAL="$(cat "$STATE_DIR/personal_research_image" 2>/dev/null || true)"
+
+# A pipeline process can be killed before releasing its 90-second Redis lease.
+# Never start its replacement while that lease may still be alive.
+stop_worker() {
+  "${compose[@]}" stop worker || return 1
+  sleep 95
+}
 
 rollback() {
   if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$NARRA_IMAGE" ]; then
-    log "rolling back api, worker and executor to $PREVIOUS (database migrations are NOT reverted)"
-    NARRA_IMAGE="$PREVIOUS" "${compose[@]}" up -d --no-build --no-deps --pull never "${SERVICES[@]}" || log "rollback failed: inspect the host by hand"
+    log "rolling back to $PREVIOUS (database migrations are NOT reverted)"
+    stop_worker || { log "rollback could not stop worker; inspect the host by hand"; return; }
+    local rollback_services=(api worker executor)
+    if [ "$PREVIOUS_PERSONAL" = "$PREVIOUS" ]; then
+      rollback_services+=(personal-research)
+    else
+      # The first release's predecessor has no personal-research entry point.
+      "${compose[@]}" stop personal-research || true
+    fi
+    NARRA_IMAGE="$PREVIOUS" "${compose[@]}" up -d --no-build --no-deps --pull never "${rollback_services[@]}" || log "rollback failed: inspect the host by hand"
   else
     log "no earlier image is recorded, so the failed containers are left in place for inspection"
   fi
@@ -75,6 +91,7 @@ log "running migrations"
 "${compose[@]}" run --rm --no-deps migrate || die "migrations failed; nothing was replaced"
 
 log "starting ${SERVICES[*]}"
+stop_worker || fail "could not stop the previous worker"
 # Images were pulled above. Do not re-pull on start/rollback, or delete unrelated services on the host.
 "${compose[@]}" up -d --no-build --no-deps --pull never "${SERVICES[@]}" || fail "could not start the services"
 
@@ -95,4 +112,5 @@ done
 
 [ -n "$PREVIOUS" ] && printf '%s\n' "$PREVIOUS" > "$STATE_DIR/previous_image"
 printf '%s\n' "$NARRA_IMAGE" > "$STATE_DIR/current_image"
+printf '%s\n' "$NARRA_IMAGE" > "$STATE_DIR/personal_research_image"
 log "deployed $NARRA_IMAGE"

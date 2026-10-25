@@ -307,12 +307,15 @@ jobs:
       - name: Deploy compose override merges correctly
         run: |
           cp .env.example .env
+          cp docker/docker-compose.prod.example.yml docker/docker-compose.prod.yml
           NARRA_IMAGE=ghcr.io/example/narra@sha256:0000 POSTGRES_PASSWORD=ci \
             docker compose -f docker/docker-compose.prod.example.yml -f docker/docker-compose.deploy.yml config --format json > merged.json
           jq -e '.services.api.image == "ghcr.io/example/narra@sha256:0000" and .services.executor.image == .services.api.image and .services.migrate.image == .services.api.image' merged.json
           jq -e '.services.executor.environment | (.PRIVY_APP_SECRET // "") == "" and (.EXECUTOR_SIGNING_KEY // "") == "" and (.WALLET_PRIVATE_KEY // "") == ""' merged.json
           jq -e '.services.api.environment.DATABASE_URL | startswith("postgresql://narra:")' merged.json
-          rm -f .env merged.json
+          jq -e '.services["personal-research"] | .command == ["npx", "tsx", "apps/api/src/personalResearchWorker.ts"] and .read_only == true and .environment.REDIS_URL == "redis://redis:6379"' merged.json
+          jq -e '.services["personal-research"].image == .services.api.image and .services["personal-research"].environment.DATABASE_URL == .services.worker.environment.DATABASE_URL' merged.json
+          rm -f .env merged.json docker/docker-compose.prod.yml
 
   web-docker:
     name: Standalone frontend image and isolated runtime

@@ -15,6 +15,8 @@ export interface AccountDeps {
   verifier: AuthVerifier;
   db: PrismaClient;
   now?: () => Date;
+  /** Enqueues private research refreshes; the worker rechecks entitlements before evaluating. */
+  requestPersonalResearch?: (userId: string) => Promise<unknown>;
 }
 
 const AUTOMATED = new Set(['SEMI_AUTO', 'AUTO']);

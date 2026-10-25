@@ -24,3 +24,4 @@ export * from './systemConfig';
 export * from './socialTokens';
 export * from './walletResearch';
 export { researchCoverage, renderResearchCoverage } from './researchCoverage';
+export { evaluatePersonalWorkspace, personalResearchLock, type PersonalPermissions } from './personalResearch';

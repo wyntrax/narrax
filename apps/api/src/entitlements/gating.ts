@@ -5,6 +5,11 @@ import { requireFeature } from './access';
 
 /** Only wholly shared surfaces. Mixed routes perform ownership/field checks in their handlers. */
 export const GATED_ROUTES: Record<string, FeatureKey> = {
+  ...Object.fromEntries((['radars', 'theses', 'briefings'] as const).flatMap(path => {
+    const feature: FeatureKey = path === 'radars' ? 'research.personal_radar' : path === 'theses' ? 'research.thesis_tracker' : 'research.personal_briefing';
+    const base = `/v1/personal-research/${path}`;
+    return [[`GET ${base}`, feature], [`POST ${base}/refresh`, feature], ...(path === 'briefings' ? [] : [[`POST ${base}`, feature], [`PUT ${base}/:id`, feature], [`DELETE ${base}/:id`, feature]])];
+  })),
   'GET /v1/smart-money/flows': 'research.smart_money', 'GET /v1/smart-money/emerging': 'research.smart_money',
   'GET /v1/narratives': 'research.narratives', 'GET /v1/narratives/:slug': 'research.narratives',
   'GET /v1/narratives/rotation': 'research.rotation', 'GET /v1/tokens/:mint': 'research.tokens',

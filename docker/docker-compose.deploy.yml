@@ -10,6 +10,14 @@ services:
   api: *image
   worker: *image
 
+  personal-research:
+    <<: *image
+    # Inherit the host's internal DB/Redis addresses and hardening, not laptop defaults.
+    extends:
+      file: docker-compose.prod.yml
+      service: worker
+    command: ["npx", "tsx", "apps/api/src/personalResearchWorker.ts"]
+
   executor:
     <<: *image
     # The executor refuses to start if any signing or Privy secret is present (workers/executor/src/main.ts), but the base

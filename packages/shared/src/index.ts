@@ -13,3 +13,4 @@ export * from './token-image';
 export * from './radar-safety-view';
 export * from './tradeability';
 export * from './latest-evidence';
+export * from './pro-research';

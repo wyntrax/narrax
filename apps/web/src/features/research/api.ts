@@ -9,7 +9,7 @@ export function createResearchApi(getToken:()=>Promise<string|null>,base=process
 /** Own-data writes (mark alert read, settings, chat). Same transport, same schema check on the reply. */
 export function createResearchWriter(getToken:()=>Promise<string|null>,base=process.env.NEXT_PUBLIC_API_URL??'',fetcher:typeof fetch=fetch,getIdentityToken?:()=>Promise<string|null>){
  const request=createTransport(base,getToken,fetcher,getIdentityToken);
- return <T,>(path:string,schema:z.ZodType<T>,method:'POST'|'PUT',body?:unknown,signal?:AbortSignal)=>request(`/v1/${path}`,schema,method,body??{},true,signal);
+  return <T,>(path:string,schema:z.ZodType<T>,method:'POST'|'PUT'|'DELETE',body?:unknown,signal?:AbortSignal)=>request(`/v1/${path}`,schema,method,method==='DELETE'?undefined:body??{},true,signal);
 }
 export function pagePath(resource:string,filters:Record<string,string>={},cursor?:string){
  const query=new URLSearchParams({limit:String(RESEARCH_PAGE_SIZE),...filters});

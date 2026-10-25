@@ -40,7 +40,7 @@
   "enforcement":"Izin fitur selalu diterapkan, termasuk URL langsung, permintaan API dan alat Agen. Aturan usia keanggotaan minimum yang ada dipertahankan; keanggotaan Pro yang memenuhi syarat tetap diperlukan meskipun tingkat diturunkan.",
   "invalid":"Pengaturan fitur tersimpan tidak valid. Tidak ada yang dapat disimpan sebelum operator memperbaikinya.","signedIn":"Pengguna masuk (lama)","age":"Usia minimum keanggotaan Pro yang ada: {hours} jam (dipertahankan)","save":"Simpan akses fitur",
   "tiers":{"EARLY_ACCESS":"Akses Awal","MEMBER":"Member","PRO":"Pro"},
-  "labels":{"narratives":"Narasi","tokens":"Token","overview":"Ringkasan","screener":"Penyaring token","rotation":"Rotasi narasi","opportunities":"Peluang","smart_money":"Smart Money","analysis":"Analisis token","wallet_detail":"Detail dompet","decision_analytics":"Analitik keputusan","advanced_analytics":"Analitik lanjutan / backtest","chat":"Agen"}
+  "labels":{"narratives":"Narasi","tokens":"Token","overview":"Ringkasan","screener":"Penyaring token","rotation":"Rotasi narasi","opportunities":"Peluang","smart_money":"Smart Money","analysis":"Analisis token","wallet_detail":"Detail dompet","decision_analytics":"Analitik keputusan","advanced_analytics":"Analitik lanjutan / backtest","chat":"Agen","personal_radar":"Radar Pribadi","thesis_tracker":"Pelacak Tesis","personal_briefing":"Ringkasan Pribadi"}
  },
   "dataHealth":{
    "lastAnalysed":"Analisis tersimpan · putaran tersimpan terakhir","providerFailures":"Kegagalan penyedia · putaran tersimpan terakhir","runSkipped":"Putaran tersimpan terakhir dilewati: {reason}.",

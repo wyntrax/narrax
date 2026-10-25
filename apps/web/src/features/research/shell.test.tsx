@@ -14,9 +14,9 @@ vi.mock('@/components/auth/context',()=>({useAuth:()=>({logout:vi.fn()})}));
 vi.mock('@/components/toggles',()=>({ThemeToggle:()=>null,LocaleToggle:()=>null}));
 afterEach(()=>{cleanup();state.allowed=false;state.preview=false;state.stale=false;});
 function view(){const child=vi.fn(()=> <p>Restricted child mounted</p>);const Child=child;render(<NextIntlClientProvider locale="en" messages={{workspace:messages,...site}}><ResearchShell theme="dark"><Child/></ResearchShell></NextIntlClientProvider>);return child;}
-it.each(['/app','/app/radar','/app/narratives/example','/app/tokens','/app/tokens/mint','/app/opportunities','/app/smart-money','/app/smart-money/address','/app/analytics','/app/backtests','/app/agent'])('direct URL %s never mounts a denied page even with legacy rollout off',path=>{
+it.each(['/app','/app/radar','/app/narratives/example','/app/tokens','/app/tokens/mint','/app/opportunities','/app/smart-money','/app/smart-money/address','/app/analytics','/app/backtests','/app/agent','/app/personal-radar','/app/theses','/app/briefing'])('direct URL %s never mounts a denied page even with legacy rollout off',path=>{
  state.path=path;const child=view();expect(child).not.toHaveBeenCalled();expect(screen.getByText(messages.locked)).toBeVisible();
- expect(document.querySelectorAll('.research-sidebar a[data-locked="true"]')).toHaveLength(8);
+  expect(document.querySelectorAll('.research-sidebar a[data-locked="true"]')).toHaveLength(11);
  expect(document.querySelector('.research-sidebar a[href="/app/portfolio"]')).not.toHaveAttribute('data-locked');
 });
 it.each(['/app/portfolio','/app/alerts','/app/settings','/app/admin'])('own-account/separately authorized page %s is not tier-blocked',path=>{state.path=path;expect(view()).toHaveBeenCalled();});
