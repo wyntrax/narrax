@@ -65,7 +65,8 @@ describe('telegram Early Radar delivery', () => {
   it('formats a readable research card with the frozen outcome and a chart link', () => {
     const text = formatTelegramAlert(alert(), token);
     expect(text).toContain('NARRAX EARLY RADAR · TRENCHER · STRONG');
-    expect(text).toContain('Score 70.3 · Route NARRATIVE · Match NAME');
+    expect(text).toContain('Marketcat (MC)');
+    expect(text).toContain('Research context\nScore: 70.3\nRoute: NARRATIVE · Match: NAME');
     expect(text).toContain(alert().title);
     expect(text).toContain('Why it surfaced');
     expect(text).toContain('trencher score 70.3 (strong).');
@@ -73,7 +74,29 @@ describe('telegram Early Radar delivery', () => {
     expect(text).toContain(`Mint: ${token.mint}`);
     expect(text).toContain(`https://dexscreener.com/solana/${token.mint}`);
     expect(text).toContain('NARRAX research feed');
-    expect(text).toContain('Research only. No trade was placed');
+    expect(text).toContain('Alert time: 2026-10-20 13:55:00 UTC');
+    expect(text).toContain('Research only. Not a recommendation to buy.\nNo trade was placed');
+  });
+
+  it('preserves safety evidence, links and the disclaimer when a narrative is too long', () => {
+    const text = formatTelegramAlert(alert({body: `${'Evidence paragraph. '.repeat(600)}Safety evidence: UNKNOWN (LP_CONTROL).`}), token);
+    expect(text.length).toBeLessThanOrEqual(4000);
+    expect(text).toContain('…');
+    expect(text).toContain('Safety gate: UNKNOWN\nMissing evidence: LP_CONTROL');
+    expect(text).toContain(`Mint: ${token.mint}`);
+    expect(text).toContain('Alert time: 2026-10-20 13:55:00 UTC');
+    expect(text.endsWith('Research only. Not a recommendation to buy.\nNo trade was placed and no return is promised.\nSmall, unvalidated sample.')).toBe(true);
+  });
+
+  it('keeps zero scores but labels missing or invalid scores and absent safety evidence explicitly', () => {
+    for (const score of [null, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const text = formatTelegramAlert(alert({earlyRadarOutcome: {...alert().earlyRadarOutcome!, score}}), null);
+      expect(text).toContain('Score: unavailable');
+      expect(text).toContain('Safety evidence: unavailable for this alert.');
+      expect(text).not.toContain('Safety gate: PASS');
+      expect(text).not.toContain('Token details');
+    }
+    expect(formatTelegramAlert(alert({earlyRadarOutcome: {...alert().earlyRadarOutcome!, score: 0}}), token)).toContain('Score: 0');
   });
 
   it('separates the frozen safety verdict from the evidence paragraph', () => {

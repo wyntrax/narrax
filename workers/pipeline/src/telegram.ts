@@ -117,7 +117,7 @@ export function telegramCursorKey(chatId: string): string {
   return TELEGRAM_CURSOR_PREFIX + chatId.replace(/[^0-9A-Za-z_-]/g, '_');
 }
 
-const truncate = (text: string, max: number): string => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
+const truncate = (text: string, max: number): string => max <= 0 ? '' : (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
 
 const RESEARCH_ONLY = /\s*Research signal only, not a prediction or a recommendation to buy\.?\s*$/i;
 /** The pipeline appends this suffix to new calls. Parsing it is presentation only; the stored body remains authoritative. */
@@ -150,16 +150,19 @@ export function formatTelegramAlert(alert: TelegramAlertRow, token: TelegramToke
   const o = alert.earlyRadarOutcome;
   const profile = (o?.profile ?? (alert.kind === 'EARLY_RADAR_HOLDER' ? 'holder' : 'trencher')).toUpperCase();
   const tier = o?.tier ? ` · ${o.tier.toUpperCase()}` : '';
-  const meta = [
-    o?.score != null ? `Score ${o.score}` : null,
-    o?.route ? `Route ${o.route}` : null,
-    o?.matchKind ? `Match ${o.matchKind}` : null,
-  ].filter(Boolean).join(' · ');
   const parsed = splitTelegramBody(alert.body);
   const lines = [`NARRAX EARLY RADAR · ${profile}${tier}`];
-  if (meta) lines.push(meta);
+  if (token) lines.push([token.name, token.symbol ? `(${token.symbol})` : null].filter(Boolean).join(' '));
   lines.push('', alert.title);
-  if (parsed.body) lines.push('', 'Why it surfaced', parsed.body);
+  lines.push('', 'Research context');
+  lines.push(o?.score != null && Number.isFinite(o.score) ? `Score: ${o.score}` : 'Score: unavailable');
+  const source = [o?.route ? `Route: ${o.route}` : null, o?.matchKind ? `Match: ${o.matchKind}` : null].filter(Boolean).join(' · ');
+  if (source) lines.push(source);
+  let bodyIndex = -1;
+  if (parsed.body) {
+    lines.push('', 'Why it surfaced', '');
+    bodyIndex = lines.length - 1;
+  }
   if (parsed.safety) {
     const s = parsed.safety;
     lines.push('', `Safety gate: ${s.status}`);
@@ -167,14 +170,17 @@ export function formatTelegramAlert(alert: TelegramAlertRow, token: TelegramToke
     if (s.top10ExLpPct) lines.push(`Top-10 excluding pool/locker accounts: ${s.top10ExLpPct}%`);
     if (s.warnings) lines.push(`Warnings: ${s.warnings}`);
     if (s.shadow) lines.push('Shadow mode: recorded, not enforced.');
-  }
+  } else lines.push('', 'Safety evidence: unavailable for this alert.');
   if (token?.mint) {
-    lines.push('', `Mint: ${token.mint}`);
+    lines.push('', 'Token details', `Mint: ${token.mint}`);
     lines.push(`Chart: https://dexscreener.com/solana/${encodeURIComponent(token.mint)}`);
   }
-  lines.push('', `${alert.createdAt.toISOString()} · NARRAX research feed`);
-  lines.push('Research only. No trade was placed and no return is promised. Small unvalidated sample.');
-  return truncate(lines.join('\n'), TELEGRAM_LIMITS.maxText);
+  lines.push('', `Alert time: ${alert.createdAt.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')}`, 'NARRAX research feed');
+  const footer = 'Research only. Not a recommendation to buy.\nNo trade was placed and no return is promised.\nSmall, unvalidated sample.';
+  const contentLimit = TELEGRAM_LIMITS.maxText - footer.length - 2;
+  // Shorten the narrative first, preserving the frozen safety evidence and the research disclaimer.
+  if (bodyIndex >= 0) lines[bodyIndex] = truncate(parsed.body, Math.max(0, contentLimit - lines.join('\n').length));
+  return `${truncate(lines.join('\n'), contentLimit)}\n\n${footer}`;
 }
 
 /** Telegram Bot API sender. The token is kept in the URL built here and is never put in a log or returned error. */
