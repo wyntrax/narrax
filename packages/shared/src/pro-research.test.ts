@@ -21,6 +21,11 @@ describe('personal research evidence policy', () => {
     expect(evaluatePersonalResearch({ ...rules, minIndependentBuyers: null }, { ...evidence(), buyers: null }, now).status).toBe('MATCH');
     expect(evaluatePersonalResearch(rules, { ...evidence(), buyers: null, liquidity: reading(1) }, now).status).toBe('NO_MATCH');
   });
+  it.each([['risk', -1], ['risk', 101], ['buyers', 3.5], ['buyers', -1], ['liquidity', -1]] as const)('does not qualify out-of-domain %s evidence (%s)', (key, value) => {
+    const result = evaluatePersonalResearch(rules, { ...evidence(), [key]: reading(value) }, now);
+    expect(result.status).toBe('UNKNOWN');
+    expect(result.checks.find(c => c.key === key)).toMatchObject({ status: 'UNKNOWN', value: null });
+  });
   it('rejects empty rules, out-of-range windows, forged fields and invalid mints', () => {
     expect(ResearchRulesSchema.safeParse({ ...rules, minLiquidityUsd: null, minIndependentBuyers: null, minNarrativeVelocity: null, maxRiskScore: null }).success).toBe(false);
     expect(ResearchRulesSchema.safeParse({ ...rules, windowMinutes: 61 }).success).toBe(false);

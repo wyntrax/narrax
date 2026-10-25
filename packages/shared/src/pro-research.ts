@@ -40,7 +40,11 @@ export function evaluatePersonalResearch(rules: ResearchRules, evidence: Persona
   for (const [key, threshold, age, maximum] of definitions) {
     if (threshold === null) continue;
     const reading = evidence[key], at = reading ? Date.parse(reading.at) : NaN;
-    const fresh = !!reading && Number.isFinite(reading.value) && Number.isFinite(at) && at <= +now && +now - at <= age;
+    const validValue = !!reading && Number.isFinite(reading.value)
+      && (key !== 'risk' || (reading.value >= 0 && reading.value <= 100))
+      && (key !== 'buyers' || (Number.isInteger(reading.value) && reading.value >= 0))
+      && (key !== 'liquidity' || reading.value >= 0);
+    const fresh = validValue && Number.isFinite(at) && at <= +now && +now - at <= age;
     const status = !fresh ? 'UNKNOWN' : (maximum ? reading.value <= threshold : reading.value >= threshold) ? 'PASS' : 'FAIL';
     checks.push({ key, status, value: fresh ? reading!.value : null, threshold, at: reading?.at ?? null,
       source: reading?.source ?? null, refs: reading?.refs ?? [], reason: !fresh ? 'MISSING_OR_STALE' : status === 'PASS' ? 'CONDITION_MET' : 'CONDITION_NOT_MET' });
