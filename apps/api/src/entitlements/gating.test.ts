@@ -116,11 +116,12 @@ describe('enforced research boundaries on scratch PostgreSQL', () => {
     expect(r.statusCode).toBe(403); expect(r.json()).toMatchObject({ error: 'FEATURE_LOCKED', requiredTier: FEATURE_TIERS[feature], requestId: expect.any(String) });
     expect((await app.inject({ method, url })).statusCode).toBe(401);
   });
-  it('ordinary token list, screener and approved rotation distinguish EARLY_ACCESS from PRO', async () => {
+  it('existing token list, screener and rotation are Early Access; personal research requires PRO', async () => {
     await settings({ 'early_access.enabled': true, 'early_access.seat_cap': 100 });
     await db.accessGrant.upsert({ where: { userId_source: { userId: user, source: 'EARLY_ACCESS' } }, create: { userId: user, source: 'EARLY_ACCESS', tier: 'EARLY_ACCESS', status: 'ACTIVE' }, update: { status: 'ACTIVE' } });
     expect((await get('/v1/tokens')).statusCode).toBe(200); expect((await get('/v1/narratives/rotation')).statusCode).toBe(200);
-    expect((await get('/v1/tokens?sort=liquidity')).statusCode).toBe(403);
+    expect((await get('/v1/tokens?sort=liquidity')).statusCode).toBe(200);
+    expect((await get('/v1/personal-research/radars')).statusCode).toBe(403);
     await membership(); expect((await get('/v1/smart-money/wallets')).statusCode).toBe(200);
   });
   it.each([true,false])('legacy rollout off cannot bypass permissions (denial logging %s)', async shadow => {

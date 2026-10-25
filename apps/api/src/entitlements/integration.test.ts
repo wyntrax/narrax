@@ -240,7 +240,8 @@ describe('non-escalation: guarded capabilities plus real database snapshots', ()
         const key = String(property);
         if (key === '$executeRaw') return target.$executeRaw.bind(target);
         if (writable.has(key)) return Reflect.get(target, property);
-        if (key === 'user') return { findUnique: (args: { select: Record<string, unknown> }) => { if (!args.select || Object.keys(args.select).some(k => k !== 'isAdmin' && k !== 'id')) return forbidden('User fields'); return target.user.findUnique(args as never); } };
+         // Read only the identity fields required by the shared admin policy; no user writes are exposed.
+         if (key === 'user') return { findUnique: (args: { select: Record<string, unknown> }) => { if (!args.select || Object.keys(args.select).some(k => !['isAdmin', 'id', 'privyUserId', 'email'].includes(k))) return forbidden('User fields'); return target.user.findUnique(args as never); } };
         if (key === 'systemSetting') return new Proxy(target.systemSetting, { get(delegate, method) {
           if (method === 'findMany' || method === 'findUnique') return Reflect.get(delegate, method).bind(delegate);
           if (method === 'upsert') return (args: { where: { key: string } }) => { if (!settingsKeys.includes(args.where.key)) return forbidden('setting key'); return delegate.upsert(args as never); };

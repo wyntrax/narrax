@@ -6,9 +6,10 @@ export const RESEARCH_TIERS = ['EARLY_ACCESS', 'MEMBER', 'PRO'] as const;
 export const activeTier = (tier: AccessTier): AccessTier => tier === 'ELITE' ? 'PRO' : tier;
 export const FEATURE_TIERS = {
   'research.narratives': 'EARLY_ACCESS', 'research.tokens': 'EARLY_ACCESS', 'research.overview': 'EARLY_ACCESS',
-  'research.screener': 'PRO', 'research.rotation': 'EARLY_ACCESS', 'research.opportunities': 'PRO', 'research.smart_money': 'PRO',
-  'research.analysis': 'PRO', 'research.wallet_detail': 'PRO', 'research.decision_analytics': 'PRO',
-  'research.advanced_analytics': 'PRO', 'research.chat': 'PRO',
+  'research.screener': 'EARLY_ACCESS', 'research.rotation': 'EARLY_ACCESS', 'research.opportunities': 'EARLY_ACCESS', 'research.smart_money': 'EARLY_ACCESS',
+  'research.analysis': 'EARLY_ACCESS', 'research.wallet_detail': 'EARLY_ACCESS', 'research.decision_analytics': 'EARLY_ACCESS',
+  'research.advanced_analytics': 'EARLY_ACCESS', 'research.chat': 'EARLY_ACCESS',
+  'research.personal_radar': 'PRO', 'research.thesis_tracker': 'PRO', 'research.personal_briefing': 'PRO',
 } as const satisfies Record<string, AccessTier>;
 export type FeatureKey = keyof typeof FEATURE_TIERS;
 export const RESEARCH_PAGE_LIMITS: Record<AccessTier, number> = { NONE: 0, EARLY_ACCESS: 20, MEMBER: 40, PRO: 70, ELITE: 70 };

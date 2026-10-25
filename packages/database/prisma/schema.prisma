@@ -179,6 +179,58 @@ model User {
   walletLinkChallenges WalletLinkChallenge[]
   accessGrants   AccessGrant[]
   manualSwaps    ManualSwap[]
+  researchMonitors ResearchMonitor[]
+  personalBriefs PersonalBrief[]
+}
+
+/// Private PRO research definitions. Updates reset the evaluation cursor, not the history.
+model ResearchMonitor {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind String
+  name String
+  thesis String
+  mint String?
+  narrativeSlug String?
+  rules Json
+  active Boolean @default(true)
+  revision Int @default(1)
+  lastEvaluatedAt DateTime?
+  lastRun Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  observations ResearchObservation[]
+
+  @@index([userId, kind, createdAt])
+  @@index([active, lastEvaluatedAt])
+}
+
+model ResearchObservation {
+  id String @id @default(cuid())
+  monitorId String
+  monitor ResearchMonitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  mint String
+  revision Int
+  status String
+  evaluation Json
+  at DateTime
+  bucket String
+  alerted Boolean @default(false)
+
+  @@unique([monitorId, mint, revision, bucket])
+  @@index([monitorId, at])
+}
+
+model PersonalBrief {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  day String
+  content Json
+  generatedAt DateTime
+
+  @@unique([userId, day])
 }
 
 /// User-signed mainnet swaps. Separate from automated orders and the paper PnL ledger.

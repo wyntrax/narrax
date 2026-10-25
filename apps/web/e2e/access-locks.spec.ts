@@ -27,16 +27,17 @@ for(const width of [1440,390])for(const theme of ['dark','light'])test(`NONE fea
    const fg=luminance(style.color),bg=luminance(style.backgroundColor);return (Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05);
   });expect(contrast).toBeGreaterThanOrEqual(4.5);
   if(width===390)expect(await page.locator('.intelligence-bar').evaluate(node=>Array.from(node.querySelectorAll('span:not(.snapshot-label)')).every(item=>{const box=item.getBoundingClientRect();return box.left>=0&&box.right<=innerWidth;}))).toBe(true);
- await expect(page.locator('.research-sidebar a[data-locked="true"]')).toHaveCount(8);
+ await expect(page.locator('.research-sidebar a[data-locked="true"]')).toHaveCount(11);
+ for(const path of ['/app/personal-radar','/app/theses','/app/briefing'])await expect(page.locator(`.research-sidebar a[href="/en${path}"],.research-sidebar a[href="${path}"]`)).toHaveAttribute('data-locked','true');
  for(const path of ['/app/portfolio','/app/alerts','/app/settings'])await expect(page.locator(`.research-sidebar a[href="/en${path}"],.research-sidebar a[href="${path}"]`)).not.toHaveAttribute('data-locked');
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
   await page.screenshot({path:`test-results/access-preview-${width}-${theme}.png`,fullPage:true});
- if(width===390){await page.getByRole('button',{name:'Menu',exact:true}).click();await expect(page.getByRole('dialog').locator('[data-locked="true"]')).toHaveCount(8);await page.getByRole('dialog').getByRole('link',{name:'Tokens · Research access required',exact:true}).click();}
+ if(width===390){await page.getByRole('button',{name:'Menu',exact:true}).click();await expect(page.getByRole('dialog').locator('[data-locked="true"]')).toHaveCount(11);await page.getByRole('dialog').getByRole('link',{name:'Tokens · Research access required',exact:true}).click();}
  else {await page.getByRole('button',{name:'Collapse sidebar'}).click();await expect(page.locator('.research-sidebar .nav-feature-lock').first()).toBeVisible();await page.locator('.research-sidebar a[data-locked="true"]').filter({hasText:'Tokens'}).click();}
  // Ordinary clicks and address-bar manipulation land on the same lock, never mounting research content.
  await expect(page.locator('main').getByRole('heading',{name:'Research access required'})).toBeVisible();
- for(const path of ['/app/radar','/app/narratives/robotics','/app/tokens/mint','/app/opportunities','/app/smart-money','/app/smart-money/address','/app/analytics','/app/backtests','/app/agent'])await enter(path);
+ for(const path of ['/app/radar','/app/narratives/robotics','/app/tokens/mint','/app/opportunities','/app/smart-money','/app/smart-money/address','/app/analytics','/app/backtests','/app/agent','/app/personal-radar','/app/theses','/app/briefing'])await enter(path);
  expect(requests.filter(p=>!['/v1/public-config','/v1/early-access/status','/v1/me/entitlements','/v1/me','/v1/market-preview','/v1/alerts/unread-count'].includes(p))).toEqual([]);
  await expect(page.getByLabel('Your question')).toHaveCount(0);
 });

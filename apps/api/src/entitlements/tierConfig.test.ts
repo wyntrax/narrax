@@ -56,12 +56,12 @@ describe('public tier requirements', () => {
       expect((await app.inject('/v1/access/requirements')).json().tokenImageUrl).toBeNull();
     }finally{await app.close();await db.systemSetting.deleteMany({where:{key}});await db.token.delete({where:{id:token.id}});}
   });
-  it('is unauthenticated and returns the owner defaults (500K / 1M / 10M $WYNTRAX) when nothing is saved', async () => {
+  it('is unauthenticated and returns the owner defaults and personal PRO features when nothing is saved', async () => {
     const app = await make();
     try {
       const r = await app.inject('/v1/access/requirements');
       expect(r.statusCode).toBe(200);
-      expect(r.json()).toMatchObject({ tokenSymbol: '$WYNTRAX', tokenMint: null, tiers: DEFAULT_TIER_REQUIREMENTS, earlyAccess: { closesAt: null, accessDays: null }, featureTiers: { 'research.chat': 'PRO' } });
+      expect(r.json()).toMatchObject({ tokenSymbol: '$WYNTRAX', tokenMint: null, tiers: DEFAULT_TIER_REQUIREMENTS, earlyAccess: { closesAt: null, accessDays: null }, featureTiers: { 'research.chat': 'EARLY_ACCESS', 'research.personal_radar': 'PRO', 'research.thesis_tracker': 'PRO', 'research.personal_briefing': 'PRO' } });
       expect(r.json().tiers).not.toHaveProperty('ELITE');
       expect(verifier.verify).not.toHaveBeenCalled();
     } finally { await app.close(); }

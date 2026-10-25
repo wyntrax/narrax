@@ -4,6 +4,7 @@ import {useMutation,useQueryClient} from '@tanstack/react-query';
 import {useTranslations} from 'next-intl';
 import {FEATURE_TIERS,FeatureOverrides,RESEARCH_TIERS,activeTier,type AccessTier} from '@narra/shared';
 import type {AdminApi} from './api';
+import {ApiError} from '@/lib/api';
 
 /** Same overrides consumed by HTTP gates and Agent research tools. Preserve existing age restrictions. */
 export function FeaturesCard({api,items}:{api:AdminApi;items:{key:string;value?:unknown}[]}){
@@ -31,7 +32,7 @@ export function FeaturesCard({api,items}:{api:AdminApi;items:{key:string;value?:
    <div className="admin-field"><label htmlFor="feature-reason">{t('adminReason')}</label><input id="feature-reason" maxLength={300} value={reason} onChange={e=>{save.reset();setReason(e.target.value);}}/></div>
    <div className="admin-actions"><button className="research-control admin-primary" disabled={!reason.trim()||save.isPending}>{t('featureAccess.save')}</button></div>
    {save.isSuccess&&<p className="admin-ok" role="status">{t('adminSaved')}</p>}
-   {save.isError&&<p className="admin-bad" role="alert">{t('adminErrUnknown')}</p>}
+    {save.isError&&<p className="admin-bad" role="alert">{t(save.error instanceof ApiError?(save.error.status===403?'adminErrForbidden':save.error.status===401?'adminErrSession':save.error.status===429?'adminErrRate':save.error.code==='INVALID_INPUT'?'adminErrInvalid':'adminErrUnknown'):'adminErrUnknown')}</p>}
   </form>}
  </section>;
 }

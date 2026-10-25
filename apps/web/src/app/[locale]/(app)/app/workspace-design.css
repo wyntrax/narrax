@@ -59,6 +59,14 @@
 .research-error-card .access-card-actions{margin-top:24px}
 .workspace-entry button.access-card-secondary{background:none;border:0;padding:0;cursor:pointer;font:inherit}
 
+/* A section, gate or access card already provides the frame. An error inside one must not
+   draw a second card with its own padding and margin, which leaves a visible empty gap. */
+.workspace-entry :is(.research-section,.paper-trading,.trade-panel,.gate-card,.research-access-card)>.research-error-card{padding:0;margin:0;border:0;border-radius:0;background:none;max-width:none}
+.workspace-entry .research-error-card{padding:clamp(22px,3vw,30px)}
+.workspace-entry .research-error-card .access-card-top{margin-bottom:20px}
+.workspace-entry .research-error-card .error-card-code{margin-top:18px}
+.workspace-entry .research-error-card .access-card-actions{margin-top:20px}
+
 /* Native selects share one chevron and one set of states. The locale switcher keeps its own compact style. */
 .workspace-entry select:not(.locale-control){appearance:none;-webkit-appearance:none;padding-right:40px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.6 6 6.4l5-4.8' fill='none' stroke='%238f8f99' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;background-size:11px 8px;transition:border-color .2s,box-shadow .2s,background-color .2s}
 .workspace-entry select:not(.locale-control):hover:not(:disabled){border-color:color-mix(in srgb,var(--tx) 45%,transparent)}

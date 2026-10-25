@@ -1,6 +1,6 @@
 import { buildApp } from './app';
 import { createPrisma } from '@narra/database';
-import { createQueues, createRedis } from '@narra/queue';
+import { createQueues, createRedis, createPersonalResearchQueue } from '@narra/queue';
 import { createEventStream } from '@narra/realtime';
 import { SolanaRpc,JupiterClient } from '@narra/solana';
 import { makeWalletEventStore } from '@narra/worker-pipeline';
@@ -19,6 +19,7 @@ const connection = createRedis();
 // The realtime reader blocks its connection (XREAD BLOCK), so it gets one of its own.
 const streamReaderConnection = createRedis();
 const queues = createQueues(connection);
+const personalResearch = createPersonalResearchQueue(connection);
 const db = createPrisma();
 const runtime = createRuntimeSettings(db);
 const store = makeWalletEventStore(db);
@@ -43,7 +44,7 @@ async function main() {
     paperQuotes:{getQuote:request=>paperQuoteClient.getQuote(request)},
     requestWalletSync: syncConfigured ? () => queues.requestWalletSync() : undefined,
     enqueueExecution: (job) => queues.enqueueExecution(job),
-    account: { db, verifier: createRuntimePrivyVerifier(runtime) },
+    account: { db, verifier: createRuntimePrivyVerifier(runtime), requestPersonalResearch: userId => personalResearch.request(userId) },
     webhooks: {
       secret,
       enqueue: (e) => queues.enqueueWalletEvent(e),
@@ -71,7 +72,7 @@ async function main() {
 
   const shutdown = async () => {
     await app.close(); // closes WebSocket clients and stops the stream reader first
-    await queues.close(); connection.disconnect(); streamReaderConnection.disconnect(); await db.$disconnect();
+    await queues.close(); await personalResearch.queue.close(); connection.disconnect(); streamReaderConnection.disconnect(); await db.$disconnect();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

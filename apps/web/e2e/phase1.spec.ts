@@ -32,6 +32,14 @@ async function mockApi(page:Page,options:{status?:PublicStatus;failure?:boolean;
 async function signIn(page:Page){await page.getByRole('button',{name:'Continue',exact:true}).click();await expect(page.getByRole('heading',{name:'Make it your wallet.'})).toBeVisible();}
 async function connect(page:Page){await page.getByRole('button',{name:'Connect external wallet'}).click();await page.getByRole('button',{name:/Phantom \(test fixture\)/}).click();}
 async function shot(page:Page,name:string){await page.screenshot({path:`test-results/screenshots/${name}.png`,fullPage:true});}
+test('early access exposes the Wyntrax Telegram group',async({page})=>{
+ await mockApi(page);await page.goto('/early-access');
+ const link=page.getByRole('link',{name:'Join the Telegram group'});
+ await expect(link).toBeVisible();
+ await expect(link).toHaveAttribute('href','https://t.me/wyntraxyz');
+ await expect(link).toHaveAttribute('target','_blank');
+ await expect(link).toHaveAttribute('rel',/noopener/);
+});
 test('signed-out → sign-in → external wallet → exact-message proof → join → leave → unlink',async({page})=>{
  const api=await mockApi(page);await page.goto('/early-access');await expect(page.getByRole('heading',{name:'Your research starts here.'})).toBeVisible();await shot(page,'signed-out');await signIn(page);await shot(page,'no-wallet');await connect(page);await expect(page.getByRole('heading',{name:'Read before you sign.'})).toBeVisible();await shot(page,'challenge');await page.getByRole('button',{name:'Sign this message'}).click();await expect(page.getByRole('heading',{name:'Wallet verified. You’re ready.'})).toBeVisible();await shot(page,'linked');await page.getByRole('button',{name:'Join early access',exact:true}).click();await expect(page.getByRole('heading',{name:'You’re in.'})).toBeVisible();await shot(page,'active');expect(api.verifyCount).toBe(1);expect(api.writes.filter(x=>x.endsWith('/join'))).toHaveLength(1);
  await page.getByRole('button',{name:'Leave early access',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();await page.getByRole('button',{name:'Confirm',exact:true}).click();await expect(page.getByRole('heading',{name:'Wallet verified. You’re ready.'})).toBeVisible();await page.getByRole('button',{name:'Unlink',exact:true}).click();await page.getByRole('button',{name:'Confirm',exact:true}).click();await expect(page.getByRole('heading',{name:'Make it your wallet.'})).toBeVisible();

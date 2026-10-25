@@ -6,16 +6,19 @@ import messages from '../../../messages/research/en.json';
 import {FEATURE_TIERS} from '@narra/shared';
 import {FeaturesCard} from './features-card';
 import type {AdminApi} from './api';
+import {ApiError} from '@/lib/api';
 afterEach(cleanup);
-function view(value?:unknown){
+function view(value?:unknown,failure?:ApiError){
  const save=vi.fn().mockResolvedValue({ok:true});
+ if(failure)save.mockRejectedValue(failure);
  render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}><QueryClientProvider client={new QueryClient()}><FeaturesCard api={{save} as unknown as AdminApi} items={value===undefined?[]:[{key:'entitlements.features',value}]}/></QueryClientProvider></NextIntlClientProvider>);
  return save;
 }
 it('offers all features with Early, Member and Pro, without Elite',()=>{
  view();
  expect(screen.getAllByRole('combobox')).toHaveLength(Object.keys(FEATURE_TIERS).length);
- expect(screen.getByLabelText('Agent')).toHaveValue('PRO');
+  expect(screen.getByLabelText('Agent')).toHaveValue('EARLY_ACCESS');
+  expect(screen.getByLabelText('Personal Radar')).toHaveValue('PRO');
  expect(screen.queryByRole('option',{name:'Elite'})).toBeNull();
  expect(screen.getByRole('button',{name:messages.featureAccess.save})).toBeDisabled();
 });
@@ -34,4 +37,16 @@ it('refuses to overwrite malformed stored settings',()=>{
  const save=view({'research.chat':{min_entitlement_age_hours:-1}});
  expect(screen.getByRole('alert')).toHaveTextContent(messages.featureAccess.invalid);
  expect(screen.queryByRole('button')).toBeNull();expect(save).not.toHaveBeenCalled();
+});
+it.each([
+ [new ApiError('UNKNOWN',403),messages.adminErrForbidden],
+ [new ApiError('UNAUTHORIZED',401),messages.adminErrSession],
+ [new ApiError('INVALID_INPUT',400),messages.adminErrInvalid],
+ [new ApiError('RATE_LIMITED',429),messages.adminErrRate],
+] as const)('explains a failed feature save (%s)',async(error,message)=>{
+ view(undefined,error);
+ fireEvent.change(screen.getByLabelText(messages.adminReason),{target:{value:'Feature access update'}});
+ fireEvent.click(screen.getByRole('button',{name:messages.featureAccess.save}));
+ expect(await screen.findByRole('alert')).toHaveTextContent(message);
+ expect(screen.queryByText(messages.adminSaved)).toBeNull();
 });

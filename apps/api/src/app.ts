@@ -32,6 +32,7 @@ import {registerPaperTradeRoutes} from './paper-trades';
 import type {JupiterClient} from '@narra/solana';
 import {registerManualTradeRoutes} from './manual-trades';
 import type {ManualSwapEngine} from './manual-swap-engine';
+import { registerPersonalResearchRoutes } from './personalResearch';
 
 const EvaluateBody = z.object({
   /** Raw model output. Untrusted until it passes the schema. */
@@ -71,6 +72,7 @@ export async function buildApp(opts: { manualSwaps?:ManualSwapEngine; paperQuote
   await registerWyntraxWebhook(app, opts.wyntrax);
   if (opts.account) {
     registerFeatureGates(app, opts.account.db, opts.account.now);
+    registerPersonalResearchRoutes(app, opts.account);
     registerWalletResearchRoutes(app, opts.account);
     registerEntitlementRoutes(app, opts.account);
     registerLinkedWalletRoutes(app, opts.account);

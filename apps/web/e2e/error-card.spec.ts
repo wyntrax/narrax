@@ -1,10 +1,33 @@
 import {test,expect} from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import {active} from '../src/test/fixtures';
 
 // Development-only auth fixture on 4010 with fully mocked HTTP. No application API, DB or provider calls.
 // The entitlements read is forced to fail so the shared ResourceError card is what a real access failure renders.
 const origin='http://localhost:4010';
 const allowed=new Set(['/v1/public-config','/v1/early-access/status','/v1/me/entitlements']);
+test('errors reuse the existing portfolio card frame',async({page})=>{
+ test.setTimeout(120000);
+ const access={...active,effectiveTier:'PRO',features:Object.fromEntries(Object.entries(active.features).map(([key,value])=>[key,{...value,allowed:true}]))};
+ await page.route('http://localhost:4000/**',async route=>{
+  const request=route.request(),url=new URL(request.url()),headers={'access-control-allow-origin':origin,'access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,OPTIONS'};
+  if(request.method()==='OPTIONS')return route.fulfill({status:204,headers});
+  if(url.pathname==='/v1/public-config')return route.fulfill({headers,json:{privyAppId:'fixture-app'}});
+  if(url.pathname==='/v1/early-access/status')return route.fulfill({headers,json:{enabled:true,seatsLeft:12,inviteRequired:false}});
+  if(url.pathname==='/v1/me/entitlements')return route.fulfill({headers,json:access});
+  return route.fulfill({status:503,headers,json:{error:'ENTITLEMENTS_UNAVAILABLE'}});
+ });
+ await page.goto(`${origin}/en/app/portfolio`);
+ await page.getByRole('button',{name:'Continue',exact:true}).click();
+ for(const selector of ['.paper-trading > .research-error-card','.research-section > .research-error-card']){
+  const card=page.locator(selector).first();
+  await expect(card).toBeVisible();
+  await expect(card).toHaveCSS('padding','0px');
+  await expect(card).toHaveCSS('margin','0px');
+  await expect(card).toHaveCSS('border-top-width','0px');
+  await expect(card).toHaveCSS('background-image','none');
+ }
+});
 for(const width of [1440,390])for(const theme of ['dark','light'])test(`request error card ${width}px ${theme}`,async({page})=>{
  test.setTimeout(120000);
  await page.setViewportSize({width,height:1000});
