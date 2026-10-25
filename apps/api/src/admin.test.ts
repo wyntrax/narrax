@@ -109,6 +109,28 @@ describe.skipIf(!up)('admin and analysis routes (needs Postgres)', () => {
     });
   });
 
+  it('lets an environment admin save audited feature access without a stored admin flag', async () => {
+    const key = 'entitlements.features', reason = `environment-admin-feature-save-${tag}`;
+    const before = await db.systemSetting.findUnique({ where: { key } });
+    try {
+      await withAdminEnv({ privyUserId: user }, async () => {
+        expect((await db.user.findUniqueOrThrow({ where: { id: userId } })).isAdmin).toBe(false);
+        expect((await call('GET', '/v1/admin/entitlements/settings', user)).status).toBe(200);
+        const settings = { [key]: { 'research.chat': { requiredTier: 'EARLY_ACCESS', min_entitlement_age_hours: 24 } } };
+        expect(await call('PUT', '/v1/admin/entitlements/settings', user, { settings, reason })).toMatchObject({ status: 200, body: { ok: true } });
+        expect((await db.systemSetting.findUniqueOrThrow({ where: { key } })).value).toEqual(settings[key]);
+        expect(await db.auditLog.findFirst({ where: { userId, action: 'entitlements.setting_changed', detail: { path: ['reason'], equals: reason } } })).not.toBeNull();
+        // Environment authorization must not persist an admin promotion or permit old database admins.
+        expect((await db.user.findUniqueOrThrow({ where: { id: userId } })).isAdmin).toBe(false);
+        expect((await call('PUT', '/v1/admin/entitlements/settings', admin, { settings: { [key]: {} }, reason })).status).toBe(403);
+        expect((await db.systemSetting.findUniqueOrThrow({ where: { key } })).value).toEqual(settings[key]);
+      });
+    } finally {
+      if (before) await db.systemSetting.update({ where: { key }, data: { value: before.value as import('@narra/database').Prisma.InputJsonValue } });
+      else await db.systemSetting.deleteMany({ where: { key } });
+    }
+  });
+
   it('explains a decision with the bull, bear and risk arguments, and shows each user only their own view', async () => {
     const token = await db.token.create({ data: { mint: `${tag}tok`.padEnd(40, '1'), symbol: 'X', name: 'X' } });
     const opp = await db.opportunity.create({ data: { tokenId: token.id, score: 88, narrativeScore: 1, smartMoneyScore: 1, liquidityScore: 1, momentumScore: 1, ogScore: 1, riskScore: 1 } });
