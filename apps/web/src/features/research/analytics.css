@@ -1,0 +1,8 @@
+/* Keep missing-price explanations readable inside the scrollable desktop table
+   and give them the full card width on mobile. */
+@media (min-width:901px){
+ .analytics-outcomes td:last-child{min-width:220px;}
+}
+@media (max-width:900px){
+ .analytics-outcomes td:last-child{grid-column:1 / -1;}
+}

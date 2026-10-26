@@ -186,6 +186,23 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     expect((await get('/v1/tokens?q=')).status).toBe(400);
   });
 
+  it('returns provenance-backed holder detail that passes the web contract for fresh and stale counts', async () => {
+    const { TokenSchema } = await import('../../web/src/features/research/contracts');
+    const token = await db.token.findUniqueOrThrow({ where: { mint: M('ROBOT') } });
+    const key = `research.holders.${token.id}`;
+    try {
+      for (const age of [0, 2 * 60 * 60 * 1000]) {
+        const retrievedAt = new Date().toISOString(), sourceAt = new Date(Date.now() - age).toISOString();
+        await db.systemSetting.upsert({ where: { key }, create: { key, value: { mint: token.mint, source: 'geckoterminal', sourceAt, retrievedAt, holders: 123, top10Pct: null, devHoldingPct: null } }, update: { value: { mint: token.mint, source: 'geckoterminal', sourceAt, retrievedAt, holders: 123, top10Pct: null, devHoldingPct: null } } });
+        const response = await get(`/v1/tokens/${token.mint}`);
+        expect(response.status).toBe(200);
+        expect(response.body.latestEvidence.holders.state).toBe(age ? 'STALE' : 'FRESH');
+        expect(response.body.holders).toEqual({ holders: 123, top10Pct: null, devHoldingPct: null, at: sourceAt });
+        expect(TokenSchema.parse(response.body).holders?.smartWalletHolders).toBeUndefined();
+      }
+    } finally { await db.systemSetting.deleteMany({ where: { key } }); }
+  });
+
   it('returns only proven price history and validates its time window', async () => {
     const t = await db.token.findUniqueOrThrow({ where: { mint: M('ROBOT') }, include: { metrics: true } });
     const metric = t.metrics[0]!;

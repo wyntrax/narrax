@@ -66,7 +66,7 @@ export const TokenSchema=TokenRef.extend({
  observation:MarketObservation.nullish(),
  blacklisted:z.boolean(),createdOnChainAt:date.nullable(),
  metrics:z.object({priceUsd:nullable,marketCapUsd:nullable,liquidityUsd:nullable,volume24hUsd:nullable,at:date}).nullable(),
- holders:z.object({holders:number,top10Pct:number,devHoldingPct:nullable,smartWalletHolders:number,at:date}).nullable(),
+  holders:z.object({holders:number,top10Pct:nullable,devHoldingPct:nullable,smartWalletHolders:nullable.optional(),at:date}).nullable(),
  risk:z.object({riskScore:number,flags:z.array(text),at:date}).nullable(),
  consensus:z.object({score:number,walletCount:number,independentEntities:number,leaderCount:number,netFlowSol:nullable,timingConcentration:number}).nullable(),
  narratives:z.array(NarrativeRef.extend({relation:text,ogScore:number}))
@@ -106,7 +106,7 @@ export type Described=z.infer<typeof DescribedSchema>;
 const Bucket=z.object({label:text,described:DescribedSchema});
 export const SummarySchema=z.object({
  range:z.object({days:number}),costPct:number,
- decisions:z.object({read:number,independent:number,pending:number,final:number,unknown:number,truncated:z.boolean()}),
+ decisions:z.object({total:number,awaitingMeasurement:number,read:number,independent:number,pending:number,final:number,known:number,unknown:number,unknownRate:nullable,truncated:z.boolean()}),
  labels:z.object({WIN:number,LOSS:number,FLAT:number}),returns:DescribedSchema,medianLeadTimeSeconds:nullable,
  byConfidence:z.array(Bucket),caveats:z.array(text)
 });
