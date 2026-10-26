@@ -47,6 +47,9 @@ export interface EffectResult { ok: boolean; reasons: Reason[]; summary: EffectS
 /** SPL token account layout: mint (32), owner (32), amount (u64 LE at offset 64). Returns null when it does not look like one. */
 export function tokenAmountOf(acct: RawAccount | null): bigint | null {
   if (!acct) return 0n; // the account does not exist, which means it holds nothing
+  // Simulation can return a closed account as an empty zero-lamport object instead of null.
+  // Require the literal empty encoding: malformed/nonempty data must not be normalized away.
+  if (acct.lamports === 0 && acct.data === '') return 0n;
   if (acct.owner !== TOKEN_PROGRAM) return null;
   const bytes = Buffer.from(acct.data, 'base64');
   if (bytes.length < 72) return null;

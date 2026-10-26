@@ -6,6 +6,40 @@ const OWNER = 'Owner'.padEnd(40, '1');
 const tokenAcct = (amount: string) => ({ account: { data: { parsed: { info: { tokenAmount: { amount } } } } } });
 
 describe('SolanaRpc', () => {
+  it('exposes the simulation context slot as optional evidence', async () => {
+    const rpc = new SolanaRpc({ url: 'http://test', fetch: reply({ context: { slot: 42 }, value: { err: null, accounts: [null] } }) });
+    expect((await rpc.simulateTransaction('unsigned', ['a'])).slot).toBe(42);
+  });
+  it('preserves an empty closed post-account object and unwraps the base64 tuple without reinterpreting it', async () => {
+    const account = { lamports: 0, owner: '11111111111111111111111111111111', data: ['', 'base64'] };
+    const rpc = new SolanaRpc({ url: 'http://test', fetch: reply({ value: { err: null, unitsConsumed: 1, accounts: [account, null], logs: [] } }) });
+    expect((await rpc.simulateTransaction('unsigned', ['closed', 'missing'])).accounts).toEqual([{ lamports: 0, owner: account.owner, data: '' }, null]);
+    const invalid = new SolanaRpc({ url: 'http://test', fetch: reply({ value: { err: null, accounts: [{ ...account, data: '' }] } }) });
+    await expect(invalid.simulateTransaction('unsigned', ['closed'])).rejects.toThrow(RpcError);
+  });
+  it('preserves the old account read and exposes context only through the additive method', async () => {
+    const requests: string[] = [];
+    const fetcher = (async (_url: unknown, init: RequestInit) => {
+      requests.push(init.body as string);
+      return new Response(JSON.stringify({ result: { context: { slot: 456 }, value: [{ lamports: 123, owner: OWNER, data: ['YWJj', 'base64'] }, null] } }));
+    }) as typeof fetch;
+    const rpc = new SolanaRpc({ url: 'http://test', fetch: fetcher });
+    const accounts = [{ lamports: 123, owner: OWNER, data: 'YWJj' }, null];
+    expect(await rpc.getAccounts(['a', 'b'])).toEqual(accounts);
+    expect(await rpc.getAccountsWithContext(['a', 'b'])).toEqual({ slot: 456, accounts });
+    expect(requests).toEqual([1, 2].map(id => JSON.stringify({ jsonrpc: '2.0', id, method: 'getMultipleAccounts', params: [['a', 'b'], { encoding: 'base64', commitment: 'confirmed' }] })));
+    // Old method still accepts the response shape without context.
+    expect(await new SolanaRpc({ url: 'http://test', fetch: reply({ value: [null] }) }).getAccounts(['a'])).toEqual([null]);
+  });
+  it('fails closed on wrong counts and invalid context without changing the address limits', async () => {
+    const rpc = new SolanaRpc({ url: 'http://test', fetch: reply({ context: { slot: 456 }, value: [] }) });
+    for (const method of ['getAccounts', 'getAccountsWithContext'] as const) {
+      await expect(rpc[method](['a'])).rejects.toThrow(RpcError);
+      await expect(rpc[method]([])).rejects.toThrow(RpcError);
+      await expect(rpc[method](Array(101).fill('a'))).rejects.toThrow(RpcError);
+    }
+    await expect(new SolanaRpc({ url: 'http://test', fetch: reply({ value: [null] }) }).getAccountsWithContext(['a'])).rejects.toThrow(RpcError);
+  });
   it('reads a balance in lamports', async () => {
     let body: { method?: string; params?: unknown[] } = {};
     const f = (async (_u: string, init: RequestInit) => { body = JSON.parse(init.body as string); return new Response(JSON.stringify({ result: { value: 2_500_000_000 } })); }) as unknown as typeof fetch;
