@@ -11,6 +11,8 @@ export const GATED_ROUTES: Record<string, FeatureKey> = {
     return [[`GET ${base}`, feature], [`POST ${base}/refresh`, feature], ...(path === 'briefings' ? [] : [[`POST ${base}`, feature], [`PUT ${base}/:id`, feature], [`DELETE ${base}/:id`, feature]])];
   })),
   'GET /v1/smart-money/flows': 'research.smart_money', 'GET /v1/smart-money/emerging': 'research.smart_money',
+  'GET /v1/smart-money/investigations/:mint': 'research.smart_money_investigation',
+  'POST /v1/smart-money/investigations/:mint/discover': 'research.smart_money_investigation',
   'GET /v1/narratives': 'research.narratives', 'GET /v1/narratives/:slug': 'research.narratives',
   'GET /v1/narratives/rotation': 'research.rotation', 'GET /v1/tokens/:mint': 'research.tokens',
   'GET /v1/intelligence-bar': 'research.overview', 'GET /v1/smart-money/wallets': 'research.smart_money',

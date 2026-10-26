@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {InvestigationDiscovery} from '@narra/shared';
 const date=z.string().datetime({offset:true}),n=z.number().finite(),text=z.string();
 export const QualificationSchema=z.object({status:z.enum(['PROVISIONAL','QUALIFIED','REJECTED']),eligible:z.boolean(),reasons:z.array(text),rulesVersion:n,sample:z.object({closedTrades:n,closedTokens:n,observedDays:n,pnlSol:n.nullable(),medianRoi:n.nullable(),lastTradeAt:date.nullable(),checkedAt:date}).nullable().optional()});
 export type Qualification=z.infer<typeof QualificationSchema>;
@@ -6,4 +7,4 @@ export const FlowPageSchema=z.object({asOf:date,nextCursor:text.nullable(),items
 export const EmergingSchema=z.object({snapshot:z.object({checkedAt:date,total:n,capped:z.boolean(),stale:z.boolean(),items:z.array(z.object({address:text,scannedTokens:n}))}).nullable()});
 export const ResearchWalletsSchema=z.object({nextCursor:text.nullable(),items:z.array(z.object({address:text,label:text.nullable(),source:text,active:z.boolean(),researchReview:text,researchReviewReason:text.nullable(),qualification:QualificationSchema}))});
 export const CandidatesSchema=z.object({nextCursor:text.nullable().optional(),items:z.array(z.object({address:text,score:n,winnerTokens:n,status:text,createdAt:date,evidence:z.object({checkedAt:date.optional(),hitRate:n.optional(),avgRank:n.optional(),scannedTokens:n.optional(),winnerMints:z.array(text).optional()}).nullable()}))});
-export const ResearchHealthSchema=z.object({checkedAt:date,enabled:z.boolean(),discovery:z.object({checkedAt:date,completeScans:n,noPrice:n,stalePrice:n,insufficientObservations:n,invalidPrice:n,tokensJudged:n,winners:n,candidates:n,emerging:n}).nullable(),flow:z.object({checkedAt:date,considered:n,created:n,withheld:n,capped:z.boolean()}).nullable()});
+export const ResearchHealthSchema=z.object({checkedAt:date,enabled:z.boolean(),wallets:z.object({active:n,discovered:n,approved:n}).optional(),discovery:z.object({checkedAt:date,completeScans:n,noPrice:n,stalePrice:n,insufficientObservations:n,invalidPrice:n,tokensJudged:n,winners:n,candidates:n,emerging:n}).nullable(),flow:z.object({checkedAt:date,considered:n,created:n,withheld:n,capped:z.boolean()}).nullable(),tokenScans:z.array(InvestigationDiscovery.extend({tokenId:text,updatedAt:date})).optional()});

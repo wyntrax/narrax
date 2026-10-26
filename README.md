@@ -12,6 +12,7 @@ can be reviewed line by line.
 - **Evidence-first signals** — publishes a call only when the required observations are present and fresh.
 - **Research workspace** — narratives, tokens, radar, smart money, portfolio, alerts and analytics.
 - **Personal PRO research** — saved radar conditions with private alerts, token thesis tracking, and daily evidence-linked briefings.
+- **Smart Money Investigation** — recorded swaps, wallet-group comparisons, evidence-backed buying/selling patterns, and frozen published-flow context with token-price outcomes and explicit coverage. Defaults to PRO; admins can change its minimum tier independently.
 - **Manual trading** — off by default. Any mainnet swap is prepared unsigned and signed by the user's own wallet.
 
 ## Principles

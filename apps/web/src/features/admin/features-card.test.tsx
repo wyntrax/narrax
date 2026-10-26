@@ -18,17 +18,20 @@ it('offers all features with Early, Member and Pro, without Elite',()=>{
  view();
  expect(screen.getAllByRole('combobox')).toHaveLength(Object.keys(FEATURE_TIERS).length);
   expect(screen.getByLabelText('Agent')).toHaveValue('EARLY_ACCESS');
-  expect(screen.getByLabelText('Personal Radar')).toHaveValue('PRO');
+   expect(screen.getByLabelText('Personal Radar')).toHaveValue('PRO');
+   expect(screen.getByLabelText('Smart Money Investigation')).toHaveValue('PRO');
  expect(screen.queryByRole('option',{name:'Elite'})).toBeNull();
  expect(screen.getByRole('button',{name:messages.featureAccess.save})).toBeDisabled();
 });
 it('saves the full feature map with a reason, preserving existing age restrictions',async()=>{
  const save=view({'research.chat':{requiredTier:'ELITE',min_entitlement_age_hours:24}});
- fireEvent.change(screen.getByLabelText('Agent'),{target:{value:'MEMBER'}});
+  fireEvent.change(screen.getByLabelText('Agent'),{target:{value:'MEMBER'}});
+  fireEvent.change(screen.getByLabelText('Smart Money Investigation'),{target:{value:'EARLY_ACCESS'}});
  fireEvent.change(screen.getByLabelText(messages.adminReason),{target:{value:'Member agent access'}});
  fireEvent.click(screen.getByRole('button',{name:messages.featureAccess.save}));
  await waitFor(()=>expect(save).toHaveBeenCalled());
- expect(save.mock.calls[0]?.[0]['entitlements.features']['research.chat']).toEqual({requiredTier:'MEMBER',min_entitlement_age_hours:24});
+  expect(save.mock.calls[0]?.[0]['entitlements.features']['research.chat']).toEqual({requiredTier:'MEMBER',min_entitlement_age_hours:24});
+  expect(save.mock.calls[0]?.[0]['entitlements.features']['research.smart_money_investigation']).toEqual({requiredTier:'EARLY_ACCESS'});
  expect(Object.keys(save.mock.calls[0]?.[0]['entitlements.features'])).toHaveLength(Object.keys(FEATURE_TIERS).length);
  expect(save.mock.calls[0]?.[1]).toBe('Member agent access');
  expect(await screen.findByText(messages.adminSaved)).toBeVisible();

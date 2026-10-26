@@ -17,6 +17,8 @@ export interface AccountDeps {
   now?: () => Date;
   /** Enqueues private research refreshes; the worker rechecks entitlements before evaluating. */
   requestPersonalResearch?: (userId: string) => Promise<unknown>;
+  /** Enqueues bounded token-scoped wallet discovery. It never grants access or approves a wallet. */
+  requestTokenDiscovery?: (mint: string) => Promise<unknown>;
   /** Enqueues a check of this user's verified wallets for the configured $WYNTRAX mint. */
   requestMembershipSync?: (userId: string) => Promise<unknown>;
 }

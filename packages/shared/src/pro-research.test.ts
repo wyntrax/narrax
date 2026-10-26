@@ -31,9 +31,9 @@ describe('personal research evidence policy', () => {
     expect(ResearchRulesSchema.safeParse({ ...rules, windowMinutes: 61 }).success).toBe(false);
     expect(ResearchMonitorInputSchema.safeParse({ name: 'Mine', thesis: '', mint: 'not-a-mint', narrativeSlug: null, rules, active: true, userId: 'someone' }).success).toBe(false);
   });
-  it('keeps every existing research feature in Early Access and reserves the new workspace for PRO', () => {
+  it('keeps shared exploration in Early Access and reserves personal research and investigation for PRO', () => {
     for (const [key, tier] of Object.entries(FEATURE_TIERS)) {
-      const personal = ['research.personal_radar', 'research.thesis_tracker', 'research.personal_briefing'].includes(key);
+      const personal = ['research.personal_radar', 'research.thesis_tracker', 'research.personal_briefing', 'research.smart_money_investigation'].includes(key);
       expect(tier).toBe(personal ? 'PRO' : 'EARLY_ACCESS');
       expect(featureAllowed('EARLY_ACCESS', key)).toBe(!personal);
       expect(featureAllowed('PRO', key)).toBe(true);
