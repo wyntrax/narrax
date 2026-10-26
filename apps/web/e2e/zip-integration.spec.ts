@@ -12,7 +12,7 @@ async function mock(page:Page){
  const settings={profile:{displayName:null as string|null,timezone:null as string|null},appearance:{theme:'DARK',density:'COMFORTABLE',reducedMotion:false},notifications:{minPriority:'WATCH',mutedKinds:[] as string[],mutableKinds:['NEW_NARRATIVE'],alwaysDelivered:['CRITICAL']}};
  await page.route('http://localhost:4000/**',async route=>{
   const req=route.request(),url=new URL(req.url()),path=url.pathname;
-  const headers={'access-control-allow-origin':'http://localhost:4010','access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,POST,PUT,OPTIONS'};
+  const headers={'access-control-allow-origin':req.headers().origin??'http://localhost:4010','access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,POST,PUT,OPTIONS'};
   const reply=(json:unknown,status=200)=>route.fulfill({headers,json,status});
   if(req.method()==='OPTIONS')return route.fulfill({headers,status:204});
   if(path==='/v1/public-config')return reply({privyAppId:null});
@@ -33,7 +33,7 @@ async function mock(page:Page){
   if(path==='/v1/settings')return reply(settings);
   if(path==='/v1/smart-money/wallets')return reply({items:[{address:'A'.repeat(32),label:'Observed wallet',score:0,winRate:null,pnl30dSol:0}],nextCursor:null});
   if(path==='/v1/alerts')return reply({items:readAt&&url.searchParams.get('unread')==='true'?[]:[{id:'n1',alertId:'a1',readAt,createdAt:at,kind:'NEW_NARRATIVE',priority:'WATCH',title:'Recorded observation',body:'An observed topic changed.',refType:null,refId:null}],nextCursor:null,unreadCount:readAt?0:1});
-  if(path==='/v1/analytics/decisions/summary')return reply({range:{days:Number(url.searchParams.get('days'))},costPct:2,decisions:{read:0,independent:0,pending:0,final:0,unknown:0,truncated:false},labels:{WIN:0,LOSS:0,FLAT:0},returns:described,medianLeadTimeSeconds:null,byConfidence:[],caveats:['No measured outcomes yet.']});
+  if(path==='/v1/analytics/decisions/summary')return reply({range:{days:Number(url.searchParams.get('days'))},costPct:2,decisions:{total:0,awaitingMeasurement:0,read:0,independent:0,pending:0,final:0,known:0,unknown:0,unknownRate:null,truncated:false},labels:{WIN:0,LOSS:0,FLAT:0},returns:described,medianLeadTimeSeconds:null,byConfidence:[],caveats:['No measured outcomes yet.']});
   if(path==='/v1/analytics/signals')return reply({costPct:2,truncated:false,byReasonCode:[],caveats:[]});
   if(path==='/v1/analytics/decisions/outcomes')return reply({items:[],nextCursor:null});
   return reply(responses[path]??{error:'NOT_FOUND'},responses[path]?200:404);

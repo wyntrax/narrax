@@ -42,7 +42,7 @@ describe('smart money, alerts, analytics, settings and chat contracts',()=>{
   expect(AlertsSchema.safeParse({items:[],nextCursor:null,unreadCount:-1}).success).toBe(false);
  });
  it('accepts an analytics summary that says its evidence is thin',()=>{
-  expect(SummarySchema.safeParse({range:{days:30},costPct:2,decisions:{read:5,independent:3,pending:1,final:2,unknown:0,truncated:false},labels:{WIN:1,LOSS:1,FLAT:0},returns:described,medianLeadTimeSeconds:null,byConfidence:[{label:'0.6 to 0.7',described}],caveats:['Past results do not predict future results.']}).success).toBe(true);
+  expect(SummarySchema.safeParse({range:{days:30},costPct:2,decisions:{total:6,awaitingMeasurement:1,read:5,independent:3,pending:1,final:2,known:2,unknown:0,unknownRate:0,truncated:false},labels:{WIN:1,LOSS:1,FLAT:0},returns:described,medianLeadTimeSeconds:null,byConfidence:[{label:'0.6 to 0.7',described}],caveats:['Past results do not predict future results.']}).success).toBe(true);
   expect(SummarySchema.safeParse({range:{days:30},costPct:2,returns:described}).success).toBe(false);
  });
  it('accepts outcomes with unmeasured fields as null',()=>{

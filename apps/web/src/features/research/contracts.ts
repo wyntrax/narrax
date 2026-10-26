@@ -106,7 +106,7 @@ export type Described=z.infer<typeof DescribedSchema>;
 const Bucket=z.object({label:text,described:DescribedSchema});
 export const SummarySchema=z.object({
  range:z.object({days:number}),costPct:number,
- decisions:z.object({read:number,independent:number,pending:number,final:number,unknown:number,truncated:z.boolean()}),
+ decisions:z.object({total:number,awaitingMeasurement:number,read:number,independent:number,pending:number,final:number,known:number,unknown:number,unknownRate:nullable,truncated:z.boolean()}),
  labels:z.object({WIN:number,LOSS:number,FLAT:number}),returns:DescribedSchema,medianLeadTimeSeconds:nullable,
  byConfidence:z.array(Bucket),caveats:z.array(text)
 });
