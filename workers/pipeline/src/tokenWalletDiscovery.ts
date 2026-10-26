@@ -145,22 +145,20 @@ export async function discoverTokenWallets(db: PrismaClient, input: {
   await save({ ...base, status: 'RUNNING', error: null });
   try {
     const sample = await scanTokenSwaps(input.mint, { apiKey, fetch: input.fetch });
-    const [tracked, discoveredCount] = await Promise.all([
-      db.trackedWallet.findMany({ where: { address: { in: sample.participants.map(p => p.address) } }, select: { address: true } }),
-      db.trackedWallet.count({ where: { source: 'DISCOVERED', active: true, researchReview: { not: 'REJECTED' } } }),
-    ]);
+    const tracked = await db.trackedWallet.findMany({ where: { address: { in: sample.participants.map(p => p.address) } }, select: { address: true } });
     const eligible = selectDiscoveryCandidates(sample.participants, new Set(tracked.map(w => w.address)), { maxWallets: TOKEN_DISCOVERY_LIMITS.maxWalletsPerScan });
-    const selected = eligible.slice(0, Math.max(0, TOKEN_DISCOVERY_LIMITS.maxDiscoveredWallets - discoveredCount));
-    const created: { id: string; address: string }[] = [];
-    for (const candidate of selected) {
-      try {
-        const wallet = await db.trackedWallet.create({ data: { address: candidate.address, source: 'DISCOVERED', active: true, researchReview: 'PROVISIONAL' }, select: { id: true, address: true } });
-        created.push(wallet);
-      } catch (error) {
-        // A concurrent scan may have added the same address. That is not a failure for this scan.
-        if ((error as { code?: string } | null)?.code !== 'P2002') throw error;
+    const created = await db.$transaction(async tx => {
+      // Share admission capacity with automatic emerging-wallet intake.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('wallet-evaluation-intake'))`;
+      const discoveredCount = await tx.trackedWallet.count({ where: { source: 'DISCOVERED', active: true, researchReview: { not: 'REJECTED' } } });
+      const rejected = new Set((await tx.walletCandidate.findMany({ where: { status: 'REJECTED', address: { in: eligible.map(w=>w.address) } }, select: { address: true } })).map(w=>w.address));
+      const added: { id: string; address: string }[] = [];
+      for (const candidate of eligible.filter(w=>!rejected.has(w.address)).slice(0,Math.max(0,TOKEN_DISCOVERY_LIMITS.maxDiscoveredWallets-discoveredCount))) {
+        const insert = await tx.trackedWallet.createMany({ data: [{ address: candidate.address, source: 'DISCOVERED', active: true, researchReview: 'PROVISIONAL' }], skipDuplicates: true });
+        if (insert.count) added.push(await tx.trackedWallet.findUniqueOrThrow({ where: { address: candidate.address }, select: { id: true, address: true } }));
       }
-    }
+      return added;
+    });
     const store = makeWalletEventStore(db), collect = input.collect ?? collectWalletHistory;
     let backfilledWallets = 0, createdTrades = 0, failures = 0;
     for (const wallet of created) {
@@ -168,7 +166,8 @@ export async function discoverTokenWallets(db: PrismaClient, input: {
         const history = await collect(wallet.address, { apiKey, now, maxPages: TOKEN_DISCOVERY_LIMITS.maxHistoryPages });
         for (const event of history.events) if (await store.saveWalletTrade(event) === 'created') createdTrades++;
         const value = { checkedAt: now.toISOString(), scanned: history.scanned, accepted: history.events.length, skipped: history.skipped,
-          capped: history.capped, coveredFrom: history.coveredFrom, coveredTo: history.coveredTo, windowDays: 30 };
+          capped: history.capped, nextBefore: history.nextBefore ?? null, scanFrom: history.coveredFrom, scanTo: history.coveredTo,
+          coveredFrom: history.coveredFrom, coveredTo: history.coveredTo, windowDays: 30 };
         await db.systemSetting.upsert({ where: { key: `wallet.history.${wallet.id}` }, create: { key: `wallet.history.${wallet.id}`, value }, update: { value } });
         backfilledWallets++;
       } catch (error) {

@@ -6,6 +6,7 @@
 import { Worker } from 'bullmq';
 import { publishWalletResearch, measureWalletResearch } from './walletResearch';
 import { refreshResearchHistory } from './walletResearchHistory';
+import { intakeEmergingWallets } from './walletCandidateIntake';
 import {heliusMetadataSource} from './tokenMetadata';
 import { createPrisma } from '@narra/database';
 import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, TokenDiscoveryJobSchema, WyntraxHoldingsJobSchema, WyntraxMembershipEventSchema, createQueues, createRedis } from '@narra/queue';
@@ -131,8 +132,13 @@ async function main(): Promise<void> {
     // One recompute at a time: it rewrites profiles, clusters and consensus together.
     new Worker(QUEUE_NAMES.walletIntelligence, async () => {
       const research = process.env.SMART_MONEY_RESEARCH_ENABLED === 'true';
-      const history = research && process.env.SMART_MONEY_HISTORY_ENABLED === 'true' && process.env.HELIUS_API_KEY ? await refreshResearchHistory(db, process.env.HELIUS_API_KEY) : null;
+      const historyEnabled = process.env.SMART_MONEY_HISTORY_ENABLED === 'true', providerConfigured = !!process.env.HELIUS_API_KEY;
+      const intake = historyEnabled && providerConfigured ? await intakeEmergingWallets(db) : null;
+      if (intake?.added) await queues.requestWalletSync();
+      const history = historyEnabled && process.env.HELIUS_API_KEY ? await refreshResearchHistory(db, process.env.HELIUS_API_KEY) : null;
       const intelligence = await recomputeWalletIntelligence(db);
+      const pipeline = { checkedAt: new Date().toISOString(), historyEnabled, providerConfigured, intakeAdded: intake?.added ?? 0, scanned: history?.scanned ?? 0, failures: history?.failures ?? 0 };
+      await db.systemSetting.upsert({ where: { key: 'wallet.evaluation.pipeline' }, create: { key: 'wallet.evaluation.pipeline', value: pipeline }, update: { value: pipeline } });
       return JSON.stringify({ ...intelligence, history, research: research ? await publishWalletResearch(db) : 'disabled' });
     }, { connection, concurrency: 1 }),
     // Position monitor: recommends exits and raises alerts. It never closes a position or places an order. The AI review is optional.

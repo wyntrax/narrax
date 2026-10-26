@@ -1,0 +1,13 @@
+.price-history-chart svg{max-height:340px;min-height:200px}
+.price-scale-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 20px;color:var(--tx2);font-size:12px}
+.price-scale-controls label{display:flex;align-items:center;gap:8px}
+.price-scale-controls select{background:var(--s1);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:6px 10px;font:inherit}
+.price-scale-controls small{font-size:11px}
+.price-history-chart .price-line{stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+.price-history-chart.chart-negative .price-line{stroke:#cf6262}
+.price-history-chart.chart-negative .snapshot-point{fill:#cf6262}
+:root[data-theme=light] .price-history-chart .price-down{color:#b14343}
+:root[data-theme=light] .price-history-chart.chart-negative .price-line{stroke:#b14343}
+:root[data-theme=light] .price-history-chart.chart-negative .snapshot-point{fill:#b14343}
+.price-history-chart .price-gap{fill:var(--tx2);fill-opacity:.07;stroke:var(--bd);stroke-dasharray:2 4;vector-effect:non-scaling-stroke}
+@media(max-width:600px){.price-chart-summary{padding:14px;gap:12px}.price-chart-summary strong{font-size:20px}.price-scale-controls{padding:10px 14px}}

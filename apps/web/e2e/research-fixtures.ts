@@ -8,6 +8,7 @@ export const opportunity={id:'o1',createdAt:at,score:78,scores:{narrative:82,sma
 export const access={...empty,effectiveTier:'PRO',researchPageLimit:70,features:Object.fromEntries(Object.entries(empty.features).map(([key,value])=>[key,{...value,allowed:key!=='research.chat'&&key!=='research.advanced_analytics'}]))};
 export const overview={at,bar:{solUsd:{priceUsd:150,at,stale:false},narrativeHeat:82,smartMoneyNetFlowSol24h:18,smartMoneyTokens24h:2,counts:{activeNarratives:3,acceleratingNarratives:1,trackedWallets:14,opportunities24h:2}},locked:{overview:false,narratives:false,rotation:false,opportunities:false},strip:{topNarratives:[narrative],hottestOpportunity:opportunity},rotation:{detected:false,window:'24h',rising:[],falling:[],unknown:1},brief:{generated:'rules',points:['Robotics leads the recorded narratives.']},me:{openPositions:2,pendingConfirmations:0,unreadAlerts:1}};
 export const responses:Record<string,unknown>={
+  '/v1/smart-money/rankings':{asOf:at,band:'SMALL_CAP',windowDays:30,total:0,capped:false,pipeline:null,items:[]},
   '/v1/paper-trades/account':{mode:'PAPER',balanceSol:10,feeSol:.002,quotesAvailable:false,entryPermission:false,paused:false},
   '/v1/market-preview':{at,solUsd:overview.bar.solUsd,narrativeHeat:82,trackedWallets:14,opportunities24h:2},
   '/v1/me':{isAdmin:false},'/v1/me/entitlements':access,'/v1/overview':overview,'/v1/alerts/unread-count':{unread:1,capped:false},

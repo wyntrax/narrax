@@ -16,3 +16,4 @@ export * from './latest-evidence';
 export * from './pro-research';
 export * from './smart-money-investigation';
 export * from './investigation-strategy';
+export * from './wallet-ranking';

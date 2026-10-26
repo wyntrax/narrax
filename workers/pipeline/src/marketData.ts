@@ -1,10 +1,11 @@
 import type { Prisma, PrismaClient } from '@narra/database';
-import { sanitizeUntrusted } from '@narra/shared';
+import { sanitizeUntrusted, LATEST_EVIDENCE_MAX_AGE_MS } from '@narra/shared';
 import { MarketDataError, WSOL_MINT, tokenRisk, type LaunchSource, type MarketQuoteSource, type MarketSnapshot, type TokenInfo, type TokenInfoSource, type SnapshotOmissionReason } from '@narra/market-data';
 import type { DeveloperHoldingSource } from './developerHoldings';
 import {refreshTokenMetadata,type MetadataSource} from './tokenMetadata';
 import {discoveryPriceCandidates} from './walletDiscovery';
 import { storeMarketSnapshot } from './marketSnapshot';
+import { SOL_HISTORY_PREFIX } from './walletResearchEvidence';
 import { COVERAGE_LIMITS, readSocialPriority, saveResearchDiagnostics, SOCIAL_INFO_CURSOR_KEY } from './researchDiagnostics';
 
 /** Starting values. None is validated against outcomes, and each should become an admin-editable setting. */
@@ -103,6 +104,11 @@ export async function refreshMarketData(
     if (solPriceUsd != null && Number.isFinite(solPriceUsd) && solPriceUsd > 0) {
       const value = { priceUsd: solPriceUsd, at: now.toISOString(), source: deps.quotes.name };
       await db.systemSetting.upsert({ where: { key: SOL_PRICE_KEY }, create: { key: SOL_PRICE_KEY, value }, update: { value } });
+      // Keep timestamped observations for delayed swaps and 30-day history backfills.
+      // A later reference price must never be applied to an earlier trade.
+      const key = `${SOL_HISTORY_PREFIX}${value.at}`;
+      await db.systemSetting.upsert({ where: { key }, create: { key, value }, update: {} });
+      await db.systemSetting.deleteMany({ where: { key: { startsWith: SOL_HISTORY_PREFIX, lt: `${SOL_HISTORY_PREFIX}${new Date(+now-35*86_400_000).toISOString()}` } } });
       out.solUsd = solPriceUsd;
     } else out.errors.push('sol price: no usable data');
   } catch (e) { out.errors.push(errText('sol price', e)); }
@@ -310,16 +316,23 @@ export async function refreshMarketData(
         } catch (e) { out.errors.push(errText('developer holdings', e)); }
       }
       const pairAgeMinutes = created ? (now.getTime() - created.getTime()) / 60_000 : null;
+      const holderAt = info?.holdersUpdatedAt === undefined ? now : info.holdersUpdatedAt;
+      const holdersFresh = holderAt != null && Number.isFinite(+holderAt) && +holderAt <= +now && +now-+holderAt <= LATEST_EVIDENCE_MAX_AGE_MS.holders;
       const risk = tokenRisk({
-        liquidityUsd: s.liquidityUsd, holders: info?.holders ?? null, top10Pct: info?.top10Pct ?? null, devHoldingPct,
+        liquidityUsd: s.liquidityUsd, holders: holdersFresh ? info?.holders ?? null : null, top10Pct: holdersFresh ? info?.top10Pct ?? null : null, devHoldingPct,
         mintAuthorityActive: info?.mintAuthorityActive ?? null, freezeAuthorityActive: info?.freezeAuthorityActive ?? null,
         isHoneypot: info?.isHoneypot ?? null, pairAgeMinutes,
       });
       if (!info) { out.infoUnavailable++; risk.flags.push('INFO_UNAVAILABLE'); }
+      if (info && !holdersFresh) risk.flags.push('HOLDER_OBSERVATION_STALE_OR_UNKNOWN');
       // A holder row needs both numbers. With either missing, nothing is written and the token stays unranked.
       if (info && info.holders != null && info.top10Pct != null) {
-        await db.tokenHolderMetric.create({ data: { tokenId: t.id, holders: info.holders, top10Pct: info.top10Pct, devHoldingPct, at: now } });
-        out.holderRowsWritten++;
+        const key=`research.holders.${t.id}`,value={mint:t.mint,source:deps.info.name,sourceAt:holderAt&&Number.isFinite(+holderAt)?holderAt.toISOString():null,retrievedAt:now.toISOString(),holders:info.holders,top10Pct:info.top10Pct,devHoldingPct};
+        await db.systemSetting.upsert({where:{key},create:{key,value},update:{value}});
+        if (holderAt && Number.isFinite(+holderAt) && +holderAt<=+now) {
+          await db.tokenHolderMetric.create({ data: { tokenId: t.id, holders: info.holders, top10Pct: info.top10Pct, devHoldingPct, at: holderAt } });
+          out.holderRowsWritten++;
+        }
       }
       await db.tokenRiskMetric.create({ data: { tokenId: t.id, riskScore: risk.riskScore, flags: risk.flags, at: now } });
       out.riskRowsWritten++;

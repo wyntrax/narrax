@@ -195,6 +195,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
     const developerHolding=await db.systemSetting.findUnique({where:{key:`research.developerHolding.${t.id}`}});
     const safety=await radarSafetyViews(db,[t],now());
     const latestEvidence=await latestEvidenceViews(db,[t],now());
+    const holderObservation=latestEvidence.get(t.id)?.holders;
     return {
       mint: t.mint, symbol: t.symbol, name: t.name, blacklisted: t.blacklisted, createdOnChainAt: t.createdOnChainAt,
       imageUrl: marketTokenImage(evidence.get(t.id),t.mint),
@@ -203,7 +204,8 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
       observation:observation(evidence.get(t.id),m?.id,now()),
       developerHolding:developerHolding?.value??null,
       metrics: m ? { priceUsd: n(m.priceUsd), marketCapUsd: n(m.marketCapUsd), liquidityUsd: n(m.liquidityUsd), volume24hUsd: n(m.volume24hUsd), at: m.at } : null,
-      holders: t.holders[0] ?? null, risk: t.risk[0] ?? null,
+      holders: holderObservation?.data && holderObservation.at && ['FRESH','STALE'].includes(holderObservation.state)
+        ? { ...holderObservation.data, at: holderObservation.at } : null, risk: t.risk[0] ?? null,
       consensus: c ? { score: c.score, walletCount: c.walletCount, independentEntities: c.independentEntities, leaderCount: c.leaderCount, netFlowSol: n(c.netFlowSol), timingConcentration: c.timingConcentration } : null,
       narratives: t.narratives.map((r) => ({ ...r.narrative, relation: r.relation, ogScore: r.ogScore })),
     };

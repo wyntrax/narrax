@@ -1,6 +1,11 @@
 import type { PrismaClient } from '@narra/database';
 import { collectWalletHistory } from './walletHistory';
 import { makeWalletEventStore } from './prismaStores';
+import { z } from 'zod';
+
+const Progress = z.object({ checkedAt: z.string().datetime(), capped: z.boolean(), nextBefore: z.string().nullable(),
+  scanFrom: z.string().datetime(), scanTo: z.string().datetime(), coveredFrom: z.string().datetime(), coveredTo: z.string().datetime(),
+  scanned: z.number().int().nonnegative(), accepted: z.number().int().nonnegative(), skipped: z.number().int().nonnegative() });
 
 /** Opt-in, at most two wallets / three pages each per intelligence cycle. This is
  * reconciliation, not a claim that filtered SWAP history includes all transfers. */
@@ -17,11 +22,21 @@ export async function refreshResearchHistory(db: PrismaClient, apiKey: string, n
     const previous = await db.systemSetting.findUnique({ where: { key } });
     const value = previous?.value;
     const checked = value && typeof value === 'object' && !Array.isArray(value) && typeof value.checkedAt === 'string' ? Date.parse(value.checkedAt) : NaN;
-    if (+now >= checked && +now - checked < 12 * 3_600_000) { out.skipped++; continue; }
+    const parsed = Progress.safeParse(value), previousScan = parsed.success ? parsed.data : null;
+    const resume = previousScan?.capped && previousScan.nextBefore && Date.parse(previousScan.scanTo) <= +now ? previousScan : null;
+    if (!resume && +now >= checked && +now - checked < 12 * 3_600_000) { out.skipped++; continue; }
     try {
-      const history = await collect(wallet.address, { apiKey, now, maxPages: 3 });
+      // Finish the fixed window before advancing its head. Subsequent scans fill the gap
+      // since the previous head, rather than repeatedly re-reading a busy wallet's first pages.
+      const complete = previousScan && !previousScan.capped && Date.parse(previousScan.coveredTo) <= +now ? previousScan : null;
+      const history = await collect(wallet.address, { apiKey, now: resume ? new Date(resume.scanTo) : now, maxPages: 3,
+        ...(resume ? { before: resume.nextBefore!, since: new Date(resume.scanFrom) } : complete ? { since: new Date(complete.coveredTo) } : {}) });
       for (const e of history.events) if (await store.saveWalletTrade(e) === 'created') out.created++;
-      const next = { checkedAt: now.toISOString(), scanned: history.scanned, accepted: history.events.length, skipped: history.skipped, capped: history.capped, coveredFrom: history.coveredFrom, coveredTo: history.coveredTo, windowDays: 30 };
+      const carry = resume ?? complete;
+      const next = { checkedAt: now.toISOString(), scanned: (carry?.scanned ?? 0) + history.scanned,
+        accepted: (carry?.accepted ?? 0) + history.events.length, skipped: (carry?.skipped ?? 0) + history.skipped,
+        capped: history.capped, nextBefore: history.nextBefore ?? null, scanFrom: history.coveredFrom, scanTo: history.coveredTo,
+        coveredFrom: carry?.coveredFrom ?? history.coveredFrom, coveredTo: history.coveredTo, windowDays: 30 };
       await db.systemSetting.upsert({ where: { key }, create: { key, value: next }, update: { value: next } });
       out.scanned++; if (history.capped) out.capped++;
     } catch { out.failures++; }

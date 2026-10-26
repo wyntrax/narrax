@@ -193,4 +193,15 @@ describe.skipIf(!up)('market data refresh on a real Postgres', () => {
     await refreshMarketData(db, { quotes: quotes as never, info: null, launches: null }, new Date(NOW.getTime() + 3 * H), { maxTokens: cap });
     expect((await tok(candidate.mint)).metrics).toHaveLength(1);
   });
+  it('keeps cached holder source time and excludes stale counts from freshly computed risk',async()=>{
+    const token=await db.token.create({data:{mint:mint('CACHED'),symbol:'CACHE',name:'Cached holders',createdOnChainAt:NOW}}),sourceAt=ago(24);
+    const cached=new FixtureMarketData({snapshots:[snapshot(token.mint)],info:[info(token.mint,{holders:5919,top10Pct:88.83,holdersUpdatedAt:sourceAt})]});
+    await refreshMarketData(db,{quotes:cached,info:cached,launches:null},NOW,ROOMY);
+    const row=await db.tokenHolderMetric.findFirstOrThrow({where:{tokenId:token.id}});
+    expect(row.at).toEqual(sourceAt);
+    const evidence=await db.systemSetting.findUniqueOrThrow({where:{key:`research.holders.${token.id}`}});
+    expect(evidence.value).toMatchObject({sourceAt:sourceAt.toISOString(),retrievedAt:NOW.toISOString(),holders:5919});
+    const risk=await db.tokenRiskMetric.findFirstOrThrow({where:{tokenId:token.id}});
+    expect(risk.flags).toContain('HOLDER_OBSERVATION_STALE_OR_UNKNOWN');expect(risk.flags).not.toContain('TOP10_OVER_60');
+  });
 });

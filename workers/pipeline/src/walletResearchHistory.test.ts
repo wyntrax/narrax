@@ -14,3 +14,19 @@ it('bounds reconciliation and retains explicit incomplete coverage; provider fai
  expect(writes.find(w=>w.where.key==='wallet.history.b')).toBeUndefined();
  expect(writes.find(w=>w.where.key==='wallet.research.historyCursor')?.create.value).toBe('b');
 });
+it('resumes fixed-window pages, preserves skipped evidence, and then fills only the new head gap',async()=>{
+ const values=new Map<string,unknown>();
+ const db={systemSetting:{findUnique:async({where}:{where:{key:string}})=>({value:values.get(where.key)}),upsert:async({where,create}:{where:{key:string};create:{value:unknown}})=>{values.set(where.key,create.value);}},trackedWallet:{findMany:async({where}:{where:{id?:{gt?:string}}})=>where.id?.gt?[]:[{id:'a',address:'A'}]}} as unknown as PrismaClient;
+ const now=new Date('2040-01-01T00:00:00Z'),from=new Date(+now-30*86400000).toISOString();
+ const collect=vi.fn().mockResolvedValueOnce({events:[],scanned:300,skipped:1,capped:true,nextBefore:'older',coveredFrom:from,coveredTo:now.toISOString()})
+  .mockResolvedValueOnce({events:[],scanned:2,skipped:0,capped:false,nextBefore:null,coveredFrom:from,coveredTo:now.toISOString()})
+  .mockResolvedValueOnce({events:[],scanned:1,skipped:0,capped:false,nextBefore:null,coveredFrom:now.toISOString(),coveredTo:new Date(+now+13*3600000).toISOString()});
+ await refreshResearchHistory(db,'key',now,collect);
+ await refreshResearchHistory(db,'key',new Date(+now+60000),collect);
+ expect(collect.mock.calls[1]?.[1]).toMatchObject({before:'older',now,since:new Date(from)});
+ expect(values.get('wallet.history.a')).toMatchObject({capped:false,scanned:302,skipped:1,coveredFrom:from});
+ await refreshResearchHistory(db,'key',new Date(+now+13*3600000),collect);
+ expect(collect.mock.calls[2]?.[1]).toMatchObject({since:now});
+ expect(collect.mock.calls[2]?.[1]).not.toHaveProperty('before');
+ expect(values.get('wallet.history.a')).toMatchObject({capped:false,scanned:303,skipped:1,coveredFrom:from});
+});

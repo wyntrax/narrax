@@ -28,7 +28,12 @@ describe('market evidence boundary',()=>{
   const db={systemSetting:{findMany}} as unknown as PrismaClient;
   const tokens=[{id:'good',mint:'token-one'},{id:'good',mint:'token-one'},{id:'wrong',mint:'token-two'},{id:'legacy',mint:'token-one'},{id:'untrusted',mint:'token-one'},{id:'missing',mint:'token-one'}];
   expect([...await marketTokenImages(db,tokens)]).toEqual([['good',value.imageUrl],['wrong',null],['legacy',null],['untrusted',null],['missing',null]]);
-  expect(findMany).toHaveBeenCalledTimes(1);expect(findMany).toHaveBeenCalledWith({where:{key:{in:['good','wrong','legacy','untrusted','missing'].map(id=>`research.market.${id}`)}}});
+   expect(findMany).toHaveBeenCalledTimes(1);expect(findMany).toHaveBeenCalledWith({where:{key:{in:['good','wrong','legacy','untrusted','missing'].flatMap(id=>[`research.market.${id}`,`research.tokenMetadata.${id}`])}}});
   findMany.mockClear();expect([...await marketTokenImages(db,[])]).toEqual([]);expect(findMany).not.toHaveBeenCalled();
- });
+  });
+  it('uses mint-bound DAS artwork when market images are missing without substituting mismatched metadata',async()=>{
+   const imageUrl='https://cdn.helius-rpc.com/cdn-cgi/image/example.png';
+   const db={systemSetting:{findMany:async()=>[{key:'research.tokenMetadata.good',value:{source:'helius-das',mint:'mint',imageUrl}},{key:'research.tokenMetadata.wrong',value:{source:'helius-das',mint:'other',imageUrl}}]}} as unknown as PrismaClient;
+   expect([...await marketTokenImages(db,[{id:'good',mint:'mint'},{id:'wrong',mint:'mint'}])]).toEqual([['good',imageUrl],['wrong',null]]);
+  });
 });

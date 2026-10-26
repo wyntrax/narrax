@@ -15,6 +15,12 @@ it('exposes timestamp and price through a keyboard-accessible observation slider
  expect(slider).toHaveAttribute('aria-valuetext',expect.stringContaining('$1'));
  expect(screen.getByRole('img')).toHaveAttribute('aria-label',expect.stringContaining('2 source-linked observations'));
 });
+it('explains crash scaling and gaps and lets the reader choose linear prices',()=>{
+ render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}><PriceHistoryChart points={[point(0,.0002),point(5,.0001),point(40,.0000022)]}/></NextIntlClientProvider>);
+ expect(screen.getByText(/Logarithmic scale/)).toBeVisible();expect(screen.getByText(/Shaded intervals/)).toBeVisible();
+ fireEvent.change(screen.getByLabelText('Price scale'),{target:{value:'linear'}});
+ expect(screen.getByText(/Linear scale/)).toBeVisible();
+});
 it('shows honest empty and single-observation states without invented trends',()=>{
  const {rerender}=render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}><PriceHistoryChart points={[]}/></NextIntlClientProvider>);
  expect(screen.getByRole('status')).toHaveTextContent('No source-linked');

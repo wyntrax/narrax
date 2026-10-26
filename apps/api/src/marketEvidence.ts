@@ -6,8 +6,13 @@ export function marketTokenImage(value:z.infer<typeof evidence>|undefined,mint:s
 /** One stored-evidence read per page, never a provider request or a per-token lookup. */
 export async function marketTokenImages(db:Pick<PrismaClient,'systemSetting'>,tokens:{id:string;mint:string}[]){
  const unique=[...new Map(tokens.map(token=>[token.id,token])).values()];
- const images=await marketEvidence(db,unique.map(token=>token.id));
- return new Map(unique.map(token=>[token.id,marketTokenImage(images.get(token.id),token.mint)]));
+  const rows=unique.length?await db.systemSetting.findMany({where:{key:{in:unique.flatMap(t=>[`research.market.${t.id}`,`research.tokenMetadata.${t.id}`])}}}):[];
+  const values=new Map(rows.map(r=>[r.key,r.value]));
+  const metadata=z.object({source:z.literal('helius-das'),mint:z.string(),imageUrl:z.unknown().transform(tokenImageUrl)});
+  return new Map(unique.map(token=>{
+    const market=evidence.safeParse(values.get(`research.market.${token.id}`)),fallback=metadata.safeParse(values.get(`research.tokenMetadata.${token.id}`));
+    return [token.id,marketTokenImage(market.success?market.data:undefined,token.mint)??(fallback.success&&fallback.data.mint===token.mint?fallback.data.imageUrl:null)];
+  }));
 }
 export async function marketEvidence(db:Pick<PrismaClient,'systemSetting'>,ids:string[]){
  const rows=ids.length?await db.systemSetting.findMany({where:{key:{in:ids.map(id=>`research.market.${id}`)}}}):[];
