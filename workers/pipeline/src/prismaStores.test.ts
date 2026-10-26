@@ -19,7 +19,7 @@ describe('wallet event store', () => {
       walletTrade: { create },
       walletProfile: { findFirst: vi.fn(async () => ({ score: 88 })) },
       tokenMetric: { findFirst: vi.fn(async () => null) },
-      systemSetting: { findUnique: vi.fn(async () => null) },
+      systemSetting: { findUnique: vi.fn(async () => null), findFirst: vi.fn(async () => null) },
       ...over,
     } as unknown as PrismaClient;
     return { db, create };
@@ -28,6 +28,8 @@ describe('wallet event store', () => {
     const { db, create } = mk();
     expect(await makeWalletEventStore(db).saveWalletTrade(EVENT)).toBe('created');
     expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ walletId: 'w1', tokenId: 't1', side: 'BUY', amountSol: 2, tokenAmount: 1000, signature: EVENT.signature }) });
+    expect(db.systemSetting.findFirst).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ amountUsd: null, marketCapUsd: null }) });
   });
   it('ignores untracked wallets', async () => {
     const { db, create } = mk({ trackedWallet: { findUnique: vi.fn(async () => null) } });
