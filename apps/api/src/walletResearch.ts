@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { makeRequireAdmin } from './admin';
 import { walletQualifications } from '@narra/worker-pipeline';
-import { sanitizeUntrusted } from '@narra/shared';
+import { InvestigationDiscovery, TOKEN_DISCOVERY_KEY_PREFIX, sanitizeUntrusted } from '@narra/shared';
 import { RESEARCH_QUALIFICATION } from '@narra/smart-money';
 import { marketTokenImages } from './marketEvidence';
 
@@ -38,9 +38,17 @@ export function registerWalletResearchRoutes(app: FastifyInstance, deps: Pick<Ac
   });
 
   app.get('/v1/admin/wallet-research/health', admin, async () => {
-    const settings = await db.systemSetting.findMany({ where: { key: { in: ['wallet.discovery.health', 'wallet.research.flowHealth'] } } });
+    const now = clock();
+    const [settings, scans, active, discovered, approved] = await Promise.all([
+      db.systemSetting.findMany({ where: { key: { in: ['wallet.discovery.health', 'wallet.research.flowHealth'] } } }),
+      db.systemSetting.findMany({ where: { key: { startsWith: TOKEN_DISCOVERY_KEY_PREFIX } }, orderBy: [{ updatedAt: 'desc' }, { key: 'asc' }], take: 10, select: { key: true, value: true, updatedAt: true } }),
+      db.trackedWallet.count({ where: { active: true } }), db.trackedWallet.count({ where: { source: 'DISCOVERED' } }), db.trackedWallet.count({ where: { researchReview: 'APPROVED' } }),
+    ]);
     const byKey = new Map(settings.map(s => [s.key,s.value]));
-    return { checkedAt: clock(), enabled: process.env.SMART_MONEY_RESEARCH_ENABLED === 'true', rules: RESEARCH_QUALIFICATION, discovery: byKey.get('wallet.discovery.health') ?? null, flow: byKey.get('wallet.research.flowHealth') ?? null };
+    return { checkedAt: now, enabled: process.env.SMART_MONEY_RESEARCH_ENABLED === 'true', rules: RESEARCH_QUALIFICATION,
+      wallets: { active, discovered, approved },
+      discovery: byKey.get('wallet.discovery.health') ?? null, flow: byKey.get('wallet.research.flowHealth') ?? null,
+      tokenScans: scans.flatMap(row => { const parsed = InvestigationDiscovery.safeParse(row.value); return parsed.success ? [{ tokenId: row.key.slice(TOKEN_DISCOVERY_KEY_PREFIX.length), updatedAt: row.updatedAt, ...parsed.data }] : []; }) };
   });
 
   app.post('/v1/admin/wallets/:address/research-review', admin, async (req, reply) => {

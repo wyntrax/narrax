@@ -8,14 +8,14 @@ import { publishWalletResearch, measureWalletResearch } from './walletResearch';
 import { refreshResearchHistory } from './walletResearchHistory';
 import {heliusMetadataSource} from './tokenMetadata';
 import { createPrisma } from '@narra/database';
-import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, createQueues, createRedis } from '@narra/queue';
+import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, TokenDiscoveryJobSchema, createQueues, createRedis } from '@narra/queue';
 import { HeliusWebhooks, JupiterClient, SolanaRpc } from '@narra/solana';
 import { readTregConfig } from '@narra/narrative';
 import { runTregJob } from './tregJob';
 import { trackEarlyRadarOutcomes } from './earlyRadarTracking';
 import { DexScreenerSource, GeckoTerminalSource } from '@narra/market-data';
 import { aiProviderFromEnv } from '@narra/ai';
-import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhook, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, type ChainPorts, type WalletEventDeps } from './index';
+import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhook, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, discoverTokenWallets, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, type ChainPorts, type WalletEventDeps } from './index';
 import { assertEnv } from '@narra/shared';
 import { makeDeveloperHoldingSource } from './developerHoldings';
 import { makeRadarSafetySource } from './radarSafetyEvidence';
@@ -138,6 +138,15 @@ async function main(): Promise<void> {
       return JSON.stringify({ ingest, graph: await rebuildFundingGraph(db) });
     }, { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletDiscovery, async () => (historyRpc ? JSON.stringify({ scan: await scanEarlyBuyers(db, historyRpc), discovery: await discoverCandidates(db) }) : 'needs HELIUS_RPC_URL'), { connection, concurrency: 1 }),
+    // User-requested, token-scoped discovery. It adds provisional wallets and bounded recent history, then asks for a webhook sync.
+    new Worker(QUEUE_NAMES.tokenDiscovery, async (job) => {
+      const { mint } = TokenDiscoveryJobSchema.parse(job.data);
+      const token = await db.token.findUnique({ where: { mint }, select: { id: true, mint: true, symbol: true, blacklisted: true } });
+      if (!token || token.blacklisted) return 'token not found';
+      const summary = await discoverTokenWallets(db, { tokenId: token.id, mint: token.mint, symbol: token.symbol, apiKey: process.env.HELIUS_API_KEY });
+      if (summary.newWallets > 0) await queues.requestWalletSync();
+      return JSON.stringify(summary);
+    }, { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.narrativeIngestion, async (job) => {
       if (!tregConfig) return 'disabled';
       return runTregJob(db, tregConfig, job);

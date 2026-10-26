@@ -11,6 +11,7 @@ import {usePagination} from './pagination';
 import {PageHeading,Section,Metrics,Facts,DataTable,Loading,ResourceError,Empty,Pager,Stamp,useFormat} from './ui';
 import './smart-money.css';
 import {QualificationBadge,WalletResearchViews} from './wallet-research';
+import {InvestigationLink} from '../investigation/link';
 
 const short=(address:string)=>address.length>12?`${address.slice(0,4)}…${address.slice(-4)}`:address;
 // Strict: valid base58 that decodes to a 32-byte key. A look-alike string would get a Solscan link that shows nothing.
@@ -28,7 +29,7 @@ function useHold(){const t=useTranslations('workspace');return (seconds:number|n
 /** Tracked-wallet directory. Scores are labelled unverified model estimates, and a missing value never becomes zero. */
 export function SmartMoneyPage(){
  const t=useTranslations('workspace'),[input,setInput]=useState(''),[search,setSearch]=useState(''),[source,setSource]=useState(''),[sort,setSort]=useState<Sort>('recent');
- return <div className="sm-page"><PageHeading title={t('smartMoney')} body={t('enhance.walletBody')}/>
+ return <div className="sm-page"><PageHeading title={t('smartMoney')} body={t('enhance.walletBody')} actions={<InvestigationLink/>}/>
   <form className="research-search" onSubmit={e=>{e.preventDefault();setSearch(input.trim());}}><label htmlFor="wallet-search">{t('enhance.walletSearch')}</label><div><input id="wallet-search" type="search" maxLength={64} value={input} onChange={e=>setInput(e.target.value)}/><button className="research-control" type="submit">{t('searchButton')}</button>{search&&<button className="research-control" type="button" onClick={()=>{setInput('');setSearch('');}}>{t('clear')}</button>}</div></form>
   <div className="research-filters"><label>{t('trench.source')}<select value={source} onChange={e=>setSource(e.target.value)}><option value="">{t('alAll')}</option>{['MANUAL','IMPORT','DISCOVERED'].map(s=><option key={s} value={s}>{t(`enhance.sources.${s}`)}</option>)}</select></label><label>{t('smSort')}<select value={sort} onChange={e=>setSort(e.target.value as Sort)}><option value="recent">{t('smSortRecent')}</option><option value="score">{t('smSortScore')}</option></select></label></div>
   {sort==='score'&&<p className="research-note">{t('smSortNote')}</p>}

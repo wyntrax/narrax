@@ -19,14 +19,14 @@ import {MeSchema} from '@/features/admin/contracts';
 const navigation=[{href:'/app',key:'overview',icon:LayoutDashboard},{href:'/app/radar',key:'radar',icon:Radar},{href:'/app/opportunities',key:'opportunities',icon:Orbit},{href:'/app/tokens',key:'tokens',icon:Coins},{href:'/app/trade',key:'trade',icon:ArrowDownUp},{href:'/app/smart-money',key:'smartMoney',icon:Wallet},{href:'/app/portfolio',key:'portfolio',icon:Briefcase},{href:'/app/alerts',key:'alerts',icon:Bell},{href:'/app/analytics',key:'analytics',icon:ChartColumn},{href:'/app/backtests',key:'backtest',icon:FlaskConical},{href:'/app/agent',key:'agent',icon:Bot},{href:'/app/settings',key:'settings',icon:Settings}];
 export function ResearchShell({children,theme}:{children:ReactNode;theme:string}){
   const t=useTranslations('workspace'),pathname=usePathname(),auth=useAuth();
-  const locale=useLocale()==='id'?'id':'en',trade=tradeCopy[locale],pro=proCopy[locale],navLabel=(key:string)=>key==='trade'?trade.title:key==='personalRadar'?pro.radar:key==='theses'?pro.thesis:key==='briefing'?pro.briefing:t(key);
+  const locale=useLocale()==='id'?'id':'en',trade=tradeCopy[locale],pro=proCopy[locale],navLabel=(key:string)=>key==='trade'?trade.title:key==='investigation'?pro.investigationNav:key==='personalRadar'?pro.radar:key==='theses'?pro.thesis:key==='briefing'?pro.briefing:t(key);
  const {access}=useResearch();
  const feature=routeFeature(pathname),locked=!!feature&&!hasFeature(access,feature);
  const isAdmin=useResearchQuery('me',MeSchema).data?.isAdmin===true;
  const unread=useResearchQuery('alerts/unread-count',UnreadAlertsSchema,true,30000);
  const count=unread.isError?null:unread.data?.unread;
  const badge=count?`${count>99?'99':count}${count>99||unread.data?.capped?'+':''}`:null;
-  const personal=[{href:'/app/personal-radar',key:'personalRadar',icon:Radar},{href:'/app/theses',key:'theses',icon:FlaskConical},{href:'/app/briefing',key:'briefing',icon:Bell}];
+  const personal=[{href:'/app/investigation',key:'investigation',icon:Wallet},{href:'/app/personal-radar',key:'personalRadar',icon:Radar},{href:'/app/theses',key:'theses',icon:FlaskConical},{href:'/app/briefing',key:'briefing',icon:Bell}];
   const items=[...navigation,...personal,...(isAdmin?[{href:'/app/admin',key:'admin',icon:ShieldCheck}]:[])];
  const [collapsed,setCollapsed]=useState(false),[mobile,setMobile]=useState(false),[signingOut,setSigningOut]=useState(false),[logoutError,setLogoutError]=useState(false);
  const signOut=()=>{setSigningOut(true);setLogoutError(false);void auth.logout().catch(()=>setLogoutError(true)).finally(()=>setSigningOut(false));};

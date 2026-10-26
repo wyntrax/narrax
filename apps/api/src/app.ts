@@ -33,6 +33,7 @@ import type {JupiterClient} from '@narra/solana';
 import {registerManualTradeRoutes} from './manual-trades';
 import type {ManualSwapEngine} from './manual-swap-engine';
 import { registerPersonalResearchRoutes } from './personalResearch';
+import { registerSmartMoneyInvestigationRoutes } from './smartMoneyInvestigation';
 
 const EvaluateBody = z.object({
   /** Raw model output. Untrusted until it passes the schema. */
@@ -74,6 +75,7 @@ export async function buildApp(opts: { manualSwaps?:ManualSwapEngine; paperQuote
     registerFeatureGates(app, opts.account.db, opts.account.now);
     registerPersonalResearchRoutes(app, opts.account);
     registerWalletResearchRoutes(app, opts.account);
+    registerSmartMoneyInvestigationRoutes(app, opts.account);
     registerEntitlementRoutes(app, opts.account);
     registerLinkedWalletRoutes(app, opts.account);
     registerAccountRoutes(app, opts.account);

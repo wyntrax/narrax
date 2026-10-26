@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@narra/database';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { ACCESS_TIERS, FEATURE_TIERS, activeTier, entitlementId, resolveEntitlements, type AccessTier, type FeatureKey } from '@narra/shared';
+import { ACCESS_TIERS, FEATURE_TIERS, INVESTIGATION_LIMITS, activeTier, entitlementId, resolveEntitlements, type AccessTier, type FeatureKey } from '@narra/shared';
 import { SETTING_SCHEMAS } from './settings';
 import { AccessError } from './common';
 // The one admin decision (environment allowlist, else the database flag). Entitlements only read it; they never grant it.
@@ -61,8 +61,8 @@ export function requireFeature(db: PrismaClient, key: FeatureKey, now = () => ne
       const decision = await featureDecision(db, req.userId!, key, now(), entry => req.log.info(entry, 'research access decision'));
       if (!decision.allowed) return reply.code(403).send({ error: 'FEATURE_LOCKED', requiredTier: decision.requiredTier, requestId: req.requestId });
       const q = req.query as Record<string, unknown>;
-      if (q && ('limit' in q || ['research.narratives', 'research.tokens', 'research.screener', 'research.smart_money', 'research.decision_analytics'].includes(key))) {
-        const limit = q.limit === undefined ? 25 : Number(q.limit);
+      if (q && ('limit' in q || ['research.narratives', 'research.tokens', 'research.screener', 'research.smart_money', 'research.smart_money_investigation', 'research.decision_analytics'].includes(key))) {
+        const limit = q.limit === undefined ? (key === 'research.smart_money_investigation' ? INVESTIGATION_LIMITS.pageSize : 25) : Number(q.limit);
         if (Number.isInteger(limit) && limit > 0 && limit <= 100) q.limit = Math.min(limit, decision.pageLimit);
       }
     } catch { return reply.code(503).send({ error: 'ENTITLEMENTS_UNAVAILABLE', requestId: req.requestId }); }

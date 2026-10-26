@@ -11,6 +11,7 @@ export * from './marketData';
 export * from './walletSync';
 export * from './walletFunding';
 export * from './walletDiscovery';
+export * from './tokenWalletDiscovery';
 export * from './positionMonitor';
 export * from './paperLedger';
 export * from './outcomes';

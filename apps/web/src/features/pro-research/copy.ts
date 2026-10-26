@@ -1,4 +1,6 @@
 const en = {
+  investigation: 'Smart Money Investigation',
+  investigationNav: 'Investigation',
   radar: 'Personal Radar', thesis: 'Thesis Tracker', briefing: 'Personal Briefing', eyebrow: 'NARRAX PRO · YOUR RESEARCH',
   radarBody: 'Turn your criteria into a private research feed. Combine conditions, save a radar, and get in-app alerts when observed evidence matches.',
   thesisBody: 'Write down your reasoning. Track the conditions that support it, weaken it, or need more evidence.',
@@ -15,6 +17,8 @@ const en = {
   errors: { INVALID_INPUT: 'Check the fields and choose at least one valid condition. A thesis needs a mint and written rationale.', MONITOR_LIMIT: 'You have reached the 20-item limit for this research type.', NARRATIVE_NOT_FOUND: 'That narrative slug is not indexed. Copy it from a narrative URL.', NOT_FOUND: 'This item no longer exists. Refresh the page.', default: 'The request failed. Your changes have not been confirmed. Please try again.' } as Record<string, string>,
 };
 const id: typeof en = {
+  investigation: 'Investigasi Smart Money',
+  investigationNav: 'Investigasi',
   radar: 'Radar Pribadi', thesis: 'Pelacak Tesis', briefing: 'Ringkasan Pribadi', eyebrow: 'NARRAX PRO · RISET ANDA',
   radarBody: 'Ubah kriteria Anda menjadi feed riset pribadi. Gabungkan kondisi, simpan radar, dan terima notifikasi saat bukti yang diamati sesuai.',
   thesisBody: 'Tuliskan alasan Anda. Pantau kondisi yang mendukung, melemahkan, atau membutuhkan bukti tambahan.',
