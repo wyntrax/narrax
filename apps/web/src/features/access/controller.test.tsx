@@ -9,13 +9,12 @@ import {active,ADDRESS,challenge,empty,linked,status} from '@/test/fixtures';
 import type {AccessView} from './view';
 import {AccessFlow} from './controller';
 
-const api=vi.hoisted(()=>({entitlements:vi.fn(),status:vi.fn(),challenge:vi.fn(),verify:vi.fn(),join:vi.fn(),leave:vi.fn(),unlink:vi.fn()}));
+const api=vi.hoisted(()=>({entitlements:vi.fn(),status:vi.fn(),challenge:vi.fn(),verify:vi.fn(),join:vi.fn(),leave:vi.fn(),unlink:vi.fn(),refreshMembership:vi.fn()}));
 vi.mock('@/lib/api',async importOriginal=>({...await importOriginal<typeof import('@/lib/api')>(),createApi:()=>api}));
-vi.mock('./view',()=>({AccessView:({state,actions,membership,setMembership}:ComponentProps<typeof AccessView>)=><>
- <output data-testid="state">{JSON.stringify(state)}</output><output data-testid="membership">{String(membership)}</output>
- {(['connect','createWallet','retry','sign','join','leave','wait','logout'] as const).map(name=><button key={name} onClick={actions[name]}>{name}</button>)}
+vi.mock('./view',()=>({AccessView:({state,actions}:ComponentProps<typeof AccessView>)=><>
+ <output data-testid="state">{JSON.stringify(state)}</output>
+ {(['connect','createWallet','retry','sign','join','leave','logout'] as const).map(name=><button key={name} onClick={actions[name]}>{name}</button>)}
  <button onClick={()=>actions.select(ADDRESS)}>select</button><button onClick={()=>actions.unlink('fixture-link')}>unlink</button>
- <button onClick={()=>setMembership(true)}>membership</button>
 </>}));
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 function auth(overrides:Partial<AuthAdapter>={}):AuthAdapter{return {ready:true,authenticated:true,userId:'alice',wallets:[{address:ADDRESS,name:'Phantom',signMessage:vi.fn().mockResolvedValue(new Uint8Array(64))}],login:vi.fn(),logout:vi.fn().mockResolvedValue(undefined),getAccessToken:vi.fn().mockResolvedValue('token'),connectWallet:vi.fn(),createWallet:vi.fn().mockResolvedValue(undefined),...overrides};}
@@ -27,18 +26,18 @@ function mount(initial=auth(),strict=false){
 async function flush(){await act(async()=>{await vi.advanceTimersByTimeAsync(0);});}
 async function click(name:string){fireEvent.click(screen.getByRole('button',{name}));await flush();}
 function state(){return JSON.parse(screen.getByTestId('state').textContent!);}
-beforeEach(()=>{vi.useFakeTimers();vi.resetAllMocks();api.entitlements.mockResolvedValue(linked);api.status.mockResolvedValue(status);api.challenge.mockImplementation(async()=>challenge(window.location.origin));});
+beforeEach(()=>{vi.useFakeTimers();vi.resetAllMocks();api.entitlements.mockResolvedValue(linked);api.status.mockResolvedValue(status);api.challenge.mockImplementation(async()=>challenge(window.location.origin));api.refreshMembership.mockResolvedValue({ok:true});});
 afterEach(()=>vi.useRealTimers());
 
 describe('identity and operation cancellation',()=>{
- it('clears snapshots, proofs and membership immediately on identity change, ignoring late reads',async()=>{
+ it('clears snapshots and proofs immediately on identity change, ignoring late reads',async()=>{
   const old=deferred<typeof active>();api.entitlements.mockReturnValueOnce(old.promise);
   const app=mount();await flush();
   app.identity(auth({userId:'bob'}));await flush();expect(state().name).toBe('linked');
   old.resolve(active);await flush();expect(state().data).toEqual(linked);expect(app.client.getQueryData(accessKey('alice'))).toBeUndefined();
-  await click('connect');await click('select');await click('membership');expect(state().challenge).toBeDefined();
+  await click('connect');await click('select');expect(state().challenge).toBeDefined();
   api.entitlements.mockReturnValue(new Promise(()=>{}));app.identity(auth({userId:'carol'}));
-  expect(state()).toEqual({name:'checking',status});expect(screen.getByTestId('membership')).toHaveTextContent('false');
+  expect(state()).toEqual({name:'checking',status});
   expect(app.client.getQueryData(accessKey('bob'))).toBeUndefined();
  });
  it.each(['join','unlink','leave'] as const)('does not start a follow-up read or invalidation after stale %s completes',async action=>{
@@ -63,8 +62,16 @@ describe('identity and operation cancellation',()=>{
   app.identity(auth({userId:'bob'}));await flush();const reads=api.entitlements.mock.calls.length;
   verification.resolve(undefined);await flush();expect(api.entitlements).toHaveBeenCalledTimes(reads);expect(state().name).toBe('linked');
  });
- it('discards pending sync data when identity changes',async()=>{
-  const app=mount();await flush();await click('wait');const poll=deferred<typeof active>();api.entitlements.mockReturnValueOnce(poll.promise);
+ it('opens paid access automatically after a silent refresh, without a membership action',async()=>{
+  mount();await flush();expect(state().name).toBe('linked');
+  api.entitlements.mockResolvedValueOnce({...active,effectiveTier:'PRO'});
+  await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
+  expect(api.refreshMembership).toHaveBeenCalled();
+  expect(state().name).toBe('active');expect(state().data.effectiveTier).toBe('PRO');
+ });
+ it('discards pending post-sign-in access refreshes when identity changes',async()=>{
+  const app=mount();await flush();expect(state().name).toBe('linked');
+  const poll=deferred<typeof active>();api.entitlements.mockReturnValueOnce(poll.promise);
   await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
   api.entitlements.mockResolvedValue(empty);app.identity(auth({userId:'bob'}));await flush();
   poll.resolve({...active,effectiveTier:'MEMBER'});await flush();expect(state().name).toBe('noWallet');expect(state().data).toEqual(empty);

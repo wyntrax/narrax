@@ -60,6 +60,7 @@ export function createApi(base: string, getAccessToken: () => Promise<string | n
     requirements: () => request('/v1/access/requirements', RequirementsSchema, 'GET', undefined, false),
     challenge: (address: string) => request('/v1/me/linked-wallets/challenge', ChallengeSchema, 'POST', {chain:'solana', address}),
     verify: (value: {challengeId: string; message: string; signature: string}) => request('/v1/me/linked-wallets/verify', LinkSchema, 'POST', value),
+    refreshMembership: () => request('/v1/me/membership/refresh', OkSchema, 'POST'),
     unlink: (id: string) => request(`/v1/me/linked-wallets/${encodeURIComponent(id)}`, OkSchema, 'DELETE'),
     join: () => request('/v1/me/early-access/join', GrantSchema, 'POST'), leave: () => request('/v1/me/early-access', OkSchema, 'DELETE')
   };
