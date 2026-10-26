@@ -36,7 +36,7 @@ describe('token wallet discovery on isolated PostgreSQL', () => {
     const fetcher = vi.fn(async () => json([buy(randomUUID() + 'a', walletA), buy(randomUUID() + 'b', walletA), buy(randomUUID() + 'c', walletB)]));
     const collected = vi.fn(async (wallet: string, opts: { apiKey: string; maxPages?: number; now?: Date }) => {
       expect(wallet).toBe(walletA); expect(opts).toMatchObject({ apiKey: 'test-key', maxPages: 2, now: at });
-      return { events: [{ signature: randomUUID() + 'd', wallet: walletA, mint, side: 'BUY' as const, amountSol: 1, tokenAmount: 10, at: at.toISOString() }], scanned: 1, skipped: 0, capped: false, coveredFrom: new Date(+at - 30 * 86_400_000).toISOString(), coveredTo: at.toISOString() };
+      return { events: [{ signature: randomUUID() + 'd', wallet: walletA, mint, side: 'BUY' as const, amountSol: 1, tokenAmount: 10, at: at.toISOString() }], scanned: 1, skipped: 0, capped: false, nextBefore: null, coveredFrom: new Date(+at - 30 * 86_400_000).toISOString(), coveredTo: at.toISOString() };
     });
     const summary = await discoverTokenWallets(db, { tokenId, mint, symbol: 'DISC', apiKey: 'test-key', now: at, fetch: fetcher as typeof fetch, collect: collected as typeof import('./walletHistory').collectWalletHistory });
     expect(summary).toMatchObject({ status: 'COMPLETE', pagesRead: 1, transactionsRead: 3, swapsRead: 3, participantsSeen: 2, candidates: 1, newWallets: 1, backfilledWallets: 1, createdTrades: 1, capped: false });

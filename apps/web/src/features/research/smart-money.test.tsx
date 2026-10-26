@@ -11,7 +11,8 @@ const intelligence={checkedAt:at,windowDays:30,observedTrades:299,observedBuys:2
 vi.mock('@/i18n/navigation',()=>({useRouter:()=>({push:vi.fn()}),Link:({href,children}:{href:string;children:ReactNode})=><a href={href}>{children}</a>}));
 vi.mock('./session',()=>({useResearchQuery:(path:string)=>{
  fixture.paths.push(path);
- const result={isPending:false,isError:false,isFetching:false,refetch:vi.fn()};
+  const result={isPending:false,isError:false,isFetching:false,refetch:vi.fn()};
+  if(path.startsWith('smart-money/rankings'))return {...result,data:{items:[],pipeline:null}};
  if(path.startsWith('smart-money/')){
   const wallet={address:'wallet',source:'MANUAL',observedTrades:299,intelligence};
   return {...result,data:{items:[fixture.dirItem??wallet],nextCursor:null}};

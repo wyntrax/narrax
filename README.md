@@ -9,6 +9,7 @@ can be reviewed line by line.
 - **Narrative radar** — tracks social attention and the lifecycle of emerging narratives.
 - **Token research** — connects narratives to Solana tokens and reviews market, holder and risk evidence.
 - **Smart-money research** — studies qualified wallets, early buyers and observed trading behavior.
+- **Small-cap wallet leaderboard** — 30-day observed realised SOL results, closed-position win/loss samples, entry-cap bands, first-sale/close timing, and explicit coverage. Missing historical market caps remain unknown. Rankings identify research candidates, not approved wallets or verified copy-trade returns.
 - **Evidence-first signals** — publishes a call only when the required observations are present and fresh.
 - **Research workspace** — narratives, tokens, radar, smart money, portfolio, alerts and analytics.
 - **Personal PRO research** — saved radar conditions with private alerts, token thesis tracking, and daily evidence-linked briefings.

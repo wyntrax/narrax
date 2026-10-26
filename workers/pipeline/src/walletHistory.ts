@@ -1,7 +1,7 @@
 import {parseHeliusSwaps} from '@narra/solana';
 import {SwapEventSchema,type SwapEvent} from '@narra/queue';
 
-export interface WalletHistoryOptions {apiKey:string;fetch?:typeof fetch;maxPages?:number;now?:Date}
+export interface WalletHistoryOptions {apiKey:string;fetch?:typeof fetch;maxPages?:number;now?:Date;before?:string;since?:Date}
 /** Hard ceiling on filtered history pages per wallet. Above this the scan is reported as capped. */
 export const HISTORY_PAGE_CAP=10;
 /** Default depth, tuned to cover a quiet wallet's 30-day swap history without spending the whole provider budget. */
@@ -19,8 +19,9 @@ export function historyPagesFromArgs(args:string[]):number{
 /** Bounded enhanced-history repair. No token-to-token valuation, guessed native deltas,
  * screening jobs, orders or fabricated cost basis. A cap is explicitly reported. */
 export async function collectWalletHistory(address:string,opts:WalletHistoryOptions){
- const since=+(opts.now??new Date())-30*86400000,until=+(opts.now??new Date());
- const events:SwapEvent[]=[],seen=new Set<string>();let before:string|undefined,scanned=0,skipped=0,capped=false;
+  const until=+(opts.now??new Date()),since=opts.since?+opts.since:until-30*86400000;
+  if(!Number.isFinite(since)||!Number.isFinite(until)||since>until)throw new Error('Invalid history boundaries');
+  const events:SwapEvent[]=[],seen=new Set<string>();let before=opts.before,scanned=0,skipped=0,capped=false;
  const pages=Math.min(HISTORY_PAGE_CAP,Math.max(1,opts.maxPages??HISTORY_PAGE_DEFAULT));
  for(let page=0;page<pages;page++){
   const url=new URL(`https://api-mainnet.helius-rpc.com/v0/addresses/${encodeURIComponent(address)}/transactions`);
@@ -43,5 +44,5 @@ export async function collectWalletHistory(address:string,opts:WalletHistoryOpti
   before=last.signature;capped=page===pages-1;
  }
  events.sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));
-  return {events,scanned,skipped,capped,coveredFrom:new Date(since).toISOString(),coveredTo:new Date(until).toISOString()};
+  return {events,scanned,skipped,capped,nextBefore:capped?before??null:null,coveredFrom:new Date(since).toISOString(),coveredTo:new Date(until).toISOString()};
 }

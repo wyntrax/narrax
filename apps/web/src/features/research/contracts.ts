@@ -80,7 +80,7 @@ export const SmartWalletSchema=z.object({address:text,label:text.nullish(),score
 export type SmartWallet=z.infer<typeof SmartWalletSchema>;
 export const WalletIntelligenceSchema=z.object({checkedAt:date,windowDays:number,observedTrades:number,closedTrades:number,requiredClosedTrades:number,status:z.enum(['INSUFFICIENT_HISTORY','READY'])});
 export const SmartWalletsSchema=pageOf(SmartWalletSchema.extend({intelligence:WalletIntelligenceSchema.nullish(),qualification:QualificationSchema.nullish(),researchReview:text.optional()}));
-const WalletTradeSchema=z.object({id:text,at:date,side:z.enum(['BUY','SELL']),amountSol:nullable,amountUsd:nullable.optional(),marketCapUsd:nullable,evidence:z.object({reasons:z.array(text),market:z.object({at:date,source:text}).nullable()}).nullish(),signature:text,token:TokenLabel});
+const WalletTradeSchema=z.object({id:text,at:date,side:z.enum(['BUY','SELL']),amountSol:nullable,amountUsd:nullable.optional(),marketCapUsd:nullable,evidence:z.object({reasons:z.array(text),market:z.object({at:date,source:text,marketCapIsFdv:z.boolean().optional()}).nullable(),sol:z.object({at:date,source:text}).nullish()}).nullish(),signature:text,token:TokenLabel});
 export const WalletTradesSchema=pageOf(WalletTradeSchema);
 export const WalletDetailSchema=z.object({
   qualification:QualificationSchema.nullish(),researchReview:text.optional(),

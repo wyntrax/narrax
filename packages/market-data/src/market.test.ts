@@ -184,6 +184,13 @@ describe('GeckoTerminalSource.getTokenInfo', () => {
       expect(r).toMatchObject({ holders: null, top10Pct: null });
     }
   });
+  it('preserves the cached holder update time and rejects a mismatched mint',async()=>{
+    const last_updated='2026-10-25T15:41:26Z';
+    const src=new GeckoTerminalSource({...fast,fetch:reply(body({holders:{count:5919,last_updated,distribution_percentage:{top_10:'88.8307'}}}))});
+    expect(await src.getTokenInfo(M1)).toMatchObject({holders:5919,holdersUpdatedAt:new Date(last_updated)});
+    expect(await new GeckoTerminalSource({...fast,fetch:reply(body({holders:{count:5919}}))}).getTokenInfo(M1)).toMatchObject({holdersUpdatedAt:null});
+    await expect(new GeckoTerminalSource({...fast,fetch:reply(body({address:M2}))}).getTokenInfo(M1)).rejects.toMatchObject({kind:'shape'});
+  });
 
   it('treats a non-boolean honeypot value as unknown', async () => {
     expect((await new GeckoTerminalSource({ ...fast, fetch: reply(body({ is_honeypot: 'unknown' })) }).getTokenInfo(M1))!.isHoneypot).toBeNull();

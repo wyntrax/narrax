@@ -3,9 +3,12 @@ import AxeBuilder from '@axe-core/playwright';
 import {responses,token} from './research-fixtures';
 
 for(const width of [1440,390])for(const theme of ['dark','light'])test(`mint research flow ${width} ${theme}`,async({page})=>{
+  test.setTimeout(180000);
  await page.setViewportSize({width,height:900});
  await page.context().addCookies([{name:'NARRA_THEME',value:theme,domain:'localhost',path:'/'}]);
- const at=new Date().toISOString();
+  const at=new Date().toISOString();
+  const missing={state:'MISSING',at:null,source:null,data:null};
+  const latestEvidence={checkedAt:at,market:missing,risk:missing,rugcheck:missing,tradeability:missing,holders:{state:'STALE',at:new Date(Date.parse(at)-86400000).toISOString(),retrievedAt:at,source:'geckoterminal',data:{holders:5919,top10Pct:88.83,devHoldingPct:null}}};
  let detailReads=0;
  await page.route('http://localhost:4000/**',async route=>{
   const request=route.request(),url=new URL(request.url()),headers={'access-control-allow-origin':request.headers().origin??'http://localhost:4010','access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,OPTIONS'};
@@ -13,11 +16,12 @@ for(const width of [1440,390])for(const theme of ['dark','light'])test(`mint res
   expect(request.method()).toBe('GET');
   if(url.pathname==='/v1/public-config')return route.fulfill({headers,json:{privyAppId:'fixture-app'}});
   if(url.pathname==='/v1/early-access/status')return route.fulfill({headers,json:{enabled:true,seatsLeft:12,inviteRequired:false}});
-  expect(request.headers().authorization).toBe('Bearer fixture-public-test-token');
+   expect(request.headers().authorization).toBe('Bearer fixture-public-test-token');
+   if(url.pathname===`/v1/tokens/${token.mint}/history`)return route.fulfill({headers,json:{window:'24h',asOf:at,truncated:false,excludedUnverified:0,points:[{at:new Date(Date.parse(at)-86400000).toISOString(),priceUsd:.00018,source:'dexscreener',pairAddress:'pool'},...Array.from({length:90},(_,i)=>({at:new Date(Date.parse(at)-(89-i)*600000).toISOString(),priceUsd:.0000022+i*.000000001,source:'dexscreener',pairAddress:'pool'}))]}});
   if(url.pathname===`/v1/tokens/${token.mint}`){
    detailReads++;
    const source=responses[url.pathname] as Record<string,unknown>;
-   return route.fulfill({headers,json:{...source,observation:{...token.observation,at,stale:detailReads>1},metrics:{priceUsd:123,marketCapUsd:120000,liquidityUsd:45000,volume24hUsd:18000,at}}});
+    return route.fulfill({headers,json:{...source,latestEvidence,observation:{...token.observation,at,stale:detailReads>1},metrics:{priceUsd:123,marketCapUsd:120000,liquidityUsd:45000,volume24hUsd:18000,at}}});
   }
   return route.fulfill({headers,status:responses[url.pathname]?200:404,json:responses[url.pathname]??{error:'NOT_FOUND'}});
  });
@@ -33,7 +37,14 @@ for(const width of [1440,390])for(const theme of ['dark','light'])test(`mint res
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
  expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa']).analyze()).violations).toEqual([]);
  await page.screenshot({path:`test-results/token-brief-${width}-${theme}.png`,fullPage:true});
- await page.getByRole('link',{name:'Inspect historical snapshots',exact:true}).click();await expect(page.locator('#token-history')).toHaveAttribute('open','');
+  await page.getByRole('link',{name:'Inspect historical snapshots',exact:true}).click();await expect(page.locator('#token-history')).toHaveAttribute('open','');
+  await expect(page.getByText(/Logarithmic scale/)).toBeVisible();
+  await expect(page.getByText('geckoterminal',{exact:true})).toBeVisible();
+  await page.getByLabel('Price scale').selectOption('linear');await expect(page.getByText(/Linear scale/)).toBeVisible();
+  await page.getByLabel('Price scale').selectOption('auto');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa']).analyze()).violations).toEqual([]);
+  await page.locator('.price-history-chart').screenshot({path:`test-results/token-crash-chart-${width}-${theme}.png`});
   await page.getByRole('button',{name:'Refresh research',exact:true}).click();await expect(page.getByText('Market snapshot is stale',{exact:true})).toBeVisible();await expect(page.getByText('$123',{exact:true})).toBeVisible();await expect(page.getByText('Last observed market values',{exact:true})).toBeVisible();await expect(page.getByText('0%',{exact:true})).toHaveCount(0);
  await page.goto('/app/tokens/11111111111111111111111111111111');await page.getByRole('button',{name:'Continue',exact:true}).click();
  await expect(page.getByRole('heading',{name:'No indexed research for this address'})).toBeVisible();

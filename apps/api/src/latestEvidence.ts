@@ -1,6 +1,6 @@
 import type {PrismaClient} from '@narra/database';
 import type {z} from 'zod';
-import {LATEST_EVIDENCE_MAX_AGE_MS,LatestEvidenceSchema,RugcheckObservationSchema,TradeabilityQuoteSchema,type LatestEvidence} from '@narra/shared';
+import {LATEST_EVIDENCE_MAX_AGE_MS,LatestEvidenceSchema,HolderObservationSchema,RugcheckObservationSchema,TradeabilityQuoteSchema,type LatestEvidence} from '@narra/shared';
 import {evidence as MarketEvidenceSchema} from './marketEvidence';
 
 const numeric=(v:unknown)=>v==null?null:Number(String(v));
@@ -9,7 +9,7 @@ const timestamp=(at:Date)=>Number.isFinite(+at)?at.toISOString():'';
 export async function latestEvidenceViews(db:PrismaClient,tokens:{id:string;mint:string}[],now:Date){
  const unique=[...new Map(tokens.map(t=>[t.id,t])).values()];
  if(!unique.length)return new Map<string,LatestEvidence>();
- const keys=unique.flatMap(t=>[`research.market.${t.id}`,`research.radarSafetyEvidence.${t.mint}`,`research.radarTradeability.${t.mint}`]);
+  const keys=unique.flatMap(t=>[`research.market.${t.id}`,`research.holders.${t.id}`,`research.radarSafetyEvidence.${t.mint}`,`research.radarTradeability.${t.mint}`]);
  const [rows,settings]=await Promise.all([
   db.token.findMany({where:{id:{in:unique.map(t=>t.id)}},select:{id:true,mint:true,metrics:{orderBy:{at:'desc'},take:1},holders:{orderBy:{at:'desc'},take:1},risk:{orderBy:{at:'desc'},take:1}}}),
   db.systemSetting.findMany({where:{key:{in:keys}},select:{key:true,value:true}}),
@@ -29,10 +29,15 @@ export async function latestEvidenceViews(db:PrismaClient,tokens:{id:string;mint
   const marketVerified=marketMeta.success&&marketMeta.data.mint===t.mint&&marketMeta.data.metricId===m?.id&&Date.parse(marketMeta.data.at)===Number(m?.at);
   const rugKey=`research.radarSafetyEvidence.${t.mint}`,quoteKey=`research.radarTradeability.${t.mint}`;
   const rug=RugcheckObservationSchema.safeParse(values.get(rugKey)),quote=TradeabilityQuoteSchema.safeParse(values.get(quoteKey));
-   const shape=LatestEvidenceSchema.shape,age=LATEST_EVIDENCE_MAX_AGE_MS;
+    const shape=LatestEvidenceSchema.shape,age=LATEST_EVIDENCE_MAX_AGE_MS;
+    const holderMeta=HolderObservationSchema.safeParse(values.get(`research.holders.${t.id}`));
+    const hm=holderMeta.success&&holderMeta.data.mint===t.mint?holderMeta.data:null;
+    const holders:LatestEvidence['holders']=hm ? Date.parse(hm.retrievedAt)>+now || hm.sourceAt!==null&&Date.parse(hm.sourceAt)>Date.parse(hm.retrievedAt) ? invalid() : {
+      ...(hm.sourceAt?record(shape.holders,{holders:hm.holders,top10Pct:hm.top10Pct,devHoldingPct:hm.devHoldingPct},hm.sourceAt,hm.source,age.holders):{state:'UNVERIFIED' as const,at:null,source:hm.source,data:{holders:hm.holders,top10Pct:hm.top10Pct,devHoldingPct:hm.devHoldingPct}}),retrievedAt:hm.retrievedAt,
+    } : values.has(`research.holders.${t.id}`)?invalid():h?record(shape.holders,{holders:h.holders,top10Pct:h.top10Pct,devHoldingPct:h.devHoldingPct},timestamp(h.at),'stored-holder-metric',age.holders,false):missing();
    const value:LatestEvidence={checkedAt:now.toISOString(),
     market:m?record(shape.market,{priceUsd:numeric(m.priceUsd),marketCapUsd:numeric(m.marketCapUsd),liquidityUsd:numeric(m.liquidityUsd)},timestamp(m.at),marketVerified?'dexscreener':null,age.market,marketVerified):missing(),
-    holders:h?record(shape.holders,{holders:h.holders,top10Pct:h.top10Pct,devHoldingPct:h.devHoldingPct},timestamp(h.at),'stored-holder-metric',age.holders):missing(),
+     holders,
     risk:r?record(shape.risk,{flags:r.flags},timestamp(r.at),'stored-risk-metric',age.risk):missing(),
     rugcheck:!values.has(rugKey)?missing():rug.success&&rug.data.mint===t.mint?record(shape.rugcheck,rug.data,rug.data.sourceAt,'rugcheck',age.rugcheck):invalid(),
     tradeability:!values.has(quoteKey)?missing():quote.success&&quote.data.mint===t.mint?record(shape.tradeability,quote.data,quote.data.sourceAt,'jupiter',age.tradeability):invalid(),

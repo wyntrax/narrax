@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@narra/database';
+import { computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
 import {
   classifyStyle, computeConsensus, computeLeaderStats, computeWalletStats, detectTimingClusters, holdingPatterns, rotationRate, walletScore, MIN_CLOSED_LEGS, researchSample,
   type ConsensusEvent, type Entry, type TradeRow, type WalletInfo,
@@ -33,15 +34,17 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   const [wallets, rows] = await Promise.all([
     db.trackedWallet.findMany({ where: { active: true }, select: { id: true, clusterId: true, cluster: { select: { label: true } } } }),
     db.walletTrade.findMany({
-      where: { at: { gte: since, lte: now }, tokenAmount: { not: null } },
-      select: { walletId: true, tokenId: true, side: true, amountSol: true, tokenAmount: true, at: true },
-      orderBy: { at: 'asc' },
+      where: { at: { gte: new Date(Math.min(+since,+now-30*86_400_000)), lte: now }, wallet: { active: true } },
+      select: { id: true, walletId: true, tokenId: true, side: true, amountSol: true, tokenAmount: true, at: true, marketCapUsd: true, evidence: true },
+      orderBy: [{ at: 'asc' }, { id: 'asc' }],
     }),
   ]);
 
   // Deactivated wallets keep their history but take no part in scores, clusters or consensus.
   const activeIds = new Set(wallets.map((w) => w.id));
-  const trades: TradeRow[] = rows.filter((r) => activeIds.has(r.walletId)).map((r) => ({ wallet: r.walletId, token: r.tokenId, side: r.side, sol: toNum(r.amountSol), qty: toNum(r.tokenAmount), at: r.at }));
+  const trades: TradeRow[] = rows.filter((r) => activeIds.has(r.walletId) && r.tokenAmount !== null && +r.at >= +since).map((r) => ({ wallet: r.walletId, token: r.tokenId, side: r.side, sol: toNum(r.amountSol), qty: toNum(r.tokenAmount), at: r.at }));
+  const performanceRows = new Map<string, PerformanceTrade[]>();
+  for (const row of rows) { if (+row.at < +now-30*86_400_000) continue; const mine = performanceRows.get(row.walletId) ?? []; mine.push(row); performanceRows.set(row.walletId,mine); }
   const byWallet = new Map<string, TradeRow[]>();
   for (const t of trades) byWallet.set(t.wallet, [...(byWallet.get(t.wallet) ?? []), t]);
 
@@ -60,6 +63,9 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   let scored = 0;
 
   for (const w of wallets) {
+    const performanceKey = `wallet.performance.${w.id}`, observed = performanceRows.get(w.id) ?? [];
+    const performance = computeWalletPerformance(observed.slice(0,10_000),now,observed.length>10_000);
+    ops.push(db.systemSetting.upsert({ where: { key: performanceKey }, create: { key: performanceKey, value: performance }, update: { value: performance } }));
     const mine = byWallet.get(w.id) ?? [];
     const stats = computeWalletStats(mine);
     const score = walletScore(stats);
