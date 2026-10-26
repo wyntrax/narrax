@@ -1,4 +1,5 @@
 import { Queue, type JobsOptions } from 'bullmq';
+import { createHash } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { z } from 'zod';
 import { AgentDecisionSchema } from '@narra/shared';
@@ -30,6 +31,8 @@ export const QUEUE_NAMES = {
   realtimePublish: 'realtime-publish',
   telegramDelivery: 'telegram-delivery',
   tokenDiscovery: 'token-discovery',
+  wyntraxHoldings: 'wyntrax-holdings',
+  wyntraxMembership: 'wyntrax-membership',
 } as const;
 
 /** A normalized on-chain swap by a wallet. Produced from provider payloads, never from raw text. */
@@ -53,6 +56,24 @@ export const AiScreeningJobSchema = z.object({
   reason: z.string().max(120),
 });
 export type AiScreeningJob = z.infer<typeof AiScreeningJobSchema>;
+
+/** A request to read the configured $WYNTRAX mint for one user, or for every linked wallet when userId is absent. */
+export const WyntraxHoldingsJobSchema = z.object({ userId: z.string().min(1).max(200).optional() }).strict();
+export type WyntraxHoldingsJob = z.infer<typeof WyntraxHoldingsJobSchema>;
+
+const SolanaAddress = z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+/** The same signed membership event shape Wyntrax sends to Narrax, used for the outbound holding notification. */
+export const WyntraxMembershipEventSchema = z.object({
+  id: z.string().min(1).max(256),
+  type: z.enum(['membership.granted', 'membership.revoked']),
+  occurredAt: z.string().datetime({ offset: true }),
+  data: z.object({
+    membershipId: z.string().min(1).max(256), key: z.enum(['MEMBER', 'PRO', 'ELITE']), chain: z.literal('solana'),
+    wallet: SolanaAddress, seq: z.number().int().safe().positive(),
+    validUntil: z.string().datetime({ offset: true }).nullable(), checkedAt: z.string().datetime({ offset: true }),
+  }).strict(),
+}).strict().refine(e => e.type === 'membership.granted' ? e.data.validUntil !== null : e.data.validUntil === null, { path: ['data', 'validUntil'] });
+export type WyntraxMembershipEvent = z.infer<typeof WyntraxMembershipEventSchema>;
 
 export const ExecutionJobSchema = z.object({
   userId: z.string().min(1),
@@ -109,6 +130,8 @@ export function createQueues(connection: Redis) {
   const realtimePublish = new Queue(QUEUE_NAMES.realtimePublish, { connection });
   const telegramDelivery = new Queue(QUEUE_NAMES.telegramDelivery, { connection });
   const tokenDiscovery = createTokenDiscoveryQueue(connection);
+  const wyntraxHoldings = new Queue(QUEUE_NAMES.wyntraxHoldings, { connection });
+  const wyntraxMembership = new Queue(QUEUE_NAMES.wyntraxMembership, { connection });
 
   return {
     walletEvents,
@@ -150,6 +173,18 @@ export function createQueues(connection: Redis) {
     /** Posts eligible global Early Radar alerts to the configured Telegram chat. */
     scheduleTelegramDelivery: (everyMs = 30_000) =>
       telegramDelivery.upsertJobScheduler('deliver', { every: everyMs }, { name: 'deliver', data: {}, opts: { attempts: 1, ...RETAIN_SHORT } }),
+    /** Refreshes $WYNTRAX holding entitlements. The job reads the mint and thresholds from SystemSetting. */
+    scheduleWyntraxHoldings: (everyMs = 5 * 60_000) =>
+      wyntraxHoldings.upsertJobScheduler('sync', { every: everyMs }, { name: 'sync', data: {}, opts: { attempts: 1, ...RETAIN } }),
+    /** At most one check per user per minute, so a screen refresh cannot flood the RPC. */
+    requestWyntraxHoldings: async (userId: string) => {
+      // BullMQ custom ids cannot contain ':' and Privy user ids do (did:privy:...).
+      const userKey = createHash('sha256').update(userId).digest('hex').slice(0, 24);
+      return wyntraxHoldings.add('check', WyntraxHoldingsJobSchema.parse({ userId }), { jobId: `user-${userKey}-${Math.floor(Date.now() / 60_000)}`, attempts: 1, ...RETAIN });
+    },
+    /** Delivers one signed membership event to the configured Wyntrax receiver, with retries. */
+    enqueueWyntraxMembership: async (event: WyntraxMembershipEvent) =>
+      wyntraxMembership.add('deliver', WyntraxMembershipEventSchema.parse(event), { jobId: event.id, attempts: 5, backoff: { type: 'exponential', delay: 5000 }, ...RETAIN }),
     scheduleWalletSync: (everyMs = 10 * 60_000) =>
       walletSync.upsertJobScheduler('sync', { every: everyMs }, { name: 'sync', data: {}, opts: { attempts: 1, ...RETAIN } }),
     /** Asks for a sync now. At most one request per minute is queued, so a burst of edits makes one sync. */
@@ -187,7 +222,7 @@ export function createQueues(connection: Redis) {
     /** Waiting, active, failed and delayed job counts for every queue, for the admin status view. */
     counts: async (): Promise<Record<string, QueueCounts>> => {
       const out: Record<string, QueueCounts> = {};
-      for (const q of [walletEvents, aiScreening, execution, walletIntelligence, narrativeIngestion, tokenResolution, aiAnalysis, marketData, walletSync, walletFunding, walletDiscovery, positionMonitor, entryFanOut, exitFanOut, portfolioSnapshots, outcomeTracking, notificationDispatch, realtimePublish, telegramDelivery, tokenDiscovery.queue]) {
+      for (const q of [walletEvents, aiScreening, execution, walletIntelligence, narrativeIngestion, tokenResolution, aiAnalysis, marketData, walletSync, walletFunding, walletDiscovery, positionMonitor, entryFanOut, exitFanOut, portfolioSnapshots, outcomeTracking, notificationDispatch, realtimePublish, telegramDelivery, tokenDiscovery.queue, wyntraxHoldings, wyntraxMembership]) {
         const c = await q.getJobCounts('waiting', 'active', 'failed', 'delayed');
         let consumers: number | undefined;
         try { consumers = (await q.getWorkers()).length; } catch { consumers = undefined; } // unknown, not zero, when Redis will not say
@@ -211,7 +246,7 @@ export function createQueues(connection: Redis) {
         out[q.name]={lastCompletedAt:job?.finishedOn?new Date(job.finishedOn).toISOString():null,lastFailedAt:failed[0]?.finishedOn?new Date(failed[0].finishedOn).toISOString():null,lastRun:Object.keys(run).length?run:null};
       }));return out;
     },
-    close: async () => { await Promise.all([walletEvents.close(), aiScreening.close(), execution.close(), walletIntelligence.close(), narrativeIngestion.close(), tokenResolution.close(), aiAnalysis.close(), marketData.close(), walletSync.close(), walletFunding.close(), walletDiscovery.close(), positionMonitor.close(), entryFanOut.close(), exitFanOut.close(), portfolioSnapshots.close(), outcomeTracking.close(), notificationDispatch.close(), realtimePublish.close(), telegramDelivery.close(), tokenDiscovery.queue.close()]); },
+    close: async () => { await Promise.all([walletEvents.close(), aiScreening.close(), execution.close(), walletIntelligence.close(), narrativeIngestion.close(), tokenResolution.close(), aiAnalysis.close(), marketData.close(), walletSync.close(), walletFunding.close(), walletDiscovery.close(), positionMonitor.close(), entryFanOut.close(), exitFanOut.close(), portfolioSnapshots.close(), outcomeTracking.close(), notificationDispatch.close(), realtimePublish.close(), telegramDelivery.close(), tokenDiscovery.queue.close(), wyntraxHoldings.close(), wyntraxMembership.close()]); },
   };
 }
 export type Queues = ReturnType<typeof createQueues>;

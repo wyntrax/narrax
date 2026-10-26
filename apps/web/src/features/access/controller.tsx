@@ -22,7 +22,7 @@ function AccessController({auth}:{auth:AuthAdapter}){
  const [scope]=useState(()=>({epoch:0,pending:false,active:true}));
  const api=useMemo(()=>createApi(process.env.NEXT_PUBLIC_API_URL??'',()=>authRef.current.getAccessToken()),[]);
  const publicQuery=usePublicStatus(api);
- const [state,dispatch]=useReducer(transition,{name:'checking'}),[membership,setMembership]=useState(false);
+ const [state,dispatch]=useReducer(transition,{name:'checking'});
  const stateRef=useRef(state);stateRef.current=state;
  function invalidate(){scope.epoch++;scope.pending=false;}
  function fail(e:unknown){const error=errorKey(e);dispatch({type:'FAIL',error,retryAt:e instanceof ApiError&&e.retryAfter?Date.now()+e.retryAfter*1000:undefined,requiredTier:e instanceof ApiError?e.requiredTier:undefined});}
@@ -65,10 +65,13 @@ function AccessController({auth}:{auth:AuthAdapter}){
   return()=>clearTimeout(timer);
  },[state.name,scope]);
  useEffect(()=>{
-  if(state.name!=='waitingSync')return;
+  if(state.name!=='linked'||!state.data?.links.length)return;
   const own=scope.epoch,current=()=>scope.active&&own===scope.epoch;
-  return watchMembership(api.entitlements,data=>{if(current())dispatch({type:'SYNC',data});},()=>{if(current())dispatch({type:'SYNC_TIMEOUT'});},error=>{if(current())fail(error);});
- },[state.name,api,scope]);
+  // Best effort: ask the server to check this wallet's token holding. Early access never waits for it.
+  void api.refreshMembership().catch(()=>{});
+  // Silent polling opens paid access if the server finds a holding or receives a Wyntrax update.
+  return watchMembership(api.entitlements,data=>{if(current()&&data.effectiveTier!=='NONE')dispatch({type:'SYNC',data});},()=>{},error=>{if(current())fail(error);});
+ },[state.name,state.data?.links.length,api,scope]);
  useEffect(()=>{if(state.name!=='active'||!state.data?.nextExpiry)return;return scheduleRefresh(state.data.nextExpiry,()=>retry());
  // Only an authoritative snapshot expiry schedules this refresh.
  // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -87,13 +90,12 @@ function AccessController({auth}:{auth:AuthAdapter}){
    if(!current())return;
    validateChallenge(snapshot.challenge,window.location.origin,snapshot.address);send({type:'SIGNED'});
    await api.verify({challengeId:snapshot.challenge.challengeId,message:snapshot.challenge.message,signature:encodeSignature(signature)});
-   const data=await load(current);if(data)send({type:'VERIFIED',data,wait:membership});
+   const data=await load(current);if(data)send({type:'VERIFIED',data});
   });},
   join:()=>{void run(async(send,current)=>{send({type:'JOIN'});await api.join();const data=await load(current);if(!data)return;send({type:'JOINED',data});if(current())await client.invalidateQueries({queryKey:['early-access-status']});});},
-  wait:()=>dispatch({type:'WAIT'}),
   unlink:(id:string)=>{void run(async(send,current)=>{send({type:'UNLINK'});await api.unlink(id);const data=await load(current);if(data)send({type:'LOADED',data});});},
   leave:()=>{void run(async(send,current)=>{send({type:'LEAVE'});await api.leave();const data=await load(current);if(!data)return;send({type:'LOADED',data});if(current())await client.invalidateQueries({queryKey:['early-access-status']});});},
   logout:()=>{invalidate();const own=scope.epoch;client.removeQueries({queryKey:['entitlements']});dispatch({type:'SIGN_OUT'});void auth.logout().catch(()=>{if(scope.active&&own===scope.epoch)fail(new ApiError('NETWORK'));});}
  };
- return <AccessView state={state} actions={actions} wallets={auth.wallets} membership={membership} setMembership={setMembership}/>;
+ return <AccessView state={state} actions={actions} wallets={auth.wallets}/>;
 }

@@ -86,6 +86,19 @@ describe.skipIf(!up)('account routes (needs Postgres)', () => {
     expect((await call('GET', '/v1/me', bob)).body.agentPaused).toBe(false);
   });
 
+  it('enqueues a post-sign-in holding check only for the authenticated user', async () => {
+    const requested: string[] = [];
+    const app = await buildApp({ account: { db, verifier, requestMembershipSync: async userId => { requested.push(userId); } } });
+    const res = await app.inject({ method: 'POST', url: '/v1/me/membership/refresh', headers: { authorization: `Bearer ${await sign(alice)}` } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+    const user = await db.user.findUniqueOrThrow({ where: { privyUserId: alice }, select: { id: true } });
+    expect(requested).toEqual([user.id]);
+    expect((await app.inject({ method: 'POST', url: '/v1/me/membership/refresh' })).statusCode).toBe(401);
+    expect(requested).toEqual([user.id]);
+    await app.close();
+  });
+
   it('saves risk presets and refuses custom limits beyond the system limits', async () => {
     expect((await call('PUT', '/v1/risk-profile', alice, { preset: 'CONSERVATIVE' })).body).toMatchObject({ preset: 'CONSERVATIVE', maxPerTradeSol: 0.1 });
     const all = { maxPerTradeSol: 0.3, maxDailyAllocationSol: 1, maxTokenExposurePct: 12, maxOpenPositions: 4, maxDailyLossPct: 6, minConfidence: 0.8 };

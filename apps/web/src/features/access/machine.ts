@@ -1,14 +1,14 @@
 import type {Challenge, Entitlements, PublicStatus} from '@/lib/schemas';
-export const STATES = ['signedOut','checking','noWallet','connecting','challenge','signing','verifying','linked','joining','active','disabled','full','inviteOnly','waitingSync','syncExpired','unlinking','leaving','error'] as const;
+export const STATES = ['signedOut','checking','noWallet','connecting','challenge','signing','verifying','linked','joining','active','disabled','full','inviteOnly','unlinking','leaving','error'] as const;
 export type StateName = typeof STATES[number];
 export interface AccessState {name: StateName; data?: Entitlements; status?: PublicStatus; challenge?: Challenge; address?: string; error?: string; retryAt?: number; requiredTier?:string}
-export type Event = {type:'SIGN_OUT'} | {type:'CHECK'} | {type:'LOADED'; data:Entitlements; status?:PublicStatus} | {type:'PUBLIC'; status:PublicStatus} | {type:'CONNECT'} | {type:'CHALLENGE'; challenge:Challenge; address:string} | {type:'SIGN'} | {type:'SIGNED'} | {type:'VERIFIED'; data:Entitlements; wait:boolean} | {type:'JOIN'} | {type:'JOINED'; data:Entitlements} | {type:'WAIT'} | {type:'SYNC'; data:Entitlements} | {type:'SYNC_TIMEOUT'} | {type:'UNLINK'} | {type:'LEAVE'} | {type:'FAIL'; error:string; retryAt?:number;requiredTier?:string};
+export type Event = {type:'SIGN_OUT'} | {type:'CHECK'} | {type:'LOADED'; data:Entitlements; status?:PublicStatus} | {type:'PUBLIC'; status:PublicStatus} | {type:'CONNECT'} | {type:'CHALLENGE'; challenge:Challenge; address:string} | {type:'SIGN'} | {type:'SIGNED'} | {type:'VERIFIED'; data:Entitlements} | {type:'JOIN'} | {type:'JOINED'; data:Entitlements} | {type:'SYNC'; data:Entitlements} | {type:'UNLINK'} | {type:'LEAVE'} | {type:'FAIL'; error:string; retryAt?:number;requiredTier?:string};
 export const TRANSITIONS: Record<Event['type'], readonly StateName[]> = {
  SIGN_OUT:STATES, PUBLIC:STATES, CHECK:STATES, FAIL:STATES,
- LOADED:['checking','unlinking','leaving'], CONNECT:['noWallet','linked','active','disabled','full','inviteOnly','syncExpired','error'],
+ LOADED:['checking','unlinking','leaving'], CONNECT:['noWallet','linked','active','disabled','full','inviteOnly','error'],
  CHALLENGE:['connecting'], SIGN:['challenge'], SIGNED:['signing'], VERIFIED:['verifying'],
- JOIN:['linked','syncExpired'], JOINED:['joining'], WAIT:['linked','syncExpired','active'], SYNC:['waitingSync'], SYNC_TIMEOUT:['waitingSync'],
- UNLINK:['linked','active','disabled','full','inviteOnly','syncExpired','error'], LEAVE:['active','linked','disabled','full','inviteOnly','syncExpired','error']
+ JOIN:['linked'], JOINED:['joining'], SYNC:['linked','active'],
+ UNLINK:['linked','active','disabled','full','inviteOnly','error'], LEAVE:['active','linked','disabled','full','inviteOnly','error']
 };
 export function resolvedName(data:Entitlements, status?:PublicStatus):StateName {
  if(data.effectiveTier!=='NONE')return 'active';
@@ -29,16 +29,15 @@ export function transition(state:AccessState,event:Event):AccessState {
  case 'CHALLENGE':return {...state,name:'challenge',challenge:event.challenge,address:event.address};
  case 'SIGN':return {...state,name:'signing'};
  case 'SIGNED':return {...state,name:'verifying'};
- case 'VERIFIED':return {...state,name:event.data.effectiveTier!=='NONE'?'active':event.wait?'waitingSync':resolvedName(event.data,state.status),data:event.data,challenge:undefined};
+ case 'VERIFIED':return {...state,name:event.data.effectiveTier!=='NONE'?'active':resolvedName(event.data,state.status),data:event.data,challenge:undefined};
  case 'JOIN':return {...state,name:'joining'};
  case 'JOINED':return {...state,name:resolvedName(event.data,state.status),data:event.data};
- case 'WAIT':return {...state,name:'waitingSync'};
- case 'SYNC':return {...state,data:event.data,name:['MEMBER','PRO','ELITE'].includes(event.data.effectiveTier)?'active':'waitingSync'};
- case 'SYNC_TIMEOUT':return {...state,name:'syncExpired'};
+ // A post-sign-in refresh may discover paid access while the wallet is verified. It opens the app without a manual step.
+ case 'SYNC':return {...state,data:event.data,name:event.data.effectiveTier!=='NONE'?'active':state.name};
  case 'UNLINK':return {...state,name:'unlinking',challenge:undefined};
  case 'LEAVE':return {...state,name:'leaving'};
  case 'FAIL':return {...state,challenge:undefined,name:event.error==='EARLY_ACCESS_DISABLED'||event.error==='EARLY_ACCESS_CLOSED'?'disabled':event.error==='EARLY_ACCESS_FULL'?'full':event.error==='INVITES_UNAVAILABLE'?'inviteOnly':'error',error:event.error,retryAt:event.retryAt,requiredTier:event.requiredTier};
  }
 }
 export const busyStates:readonly StateName[]=['checking','connecting','signing','verifying','joining','unlinking','leaving'];
-export function stepFor(state:AccessState){return state.name==='signedOut'||(state.name==='checking'&&!state.data)?1:state.data?.links.length||['joining','active','linked','waitingSync','syncExpired'].includes(state.name)?3:2;}
+export function stepFor(state:AccessState){return state.name==='signedOut'||(state.name==='checking'&&!state.data)?1:state.data?.links.length||['joining','active','linked'].includes(state.name)?3:2;}

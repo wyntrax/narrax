@@ -39,6 +39,7 @@ const ParsedTxResult = z.object({
 const RawAccountSchema = z.object({ lamports: z.number().int().nonnegative(), owner: z.string(), data: z.tuple([z.string(), z.literal('base64')]) }).passthrough();
 const MultipleAccountsResult = z.object({ value: z.array(RawAccountSchema.nullable()) });
 const SimulateResult = z.object({
+  context: z.object({ slot: z.number().int().nonnegative().safe() }).optional(),
   value: z.object({
     err: z.unknown().nullish(),
     logs: z.array(z.string()).nullish(),
@@ -58,7 +59,7 @@ const MintInfoResult = z.object({
 export type ParsedTx = NonNullable<z.infer<typeof ParsedTxResult>>;
 /** An account as returned with base64 encoding. */
 export interface RpcAccount { lamports: number; owner: string; data: string }
-export interface SimulationResponse { err: unknown | null; logs: string[]; unitsConsumed: number | null; accounts: (RpcAccount | null)[] }
+export interface SimulationResponse { err: unknown | null; logs: string[]; unitsConsumed: number | null; accounts: (RpcAccount | null)[]; /** Evidence only; older responses may omit context. */ slot?: number }
 export interface MintInfo { /** The program that owns the mint account. */ program: string; decimals: number; freezeAuthority: string | null; mintAuthority: string | null; hasExtensions: boolean }
 export interface SignatureInfo { signature: string; blockTime: number | null; failed: boolean }
 
@@ -129,6 +130,15 @@ export class SolanaRpc {
     return r.value.map((a) => (a ? { lamports: a.lamports, owner: a.owner, data: a.data[0] } : null));
   }
 
+  /** Same confirmed account read, retaining the RPC context slot as review evidence only. */
+  async getAccountsWithContext(addresses: string[]): Promise<{ slot: number; accounts: (RpcAccount | null)[] }> {
+    if (addresses.length === 0 || addresses.length > 100) throw new RpcError('getMultipleAccounts needs 1 to 100 addresses');
+    const schema = MultipleAccountsResult.extend({ context: z.object({ slot: z.number().int().nonnegative().safe() }) });
+    const r = await this.call('getMultipleAccounts', [addresses, { encoding: 'base64', commitment: 'confirmed' }], schema);
+    if (r.value.length !== addresses.length) throw new RpcError('getMultipleAccounts returned the wrong number of accounts');
+    return { slot: r.context.slot, accounts: r.value.map((a) => (a ? { lamports: a.lamports, owner: a.owner, data: a.data[0] } : null)) };
+  }
+
   /**
    * Runs an unsigned transaction against the node's state and returns the post-state of the named accounts. Nothing is sent.
    * Signature verification is off (the transaction is unsigned) and the blockhash is NOT replaced, so an expired one fails.
@@ -140,6 +150,7 @@ export class SolanaRpc {
     return {
       err: r.value.err ?? null, logs: r.value.logs ?? [], unitsConsumed: r.value.unitsConsumed ?? null,
       accounts: accs.map((a) => (a ? { lamports: a.lamports, owner: a.owner, data: a.data[0] } : null)),
+      ...(r.context ? { slot: r.context.slot } : {}),
     };
   }
 

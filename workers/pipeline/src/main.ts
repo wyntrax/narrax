@@ -8,7 +8,7 @@ import { publishWalletResearch, measureWalletResearch } from './walletResearch';
 import { refreshResearchHistory } from './walletResearchHistory';
 import {heliusMetadataSource} from './tokenMetadata';
 import { createPrisma } from '@narra/database';
-import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, TokenDiscoveryJobSchema, createQueues, createRedis } from '@narra/queue';
+import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, TokenDiscoveryJobSchema, WyntraxHoldingsJobSchema, WyntraxMembershipEventSchema, createQueues, createRedis } from '@narra/queue';
 import { HeliusWebhooks, JupiterClient, SolanaRpc } from '@narra/solana';
 import { readTregConfig } from '@narra/narrative';
 import { runTregJob } from './tregJob';
@@ -21,6 +21,8 @@ import { makeDeveloperHoldingSource } from './developerHoldings';
 import { makeRadarSafetySource } from './radarSafetyEvidence';
 import { makeTradeabilitySource } from './tradeabilityEvidence';
 import { deliverEarlyRadarTelegram, telegramConfigFromEnv, TelegramBotApiTransport } from './telegram';
+import { syncWyntraxHoldings } from './wyntraxHoldings';
+import { deliverWyntraxMembership } from './wyntraxMembership';
 import { acquireWorkerLock, WORKER_LOCK_KEY } from './workerLock';
 
 // First, before any connection is opened: stop with a clear list of what is wrong. Messages never contain a value.
@@ -85,6 +87,13 @@ async function main(): Promise<void> {
   // Wallet jobs. History scans need an RPC URL. Webhook sync needs the Helius API key, the public webhook URL and the shared secret.
   // Each job does nothing when its inputs are missing, and none of them can trade.
   const historyRpc = process.env.HELIUS_RPC_URL ? new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 }) : null;
+  // $WYNTRAX holding checks write local entitlements. The optional outbound notification keeps Wyntrax membership in sync.
+  const membershipWebhook = process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_URL && process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_SECRET
+    ? { url: process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_URL, secret: process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_SECRET }
+    : null;
+  if (!historyRpc) console.log('no HELIUS_RPC_URL: $WYNTRAX holding checks are off');
+  else if (!membershipWebhook) console.log('$WYNTRAX holding checks on; outbound membership webhook off');
+  else console.log('$WYNTRAX holding checks on; outbound membership webhook on');
   const syncDeps = process.env.HELIUS_API_KEY && process.env.HELIUS_WEBHOOK_URL && process.env.HELIUS_WEBHOOK_SECRET
     ? { client: new HeliusWebhooks({ apiKey: process.env.HELIUS_API_KEY }), cfg: { webhookUrl: process.env.HELIUS_WEBHOOK_URL, authHeader: process.env.HELIUS_WEBHOOK_SECRET } }
     : null;
@@ -113,6 +122,7 @@ async function main(): Promise<void> {
     await queues.scheduleNotificationDispatch();
     await queues.scheduleRealtimePublish();
     if (telegramConfig) await queues.scheduleTelegramDelivery();
+    if (historyRpc) await queues.scheduleWyntraxHoldings();
   })();
   scheduled.then(() => console.log('schedules registered'), (e) => { console.error('could not register schedules:', e instanceof Error ? e.message : e); process.exit(1); });
 
@@ -179,6 +189,20 @@ async function main(): Promise<void> {
       }
       return JSON.stringify(summary);
     }, { connection, concurrency: 1 }),
+    // $WYNTRAX holding discovery. It can grant paid access locally and enqueue an outbound Wyntrax membership event.
+    new Worker(QUEUE_NAMES.wyntraxHoldings, async (job) => {
+      if (!historyRpc) return 'needs HELIUS_RPC_URL';
+      const { userId } = WyntraxHoldingsJobSchema.parse(job.data);
+      return JSON.stringify(await syncWyntraxHoldings({
+        db, rpc: historyRpc, now: () => new Date(), enqueue: event => queues.enqueueWyntraxMembership(event),
+      }, { userId }));
+    }, { connection, concurrency: 1 }),
+    // Delivery only. The payload is validated again here, and a missing receiver is a completed no-op.
+    new Worker(QUEUE_NAMES.wyntraxMembership, async (job) => {
+      const event = WyntraxMembershipEventSchema.parse(job.data);
+      if (!membershipWebhook) return 'not configured';
+      return deliverWyntraxMembership(event, membershipWebhook);
+    }, { connection, concurrency: 2 }),
     // The execution queue is consumed by workers/executor, a separate process, since B5a. This process only enqueues.
   ];
   for (const w of workers) w.on('failed', (job, err) => console.error(JSON.stringify({ msg: 'job_failed', queue: w.name, id: job?.id, err: err.message })));

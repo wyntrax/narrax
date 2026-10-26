@@ -44,7 +44,7 @@ async function main() {
     paperQuotes:{getQuote:request=>paperQuoteClient.getQuote(request)},
     requestWalletSync: syncConfigured ? () => queues.requestWalletSync() : undefined,
     enqueueExecution: (job) => queues.enqueueExecution(job),
-    account: { db, verifier: createRuntimePrivyVerifier(runtime), requestPersonalResearch: userId => personalResearch.request(userId), requestTokenDiscovery: mint => queues.enqueueTokenDiscovery(mint) },
+    account: { db, verifier: createRuntimePrivyVerifier(runtime), requestPersonalResearch: userId => personalResearch.request(userId), requestTokenDiscovery: mint => queues.enqueueTokenDiscovery(mint), requestMembershipSync: userId => queues.requestWyntraxHoldings(userId) },
     webhooks: {
       secret,
       enqueue: (e) => queues.enqueueWalletEvent(e),

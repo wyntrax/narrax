@@ -19,7 +19,7 @@ export const SETTING_SCHEMAS = {
   // $Wyntrax holding each paid tier asks for. Shown to users; the gate itself is the Wyntrax membership token gate.
   'access.tier_requirements': TierRequirements,
   'access.token_symbol': TokenSymbol,
-  // Where the token lives on-chain. Informational today: nothing in Narrax reads balances with it yet.
+  // Where the token lives on-chain. The pipeline worker reads linked-wallet balances for it and refreshes paid access.
   'access.token_mint': TokenMint,
   'entitlements.wallet_link_domain': Domain,
   'entitlements.enforced': z.boolean(),

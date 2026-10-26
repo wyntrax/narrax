@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { VersionedTransaction, type MessageCompiledInstruction } from '@solana/web3.js';
+import { validateLookupTables, type ResolvedLookupTables } from './lookupTables';
 import {
   ASSOCIATED_TOKEN_PROGRAM, COMPUTE_BUDGET_PROGRAM, JUPITER_V6_PROGRAM, PROGRAM_NAMES, SYSTEM_PROGRAM, TOKEN_PROGRAM, WSOL_MINT, associatedTokenAddress, isBase58Address,
 } from './programs';
@@ -18,6 +19,8 @@ export interface SwapExpectations {
   limits: TxLimits;
   /** Optional lookup keys resolved from the chain by the caller, in message writable/readonly order. Never accept client-supplied keys. */
   resolvedLookupKeys?: {writable: string[]; readonly: string[]};
+  /** Optional trusted RPC resolution. Omit to preserve the original static-only checks. */
+  resolvedLookupTables?: ResolvedLookupTables;
 }
 
 /** Starting values, not tuned. The executor config can only make them stricter than its hard-coded ceilings. */
@@ -51,6 +54,11 @@ export interface TxSummary {
   feePayer: string | null;
   requiredSignatures: number;
   lookupTables: number;
+  /** Present only when resolution was supplied; slot is review evidence, never an acceptance condition. */
+  lookupContextSlot?: number | null;
+  lookupTableDetails?: { address: string; addressCount: number; authority: string | null }[];
+  /** Message account indices, in runtime order, with their lookup-table provenance. */
+  lookupAccounts?: { index: number; address: string; table: string; tableIndex: number; writable: boolean }[];
   computeUnitLimit: number | null;
   computeUnitPrice: string | null;
   priorityFeeLamports: string | null;
@@ -98,7 +106,7 @@ export function verifySwapTransaction(base64: string, exp: SwapExpectations): Ve
   }
 
   const msg = tx.message;
-  const keys = msg.staticAccountKeys.map((k) => k.toBase58());
+  let keys: (string | undefined)[] = msg.staticAccountKeys.map((k) => k.toBase58());
   const staticCount = keys.length;
   const ixs: MessageCompiledInstruction[] = msg.compiledInstructions;
   const lookups = msg.addressTableLookups ?? [];
@@ -124,6 +132,33 @@ export function verifySwapTransaction(base64: string, exp: SwapExpectations): Ve
   if (ixs.length === 0) fail('NO_INSTRUCTIONS', 'The transaction has no instructions.');
   if (ixs.length > exp.limits.maxInstructions) fail('TOO_MANY_INSTRUCTIONS', `${ixs.length} instructions, at most ${exp.limits.maxInstructions} allowed.`);
 
+  if (exp.resolvedLookupTables !== undefined && lookups.length > 0) {
+    // Resolution never relaxes the table cap and never falls back to a partial key list.
+    if (lookups.length > exp.limits.maxLookupTables) return done();
+    const resolved = exp.resolvedLookupTables;
+    summary.lookupContextSlot = resolved.slot;
+    const invalid = validateLookupTables(lookups, resolved.tables);
+    if (invalid.length) { reasons.push(...invalid); return done(); }
+    try {
+      if (msg.version !== 0) throw new Error();
+      const full = msg.getAccountKeys({ addressLookupTableAccounts: resolved.tables });
+      keys = Array.from({ length: full.length }, (_, i) => full.get(i)?.toBase58());
+      summary.lookupTableDetails = lookups.map(l => {
+        const t = resolved.tables.find(t => t.key.equals(l.accountKey))!;
+        return { address: t.key.toBase58(), addressCount: t.state.addresses.length, authority: t.state.authority?.toBase58() ?? null };
+      });
+      summary.lookupAccounts = [];
+      let index = staticCount;
+      // Runtime order: ALL writable table entries first, then ALL readonly entries.
+      for (const writable of [true, false]) for (const lookup of lookups) {
+        for (const tableIndex of writable ? lookup.writableIndexes : lookup.readonlyIndexes) {
+          summary.lookupAccounts.push({ index, address: keys[index]!, table: lookup.accountKey.toBase58(), tableIndex, writable });
+          index++;
+        }
+      }
+    } catch { fail('LOOKUP_TABLE_INVALID', 'The full message account list could not be resolved.'); return done(); }
+  }
+
   const wsol = associatedTokenAddress(exp.userWallet, WSOL_MINT);
   const inAcct = associatedTokenAddress(exp.userWallet, exp.inputMint);
   const outAcct = associatedTokenAddress(exp.userWallet, exp.outputMint);
@@ -137,18 +172,18 @@ export function verifySwapTransaction(base64: string, exp: SwapExpectations): Ve
   ixs.forEach((ix, i) => {
     const programId = keys[ix.programIdIndex];
     const at = `Instruction ${i + 1}`;
-    if (programId === undefined) { fail('PROGRAM_NOT_STATIC', `${at} calls a program that is not in the transaction's own account list.`); summary.instructions.push({ program: 'unknown', kind: 'unresolved' }); return; }
+    if (ix.programIdIndex >= staticCount || programId === undefined) { fail('PROGRAM_NOT_STATIC', `${at} calls a program that is not in the transaction's own account list.`); summary.instructions.push({ program: 'unknown', kind: 'unresolved' }); return; }
     const program = PROGRAM_NAMES[programId];
     if (!program) { fail('PROGRAM_NOT_ALLOWED', `${at} calls ${programId}, which is not on the allow list.`); summary.instructions.push({ program: programId, kind: 'not-allowed' }); return; }
 
     const idx = [...ix.accountKeyIndexes];
-    const staticOnly = idx.every((n) => n < (exp.resolvedLookupKeys?keys.length:staticCount));
+    const allKnown = idx.every((n) => keys[n] !== undefined);
     const acct = (n: number) => keys[idx[n] ?? -1];
     const data = ix.data;
     const note = (kind: string, detail?: string) => summary.instructions.push({ program, kind, ...(detail ? { detail } : {}) });
-    // The instructions below move or authorise value, so every account they name must be one we can see. An account loaded from a
-    // lookup table cannot be checked here, and an unchecked account is a refusal.
-    const needStatic = () => { if (!staticOnly) fail('ACCOUNT_NOT_STATIC', `${at} (${program}) names an account loaded from a lookup table, which cannot be verified.`); return staticOnly; };
+    // Visibility is not permission: all the original address/authority/mint rules below still apply.
+    // Without resolution, the original refusal and its message are preserved.
+    const needKnown = () => { if (!allKnown) fail('ACCOUNT_NOT_STATIC', `${at} (${program}) names an account loaded from a lookup table, which cannot be verified.`); return allKnown; };
 
     switch (programId) {
       case COMPUTE_BUDGET_PROGRAM: {
@@ -173,7 +208,7 @@ export function verifySwapTransaction(base64: string, exp: SwapExpectations): Ve
 
       case SYSTEM_PROGRAM: {
         const tag = u32(data, 0);
-        if (tag === 2 && needStatic()) { // Transfer
+        if (tag === 2 && needKnown()) { // Transfer
           const lamports = u64(data, 4);
           const from = acct(0); const to = acct(1);
           note('transfer', `${lamports ?? '?'} lamports to ${to ?? '?'}`);
@@ -190,7 +225,7 @@ export function verifySwapTransaction(base64: string, exp: SwapExpectations): Ve
 
       case TOKEN_PROGRAM: {
         const tag = data[0];
-        if (!needStatic()) { note('unverifiable'); return; }
+        if (!needKnown()) { note('unverifiable'); return; }
         if (tag === 17) { // SyncNative
           note('sync-native', acct(0));
           if (acct(0) !== wsol) fail('SYNC_NATIVE_OTHER', `${at} syncs an account that is not the user's wrapped SOL account.`);
@@ -209,7 +244,7 @@ export function verifySwapTransaction(base64: string, exp: SwapExpectations): Ve
       case ASSOCIATED_TOKEN_PROGRAM: {
         // [payer, ata, owner, mint, system program, token program]. Empty data is the legacy Create.
         const tag = data.length === 0 ? 0 : data[0];
-        if (!needStatic()) { note('unverifiable'); return; }
+        if (!needKnown()) { note('unverifiable'); return; }
         if (tag === 0 || tag === 1) {
           note(tag === 0 ? 'create-ata' : 'create-ata-idempotent', `${acct(1)} for ${acct(2)}, mint ${acct(3)}`);
           if (acct(0) !== exp.userWallet) fail('ATA_PAYER_OTHER', `${at} creates a token account paid by someone other than the user.`);
