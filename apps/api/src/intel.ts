@@ -39,12 +39,13 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     });
     if (!w) return reply.code(404).send({ error: 'NOT_FOUND' });
 
-    const [metricRows, trades, scan, intelligence, history] = await Promise.all([
+    const [metricRows, trades, scan, intelligence, history, historyAttempt] = await Promise.all([
       db.walletMetric.findMany({ where: { walletId: w.id }, orderBy: { computedAt: 'desc' }, take: 40 }),
       db.walletTrade.findMany({ where: { walletId: w.id }, orderBy: [{ at: 'desc' }, { id: 'desc' }], take: WALLET_DETAIL.recentTrades, include: { token: { select: { mint: true, symbol: true, name:true } } } }),
       db.walletTrade.findMany({ where: { walletId: w.id, at: { gte: new Date(now().getTime() - WALLET_DETAIL.narrativeLookbackDays * DAY) } }, orderBy: { at: 'desc' }, take: WALLET_DETAIL.narrativeTradeScan, select: { tokenId: true, side: true, amountSol: true, at: true } }),
       db.systemSetting.findUnique({ where: { key: `wallet.intelligence.${w.id}` } }),
       db.systemSetting.findUnique({ where: { key: `wallet.history.${w.id}` } }),
+      db.systemSetting.findUnique({ where: { key: `wallet.historyAttempt.${w.id}` } }),
     ]);
 
     // Newest reading per window.
@@ -78,6 +79,7 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
       researchReview: w.researchReview, qualification: (await walletQualifications(db,[w],now())).get(w.id),
       intelligence: intelligence?.value ?? null,
       history: history?.value ?? null,
+      historyAttempt: historyAttempt?.value ?? null,
       profile: w.profile ? { score: w.profile.score, leaderScore: w.profile.leaderScore, style: w.profile.style, medianHoldSeconds: w.profile.medianHoldSeconds, strongestNarrative: w.profile.strongestNarrative, bestPattern: w.profile.bestPattern, weakPattern: w.profile.weakPattern, typicalEntryMarketCapUsd: { min: n(w.profile.typicalEntryMcMin), max: n(w.profile.typicalEntryMcMax) }, updatedAt: w.profile.updatedAt } : null,
       performance,
       // Cluster and relationship links are inferred from timing and funding, so confidence always comes with them.

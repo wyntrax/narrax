@@ -2,6 +2,11 @@ import {parseHeliusSwaps} from '@narra/solana';
 import {SwapEventSchema,type SwapEvent} from '@narra/queue';
 
 export interface WalletHistoryOptions {apiKey:string;fetch?:typeof fetch;maxPages?:number;now?:Date;before?:string;since?:Date}
+export class WalletHistoryError extends Error {
+  constructor(public readonly code: 'RATE_LIMITED'|'PROVIDER_HTTP'|'INVALID_PAYLOAD'|'PAGINATION_STALLED'|'TIMEOUT'|'NETWORK', public readonly pagesRead: number, public readonly httpStatus?: number) {
+    super(httpStatus ? `Wallet history returned HTTP ${httpStatus}` : `Wallet history ${code}`);
+  }
+}
 /** Hard ceiling on filtered history pages per wallet. Above this the scan is reported as capped. */
 export const HISTORY_PAGE_CAP=10;
 /** Default depth, tuned to cover a quiet wallet's 30-day swap history without spending the whole provider budget. */
@@ -22,27 +27,38 @@ export async function collectWalletHistory(address:string,opts:WalletHistoryOpti
   const until=+(opts.now??new Date()),since=opts.since?+opts.since:until-30*86400000;
   if(!Number.isFinite(since)||!Number.isFinite(until)||since>until)throw new Error('Invalid history boundaries');
   const events:SwapEvent[]=[],seen=new Set<string>();let before=opts.before,scanned=0,skipped=0,capped=false;
+  let pagesRead=0,oldestObservedAt:number|null=null,newestObservedAt:number|null=null,scannedThroughAt:number|null=null;
  const pages=Math.min(HISTORY_PAGE_CAP,Math.max(1,opts.maxPages??HISTORY_PAGE_DEFAULT));
  for(let page=0;page<pages;page++){
   const url=new URL(`https://api-mainnet.helius-rpc.com/v0/addresses/${encodeURIComponent(address)}/transactions`);
   url.searchParams.set('api-key',opts.apiKey);url.searchParams.set('type','SWAP');url.searchParams.set('limit','100');if(before)url.searchParams.set('before',before);
   let response:Response|undefined;
   for(let attempt=0;attempt<3;attempt++){
-   response=await (opts.fetch??fetch)(url,{signal:AbortSignal.timeout(20000)});
+    try { response=await (opts.fetch??fetch)(url,{signal:AbortSignal.timeout(20000)}); }
+    catch(e) { throw new WalletHistoryError(e instanceof Error && ['TimeoutError','AbortError'].includes(e.name)?'TIMEOUT':'NETWORK',pagesRead); }
    if(response.status!==429)break;
    if(attempt<2)await new Promise(resolve=>setTimeout(resolve,1000*2**attempt));
   }
-  if(!response?.ok)throw new Error(`Wallet history returned HTTP ${response?.status??0}`);
-  const data:unknown=await response.json();if(!Array.isArray(data))throw new Error('Wallet history returned an invalid payload');
+   if(!response?.ok)throw new WalletHistoryError(response?.status===429?'RATE_LIMITED':'PROVIDER_HTTP',pagesRead,response?.status??0);
+   let data:unknown;
+   try { data=await response.json(); } catch { throw new WalletHistoryError('INVALID_PAYLOAD',pagesRead); }
+   if(!Array.isArray(data))throw new WalletHistoryError('INVALID_PAYLOAD',pagesRead);
+   pagesRead++;
+   for(const row of data){
+    const t=typeof row?.timestamp==='number'?row.timestamp*1000:NaN;
+    if(!Number.isFinite(t)||!Number.isFinite(+new Date(t)))throw new WalletHistoryError('INVALID_PAYLOAD',pagesRead);
+    if(t<=until){scannedThroughAt=scannedThroughAt===null?t:Math.min(scannedThroughAt,t);if(t>=since){oldestObservedAt=oldestObservedAt===null?t:Math.min(oldestObservedAt,t);newestObservedAt=newestObservedAt===null?t:Math.max(newestObservedAt,t);}}
+   }
   scanned+=data.length;const parsed=parseHeliusSwaps(data);skipped+=parsed.skipped;
    for(const event of parsed.events){const valid=SwapEventSchema.safeParse(event),at=Date.parse(event.at);if(!valid.success){skipped++;continue;}if(event.wallet===address&&at>=since&&at<=until&&!seen.has(event.signature)){events.push(valid.data);seen.add(event.signature);}}
   const last=data[data.length-1] as {signature?:unknown;timestamp?:unknown}|undefined;
    // Filtered history pages may contain fewer than limit while older swaps still exist.
    // Only an empty page or crossing the time boundary proves this scan is finished.
    if(data.length===0||typeof last?.timestamp==='number'&&last.timestamp*1000<since)break;
-  if(typeof last?.signature!=='string'||last.signature===before)throw new Error('Wallet history pagination did not advance');
+   if(typeof last?.signature!=='string'||last.signature===before)throw new WalletHistoryError('PAGINATION_STALLED',pagesRead);
   before=last.signature;capped=page===pages-1;
  }
  events.sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));
-  return {events,scanned,skipped,capped,nextBefore:capped?before??null:null,coveredFrom:new Date(since).toISOString(),coveredTo:new Date(until).toISOString()};
+   return {events,scanned,skipped,capped,nextBefore:capped?before??null:null,coveredFrom:new Date(since).toISOString(),coveredTo:new Date(until).toISOString(),
+    pagesRead,oldestObservedAt:oldestObservedAt===null?null:new Date(oldestObservedAt).toISOString(),newestObservedAt:newestObservedAt===null?null:new Date(newestObservedAt).toISOString(),scannedThroughAt:scannedThroughAt===null?null:new Date(scannedThroughAt).toISOString()};
 }
