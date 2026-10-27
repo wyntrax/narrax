@@ -10,6 +10,10 @@ export const WalletBandPerformance = z.object({
   openCostSol: decimal, medianRoi: n.nullable(), medianWinSol: decimal.nullable(), medianLossSol: decimal.nullable(),
   profitFactor: n.nullable(), medianFirstSellSeconds: n.nullable(), medianCloseSeconds: n.nullable(),
   realisedDrawdownSol: decimal, observedDays: n, fastCloseRate: n.nullable(),
+  // Optional for stored version-1 snapshots; absence is unknown, never zero.
+  medianEntrySol: decimal.nullable().optional(), deployedSol: decimal.optional(),
+  medianClosedPositionSol: decimal.nullable().optional(),
+  entryCapKnownPositions: count.optional(), entryCapTotalPositions: count.optional(),
 });
 export type WalletBandPerformance = z.infer<typeof WalletBandPerformance>;
 export const WalletPerformance = z.object({
@@ -20,6 +24,8 @@ export const WalletPerformance = z.object({
 export type WalletPerformance = z.infer<typeof WalletPerformance>;
 export const WalletRankingPage = z.object({
   asOf: z.string().datetime(), band: WalletEntryBand, windowDays: z.literal(30), total: count, capped: z.boolean(),
+  minMedianPositionSol: n.nonnegative().optional(),
+  counts: z.object({ reviewReady: count, observing: count }).optional(),
   pipeline: z.object({ checkedAt: z.string().datetime(), historyEnabled: z.boolean(), providerConfigured: z.boolean(),
     intakeAdded: count, scanned: count, failures: count }).nullable(),
   items: z.array(z.object({ address: z.string(), label: z.string().nullable(), review: z.string(),

@@ -21,6 +21,7 @@
     "wallets:scorecard": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/wallet-research-scorecard.ts",
     "wallets:seed": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/seed-tracked-wallets.ts",
     "wallets:backfill": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/backfill-wallet-history.ts",
+    "wallets:reconcile-valuations": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/reconcile-wallet-valuations.ts",
     "tokens:resolve-metadata": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/resolve-token-metadata.ts",
     "data:purge-fabricated": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/purge-fabricated-data.ts",
     "narratives:link-tokens": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/link-narrative-tokens.ts",

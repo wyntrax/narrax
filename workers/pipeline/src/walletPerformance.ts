@@ -9,7 +9,7 @@ export interface PerformanceTrade {
   tokenAmount: { toString(): string } | null; marketCapUsd: { toString(): string } | null; evidence: unknown; at: Date;
 }
 type Position = { token: string; band: WalletEntryBand; start: number; last: number; firstSell: number | null;
-  close: number | null; qty: Decimal; cost: Decimal; invested: Decimal; pnl: Decimal; sold: boolean };
+  close: number | null; qty: Decimal; cost: Decimal; invested: Decimal; entry: Decimal; pnl: Decimal; sold: boolean };
 const decimalMedian = (xs: Decimal[]) => {
   const s = [...xs].sort((a,b) => a.cmp(b)), mid = Math.floor(s.length / 2);
   return !s.length ? null : s.length % 2 ? s[mid]!.toFixed() : s[mid-1]!.plus(s[mid]!).div(2).toFixed();
@@ -41,7 +41,7 @@ export function computeWalletPerformance(rows: PerformanceTrade[], now: Date, ca
     let p = active.get(t.tokenId);
     if (t.side === 'BUY') {
       if (!p) { p = { token: t.tokenId, band: entryBand(t), start: +t.at, last: +t.at, firstSell: null, close: null,
-        qty: new D(0), cost: new D(0), invested: new D(0), pnl: new D(0), sold: false }; positions.push(p); active.set(t.tokenId,p); }
+        qty: new D(0), cost: new D(0), invested: new D(0), entry: sol, pnl: new D(0), sold: false }; positions.push(p); active.set(t.tokenId,p); }
       p.qty = p.qty.plus(qty); p.cost = p.cost.plus(sol); p.invested = p.invested.plus(sol); p.last = +t.at;
     } else {
       if (!p || qty.gt(p.qty)) { unmatchedSells++; contaminated.add(t.tokenId); active.delete(t.tokenId); continue; }
@@ -73,6 +73,9 @@ export function computeWalletPerformance(rows: PerformanceTrade[], now: Date, ca
       medianFirstSellSeconds: median(sold.map(p=>(p.firstSell!-p.start)/1000)), medianCloseSeconds: median(closed.map(p=>(p.close!-p.start)/1000)),
       realisedDrawdownSol: drawdown.toFixed(), observedDays: mine.length ? (Math.max(...mine.map(p=>p.last))-Math.min(...mine.map(p=>p.start)))/86_400_000 : 0,
       fastCloseRate: n ? closed.filter(p=>p.close!-p.start<60_000).length/n : null,
+      medianEntrySol: decimalMedian(mine.map(p=>p.entry)), deployedSol: sum(mine,p=>p.invested).toFixed(),
+      medianClosedPositionSol: decimalMedian(closed.map(p=>p.invested)),
+      entryCapKnownPositions: valid.filter(p=>p.band!=='UNKNOWN').length, entryCapTotalPositions: valid.length,
     } satisfies WalletBandPerformance;
   });
   return { version: 1, checkedAt: now.toISOString(), windowDays: 30, observedTrades: trades.length, invalidTrades, unmatchedSells, capped,
