@@ -28,7 +28,7 @@ async function main(){
    requestedFrom:text(a?.requestedFrom)??text(h?.scanFrom),requestedTo:text(a?.requestedTo)??text(h?.scanTo),
    verifiedCoveredFrom:text(h?.verifiedCoveredFrom),verifiedCoveredTo:text(h?.verifiedCoveredTo),
    oldestObservedAt:text(h?.oldestObservedAt),newestObservedAt:text(h?.newestObservedAt),scannedThroughAt:text(h?.scannedThroughAt),
-   resumable:h?.capped===true&&typeof h.nextBefore==='string',scanned:count(h?.scanned),accepted:count(h?.accepted),skipped:count(h?.skipped),pagesRead:count(h?.pagesRead)};
+   resumable:h?.capped===true&&typeof h.nextBefore==='string',scanned:count(h?.scanned),accepted:count(h?.accepted),skipped:count(h?.skipped),pagesRead:count(h?.pagesRead),searchHops:count(h?.searchHops),lastAttemptSearchHops:count(a?.searchHops)};
  });
  console.log(JSON.stringify({asOf:now.toISOString(),readOnly:true,truncated:wallets.length>limit,displayed:items.length,
   note:'Requested ranges are not proof of coverage. Observed dates describe provider rows, including unsupported swaps. Completed scans cover filtered SWAP history, not transfers. Legacy attempt counts and verified bounds remain unknown.',

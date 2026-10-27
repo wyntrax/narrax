@@ -9,6 +9,7 @@ const Progress = z.object({ checkedAt: date, capped: z.boolean(), nextBefore: z.
   scanned: z.number().int().nonnegative(), accepted: z.number().int().nonnegative(), skipped: z.number().int().nonnegative(),
   oldestObservedAt:date.nullable().optional(),newestObservedAt:date.nullable().optional(),scannedThroughAt:date.nullable().optional(),
   verifiedCoveredFrom:date.nullable().optional(),verifiedCoveredTo:date.nullable().optional(),pagesRead:z.number().int().nonnegative().optional(),
+  searchHops:z.number().int().nonnegative().optional(),
 });
 export const HISTORY_ATTEMPT_PREFIX='wallet.historyAttempt.';
 export const HISTORY_RETRY_MS=15*60_000;
@@ -36,7 +37,7 @@ export async function selectResearchHistoryWallets(db:PrismaClient,now:Date){
 export async function refreshResearchHistory(db: PrismaClient, apiKey: string, now = new Date(), collect = collectWalletHistory) {
   if(!Number.isFinite(+now))throw new Error('Invalid history scheduling date');
   const wallets=await selectResearchHistoryWallets(db,now);
-  const out={scanned:0,created:0,capped:0,skipped:0,failures:0,resumed:0,pagesRead:0};
+  const out={scanned:0,created:0,capped:0,skipped:0,failures:0,resumed:0,pagesRead:0,searchHops:0};
   const store=makeWalletEventStore(db);
   for(const wallet of wallets){
     const key=`wallet.history.${wallet.id}`,attemptKey=`${HISTORY_ATTEMPT_PREFIX}${wallet.id}`;
@@ -49,13 +50,14 @@ export async function refreshResearchHistory(db: PrismaClient, apiKey: string, n
     // Written before provider I/O: interrupted jobs remain visible and rotate fairly.
     const attempt={version:1,attempts,lastAttemptAt:now.toISOString(),lastSuccessAt:previousScan?.checkedAt??null,
       status:'RUNNING',mode:resume?'RESUME':complete?'HEAD':'INITIAL',requestedFrom,requestedTo,
-      consecutiveFailures:count(oldAttempt.consecutiveFailures),errorCode:null as string|null,httpStatus:null as number|null,pagesRead:0};
+      consecutiveFailures:count(oldAttempt.consecutiveFailures),errorCode:null as string|null,httpStatus:null as number|null,pagesRead:0,searchHops:0};
     await db.systemSetting.upsert({where:{key:attemptKey},create:{key:attemptKey,value:attempt,updatedAt:now},update:{value:attempt,updatedAt:now}});
     let phase:'COLLECT'|'STORE'='COLLECT';
     try{
       const history=await collect(wallet.address,{apiKey,now:new Date(requestedTo),maxPages:3,
         ...(resume?{before:resume.nextBefore!,since:new Date(requestedFrom)}:complete?{since:new Date(requestedFrom)}:{})});
       phase='STORE';attempt.pagesRead=history.pagesRead??0;out.pagesRead+=attempt.pagesRead;
+      attempt.searchHops=history.searchHops??0;out.searchHops+=attempt.searchHops;
       for(const e of history.events)if(await store.saveWalletTrade(e)==='created')out.created++;
       const carry=resume??complete;
       const next={checkedAt:now.toISOString(),scanned:(carry?.scanned??0)+history.scanned,accepted:(carry?.accepted??0)+history.events.length,
@@ -65,7 +67,7 @@ export async function refreshResearchHistory(db: PrismaClient, apiKey: string, n
         verifiedCoveredFrom:history.capped?(carry?.verifiedCoveredFrom??(complete?complete.coveredFrom:null)):(carry?.coveredFrom??history.coveredFrom),
         verifiedCoveredTo:history.capped?(carry?.verifiedCoveredTo??(complete?complete.coveredTo:null)):history.coveredTo,
         oldestObservedAt:earliest(carry?.oldestObservedAt,history.oldestObservedAt),newestObservedAt:latest(carry?.newestObservedAt,history.newestObservedAt),
-        scannedThroughAt:earliest(resume?.scannedThroughAt,history.scannedThroughAt),pagesRead:(carry?.pagesRead??0)+attempt.pagesRead};
+        scannedThroughAt:earliest(resume?.scannedThroughAt,history.scannedThroughAt),pagesRead:(carry?.pagesRead??0)+attempt.pagesRead,searchHops:(carry?.searchHops??0)+attempt.searchHops};
       const success={...attempt,status:history.capped?'PARTIAL':'COMPLETE',lastSuccessAt:now.toISOString(),consecutiveFailures:0};
       await db.$transaction([
         db.systemSetting.upsert({where:{key},create:{key,value:next,updatedAt:now},update:{value:next,updatedAt:now}}),
@@ -75,9 +77,9 @@ export async function refreshResearchHistory(db: PrismaClient, apiKey: string, n
     }catch(e){
       out.failures++;
       const typed=e instanceof WalletHistoryError;
-      if(typed)out.pagesRead+=e.pagesRead;
+      if(typed){out.pagesRead+=e.pagesRead;out.searchHops+=e.searchHops;}
       const failure={...attempt,status:'FAILED',consecutiveFailures:attempt.consecutiveFailures+1,
-        errorCode:typed?e.code:phase==='STORE'?'PERSISTENCE_FAILED':'COLLECTION_FAILED',httpStatus:typed?e.httpStatus??null:null,pagesRead:typed?e.pagesRead:attempt.pagesRead};
+        errorCode:typed?e.code:phase==='STORE'?'PERSISTENCE_FAILED':'COLLECTION_FAILED',httpStatus:typed?e.httpStatus??null:null,pagesRead:typed?e.pagesRead:attempt.pagesRead,searchHops:typed?e.searchHops:attempt.searchHops};
       // Never store raw provider messages/URLs or overwrite the successful continuation checkpoint.
       await db.systemSetting.upsert({where:{key:attemptKey},create:{key:attemptKey,value:failure,updatedAt:now},update:{value:failure,updatedAt:now}});
     }

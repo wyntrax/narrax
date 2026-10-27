@@ -44,3 +44,38 @@ it('reads an explicit page depth from --pages and refuses a malformed one instea
  expect(historyPagesFromArgs(['--apply','--pages','4'])).toBe(4);
  for(const bad of [['--pages=0'],['--pages=11'],['--pages=abc'],['--pages'],['--pages=2.5']]) expect(()=>historyPagesFromArgs(bad)).toThrow(/--pages/);
 });
+const hop=(signature:string)=>new Response(JSON.stringify({error:`Failed to find events within the search period. To continue search, query the API again with the \`before-signature\` parameter set to ${signature}.`}),{status:404});
+const cursorA='3f5iAyibdHeHsdWAFCgDeqW1qka54szYRKqC65a4KNDZFVtCMdyF8AxWFQdMyAG83hZeK2B5XK78MznAmBTs6Bge';
+const cursorB='3NsXBHnLYWNGn4ZgcM7hjvtNZipgTFeRcExgH3tC2zvFLjtAZoike1837Tp3J4DpqAH5aJvCD4cGSFBzt4Ffs8Sm';
+it('follows the observed search-period 404 within the existing page budget, preserving collected swaps',async()=>{
+ const fetch=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify([tx]))).mockResolvedValueOnce(hop(cursorA)).mockResolvedValueOnce(hop(cursorB));
+ const result=await collectWalletHistory(address,{apiKey:'secret',fetch,now,maxPages:3});
+ expect(fetch).toHaveBeenCalledTimes(3);
+ expect(new URL(String(fetch.mock.calls[2]![0])).searchParams.get('before')).toBe(cursorA);
+ expect(result).toMatchObject({scanned:1,pagesRead:1,searchHops:2,capped:true,nextBefore:cursorB,scannedThroughAt:new Date(tx.timestamp*1000).toISOString()});
+ expect(result.events).toHaveLength(1);
+});
+it('keeps search-only windows incomplete and can resume to older swaps before real exhaustion',async()=>{
+ const partial=await collectWalletHistory(address,{apiKey:'secret',fetch:async()=>hop(cursorA),now,maxPages:1});
+ expect(partial).toMatchObject({scanned:0,events:[],pagesRead:0,searchHops:1,capped:true,nextBefore:cursorA,oldestObservedAt:null,scannedThroughAt:null});
+ const fetch=vi.fn().mockResolvedValueOnce(hop(cursorB)).mockResolvedValueOnce(new Response(JSON.stringify([tx]))).mockResolvedValueOnce(new Response('[]'));
+ const complete=await collectWalletHistory(address,{apiKey:'secret',fetch,now,before:partial.nextBefore!});
+ expect(complete).toMatchObject({scanned:1,pagesRead:2,searchHops:1,capped:false,nextBefore:null});
+ expect(complete.events).toHaveLength(1);
+});
+it.each(['missing','malformed','invalid signature'])('rejects an unrecognized 404 (%s) rather than marking history complete',async(kind)=>{
+ const response=kind==='missing'?new Response(JSON.stringify({error:'Not found'}),{status:404}):kind==='malformed'?new Response('<html>Not found</html>',{status:404}):hop('https://provider?api-key=secret');
+ await expect(collectWalletHistory(address,{apiKey:'secret',fetch:async()=>response,now})).rejects.toMatchObject({code:'PROVIDER_HTTP',httpStatus:404,searchHops:0});
+});
+it('rejects repeated and cyclic search cursors without extra requests',async()=>{
+ const same=vi.fn(async()=>hop(cursorA));
+ await expect(collectWalletHistory(address,{apiKey:'secret',fetch:same,now,before:cursorA})).rejects.toMatchObject({code:'PAGINATION_STALLED',searchHops:0});
+ expect(same).toHaveBeenCalledTimes(1);
+ const cycle=vi.fn().mockResolvedValueOnce(hop(cursorB)).mockResolvedValueOnce(hop(cursorA));
+ await expect(collectWalletHistory(address,{apiKey:'secret',fetch:cycle,now,before:cursorA})).rejects.toMatchObject({code:'PAGINATION_STALLED',searchHops:1});
+ expect(cycle).toHaveBeenCalledTimes(2);
+});
+it('retains successful hop diagnostics if the subsequent provider request fails',async()=>{
+ const fetch=vi.fn().mockResolvedValueOnce(hop(cursorA)).mockResolvedValueOnce(new Response('',{status:503}));
+ await expect(collectWalletHistory(address,{apiKey:'secret',fetch,now})).rejects.toMatchObject({code:'PROVIDER_HTTP',httpStatus:503,pagesRead:0,searchHops:1});
+});
