@@ -41,3 +41,10 @@ it('uses exact entry-band boundaries, ignores future trades, and penalises tiny 
     const b=result.bands.find(b=>b.band===expected)!;expect(b.closedPositions).toBe(1);expect(b.winRateLowerBound).toBeLessThan(.3);expect(result.observedTrades).toBe(2);
   }
 });
+it('separates first entries, recycled buy turnover, closed position spend and wallet-wide cap coverage',()=>{
+  const rows=[trade('BUY','.00003','10',0),trade('BUY','.09997','10',1),trade('SELL','.2','20',10),
+    trade('BUY','2','10',20),trade('SELL','3','10',30),trade('BUY','100','1',40,null,'unknown')];
+  const result=computeWalletPerformance(rows,now),small=result.bands.find(b=>b.band==='SMALL_CAP')!;
+  expect(small).toMatchObject({medianEntrySol:'1.000015',deployedSol:'2.1',medianClosedPositionSol:'1.05',entryCapKnownPositions:2,entryCapTotalPositions:3});
+  expect(result.bands.find(b=>b.band==='ALL')).toMatchObject({deployedSol:'102.1',medianClosedPositionSol:'1.05',medianEntrySol:'2'});
+});

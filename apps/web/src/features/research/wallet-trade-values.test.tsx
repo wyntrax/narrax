@@ -14,3 +14,8 @@ it('distinguishes absent historical prices from FDV-only observations',()=>{
  view(<><TradeValuation value={null} kind="usd"/><TradeValuation value={null} kind="cap" fdv/></>);
  expect(screen.getByText('No SOL/USD observation at trade time')).toBeVisible();expect(screen.getByText('Only FDV available at trade time')).toBeVisible();
 });
+it('uses recorded gap diagnostics while keeping legacy unknown reasons readable',()=>{
+ view(<><TradeValuation value={null} kind="cap" reasons={['NO_CONTEMPORANEOUS_MARKET','TRADE_BEFORE_MARKET_HISTORY']}/><TradeValuation value={null} kind="cap" reasons={['FUTURE_REASON']}/></>);
+ expect(screen.getByText('Trade predates token price collection')).toBeVisible();
+ expect(screen.getByText('No market-cap observation at trade time')).toBeVisible();
+});

@@ -19,6 +19,8 @@ export const MARKET_DATA_LIMITS = {
   maxEarlyRadarTokensPerRun: 100,
   /** Rotating coverage for completed wallet-discovery scans, within the same total cap. */
   maxDiscoveryTokensPerRun: 25,
+  /** Recent tracked-wallet tokens rotate independently of the general backlog. */
+  maxWalletTokensPerRun: 10,
   /** Slow-source calls per run. At the 15 s GeckoTerminal pace this covers about 4.5 min, inside the 5-minute schedule. */
   maxInfoCallsPerRun: 18,
   /** How long a token-info lookup (holders, authorities, risk) is reused. */
@@ -33,8 +35,9 @@ export const DISCOVERY_PRICE_CURSOR_KEY = 'market.walletDiscoveryPriceCursor';
 export const GENERAL_PRICE_CURSOR_KEY = 'market.generalPriceCursor';
 export const INFO_CURSOR_KEY = 'market.infoCursor';
 export const SOCIAL_PRICE_CURSOR_KEY = 'market.socialPriceCursor';
+export const WALLET_PRICE_CURSOR_KEY = 'market.walletPriceCursor';
 
-export type PriceCoverageLane = 'outcomes' | 'discovery' | 'social' | 'launches' | 'unpriced' | 'general';
+export type PriceCoverageLane = 'outcomes' | 'discovery' | 'wallets' | 'social' | 'launches' | 'unpriced' | 'general';
 export interface PriceCoverageCounts {
   selected: number;
   written: number;
@@ -91,7 +94,7 @@ export async function refreshMarketData(
 ): Promise<MarketDataSummary> {
   const L = MARKET_DATA_LIMITS;
   const emptyCoverage = (): PriceCoverageCounts => ({ selected: 0, written: 0, unavailable: 0, failed: 0, notRequested: 0 });
-  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, priceCoverage: { outcomes: emptyCoverage(), discovery: emptyCoverage(), social: emptyCoverage(), launches: emptyCoverage(), unpriced: emptyCoverage(), general: emptyCoverage() }, priceOmissions: {}, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, riskRowsWritten: 0, solUsd: null, errors: [] };
+  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, priceCoverage: { outcomes: emptyCoverage(), discovery: emptyCoverage(), wallets: emptyCoverage(), social: emptyCoverage(), launches: emptyCoverage(), unpriced: emptyCoverage(), general: emptyCoverage() }, priceOmissions: {}, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, riskRowsWritten: 0, solUsd: null, errors: [] };
   if(deps.metadata){try{await refreshTokenMetadata(db,deps.metadata,now);}catch(e){out.errors.push(errText('token metadata',e));}}
 
   // 1. SOL/USD, kept in one settings row so every later consumer reads the same number.
@@ -163,6 +166,13 @@ export async function refreshMarketData(
   const discoveryById = new Map(discoveryRows.map(t => [t.id, t]));
   const discovery = discoveryIds.flatMap(id => { const token = discoveryById.get(id); return token ? [token] : []; });
   const priorIds = [...priority, ...discovery].map(t => t.id);
+  const walletBudget = Math.min(L.maxWalletTokensPerRun, Math.floor((cap-priorIds.length)/2));
+  const walletCursor = await readCursor(db,WALLET_PRICE_CURSOR_KEY);
+  const walletWhere: Prisma.TokenWhereInput = { blacklisted:false, mint:{not:WSOL_MINT}, id:{notIn:priorIds},
+    walletTrades:{some:{at:{gte:new Date(+now-L.activeWindowMs),lte:now},wallet:{active:true,researchReview:{not:'REJECTED'}}}} };
+  const wallets = walletBudget ? await db.token.findMany({where:{AND:[walletWhere,...(walletCursor?[{id:{gt:walletCursor}}]:[])]},orderBy:{id:'asc'},take:walletBudget,select:tokenSelect}) : [];
+  if (walletCursor && wallets.length<walletBudget) wallets.push(...await db.token.findMany({where:{AND:[walletWhere,{id:{lte:walletCursor}}]},orderBy:{id:'asc'},take:walletBudget-wallets.length,select:tokenSelect}));
+  priorIds.push(...wallets.map(t=>t.id));
   const socialIds = await readSocialPriority(db, now);
   const socialCursor = await readCursor(db, SOCIAL_PRICE_CURSOR_KEY);
   const sortedSocialIds = [...socialIds].sort();
@@ -212,7 +222,7 @@ export async function refreshMarketData(
     orderBy: { id: 'asc' }, take: remaining - rest.length, select: tokenSelect,
   }));
   out.generalTokensSelected = rest.length;
-  const tokens = [...priority, ...discovery, ...social, ...launches, ...unpriced, ...rest];
+  const tokens = [...priority, ...discovery, ...wallets, ...social, ...launches, ...unpriced, ...rest];
   out.tokensConsidered = tokens.length;
 
   // 4. Prices. One batch failing does not lose the others, and a 429 stops the step.
@@ -240,7 +250,7 @@ export async function refreshMarketData(
     // provider throttling leaves this batch and all unattempted batches in place.
     for (const mint of mints.slice(i, i + L.quoteBatch)) attempted.add(mint);
   }
-  const lanes = { outcomes: priority, discovery, social, launches, unpriced, general: rest };
+  const lanes = { outcomes: priority, discovery, wallets, social, launches, unpriced, general: rest };
   for (const lane of Object.keys(lanes) as PriceCoverageLane[]) {
     const counts = out.priceCoverage[lane];
     counts.selected = lanes[lane].length;
@@ -342,6 +352,8 @@ export async function refreshMarketData(
   // Advance only through attempted members of each rotating group.
   const lastDiscovery = discoveryIds.filter(id => attempted.has(discoveryById.get(id)?.mint ?? '')).at(-1);
   if (lastDiscovery) await writeCursor(db, DISCOVERY_PRICE_CURSOR_KEY, lastDiscovery);
+  const lastWallet = wallets.filter(t=>attempted.has(t.mint)).at(-1);
+  if (lastWallet) await writeCursor(db,WALLET_PRICE_CURSOR_KEY,lastWallet.id);
   const lastGeneral = rest.filter(t => attempted.has(t.mint)).at(-1);
   if (lastGeneral) await writeCursor(db, GENERAL_PRICE_CURSOR_KEY, lastGeneral.id);
   const lastSocial = social.filter(t => attempted.has(t.mint)).at(-1);

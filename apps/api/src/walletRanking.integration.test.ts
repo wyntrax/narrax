@@ -70,8 +70,19 @@ it('enforces authentication, tier access and admin bypass, and validates query b
  expect((await get()).statusCode).toBe(401);
  expect((await get('none')).statusCode).toBe(403);
  expect((await get('early')).statusCode).toBe(200);
- expect((await get('admin','?band=made-up')).statusCode).toBe(400);
+  expect((await get('admin','?band=made-up')).statusCode).toBe(400);
+  expect((await get('admin','?minMedianPositionSol=-1')).statusCode).toBe(400);
+  expect((await get('admin','?status=APPROVED')).statusCode).toBe(400);
  await setting('entitlements.features',{'research.smart_money':{requiredTier:'PRO'}});
  expect((await get('early')).statusCode).toBe(403);
  expect((await get('admin')).statusCode).toBe(200);
+});
+it('filters before limiting, exposes group counts and recomputes readiness with the selected size threshold',async()=>{
+ const get=(query:string)=>app.inject({method:'GET',url:`/v1/smart-money/rankings?band=UNDER_100K&${query}`,headers:{authorization:'Bearer admin'}});
+ const ready=WalletRankingPage.parse((await get('status=REVIEW_READY&limit=1')).json());
+ expect(ready.items[0]?.address).toBe(a);expect(ready.counts?.reviewReady).toBeGreaterThanOrEqual(1);
+ const strict=WalletRankingPage.parse((await get('status=OBSERVING&minMedianPositionSol=2')).json());
+ expect(strict.items.find(w=>w.address===a)?.reasons).toContain('SMALL_POSITIONS');
+ expect(strict.minMedianPositionSol).toBe(2);
+ expect(WalletRankingPage.parse((await get('status=REVIEW_READY&minMedianPositionSol=2')).json()).items.some(w=>w.address===a)).toBe(false);
 });

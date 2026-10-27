@@ -16,9 +16,12 @@ export function registerWalletResearchRoutes(app: FastifyInstance, deps: Pick<Ac
   const paging = z.object({ limit: z.coerce.number().int().min(1).max(100).default(25), cursor: z.string().max(128).optional(), side: z.enum(['BUY','SELL']).optional() });
 
   app.get('/v1/smart-money/rankings', opts, async (req, reply) => {
-    const query = z.object({ band: WalletEntryBand.default('SMALL_CAP'), limit: z.coerce.number().int().min(1).max(100).default(50) }).strict().safeParse(req.query);
+    const query = z.object({ band: WalletEntryBand.default('SMALL_CAP'), limit: z.coerce.number().int().min(1).max(100).default(50),
+      status: z.enum(['ALL','REVIEW_READY','OBSERVING']).default('ALL'),
+      minMedianPositionSol: z.coerce.number().finite().min(0).max(1000).default(0.01),
+    }).strict().safeParse(req.query);
     if (!query.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
-    return walletRanking(db,clock(),query.data.band,query.data.limit);
+    return walletRanking(db,clock(),query.data.band,query.data.limit,query.data.status,query.data.minMedianPositionSol);
   });
 
   app.get('/v1/smart-money/flows', opts, async (req, reply) => {
