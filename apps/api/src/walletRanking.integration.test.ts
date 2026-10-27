@@ -82,7 +82,39 @@ it('filters before limiting, exposes group counts and recomputes readiness with 
  const ready=WalletRankingPage.parse((await get('status=REVIEW_READY&limit=1')).json());
  expect(ready.items[0]?.address).toBe(a);expect(ready.counts?.reviewReady).toBeGreaterThanOrEqual(1);
  const strict=WalletRankingPage.parse((await get('status=OBSERVING&minMedianPositionSol=2')).json());
- expect(strict.items.find(w=>w.address===a)?.reasons).toContain('SMALL_POSITIONS');
+  expect(strict.items.some(w=>w.address===a)).toBe(false);
  expect(strict.minMedianPositionSol).toBe(2);
  expect(WalletRankingPage.parse((await get('status=REVIEW_READY&minMedianPositionSol=2')).json()).items.some(w=>w.address===a)).toBe(false);
+});
+it('applies inclusive decimal size filtering to all groups and before counts and row limits; zero includes unknowns',async()=>{
+ const get=async(query:string)=>WalletRankingPage.parse((await app.inject({url:`/v1/smart-money/rankings?band=UNDER_100K&${query}`,headers:{authorization:'Bearer admin'}})).json());
+ const other=await db.trackedWallet.findUniqueOrThrow({where:{address:b}}),key=`wallet.performance.${other.id}`;
+ const original=await db.systemSetting.findUniqueOrThrow({where:{key}});
+ const source=(await db.systemSetting.findUniqueOrThrow({where:{key:`wallet.performance.${walletId}`}})).value as Prisma.JsonObject;
+ const setSize=async(size:string|null)=>{
+  const snapshot=structuredClone(source);
+  for(const band of snapshot.bands as Prisma.JsonObject[])if(band.band==='UNDER_100K')band.medianClosedPositionSol=size;
+  await setting(key,snapshot as Prisma.InputJsonValue);
+ };
+ try{
+  await setSize(null);
+  const unfiltered=await get('status=ALL&minMedianPositionSol=0&limit=100');
+  expect(unfiltered.items.some(w=>w.address===b&&w.performance.medianClosedPositionSol==null)).toBe(true);
+  const atOne=await get('status=ALL&minMedianPositionSol=1&limit=100');
+  expect(atOne.items.some(w=>w.address===a)).toBe(true); // exactly 1 is inclusive
+  expect(atOne.items.some(w=>w.address===b)).toBe(false);
+  expect(atOne.total).toBe(atOne.counts!.reviewReady+atOne.counts!.observing);
+  expect((await get('status=OBSERVING&minMedianPositionSol=1')).items.some(w=>w.address===b)).toBe(false);
+  await setSize('0.99999999999999999999');
+  expect((await get('status=ALL&minMedianPositionSol=1')).items.some(w=>w.address===b)).toBe(false);
+  await setSize('1');
+  const observing=await get('status=OBSERVING&minMedianPositionSol=1');
+  expect(observing.items.some(w=>w.address===b)).toBe(true);
+  expect(observing.total).toBe(observing.counts!.observing);
+  expect((await get('status=REVIEW_READY&minMedianPositionSol=1')).items.some(w=>w.address===b)).toBe(false); // size does not grant readiness
+  await setSize('2');
+  const limited=await get('status=ALL&minMedianPositionSol=2&limit=1');
+  expect(limited.items[0]?.address).toBe(b); // higher-ranked 1 SOL wallet must not consume the slot
+  expect((await get('status=REVIEW_READY&minMedianPositionSol=2')).items.some(w=>w.address===a)).toBe(false);
+ }finally{await setting(key,original.value as Prisma.InputJsonValue);}
 });

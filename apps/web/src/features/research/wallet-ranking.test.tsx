@@ -26,7 +26,17 @@ it('separates review-ready wallets and displays readable SOL, position sizes and
 it('requests an explicit entry band and keeps missing historical caps explainable',async()=>{
  state.empty=true;view();await userEvent.selectOptions(screen.getByLabelText('Market cap at entry'),'UNKNOWN');
  await userEvent.selectOptions(screen.getByLabelText('Evaluation group'),'OBSERVING');
+ await userEvent.selectOptions(screen.getByLabelText('Minimum median closed-position spend · SOL'),'0');
  expect(state.paths.at(-1)).toContain('band=UNKNOWN');expect(screen.getByText(/historical market caps cannot be inferred/)).toBeVisible();
+});
+it('requests 1 SOL in Observing and explains a filtered empty result without claiming missing entry caps',async()=>{
+ state.empty=true;view();
+ await userEvent.selectOptions(screen.getByLabelText('Evaluation group'),'OBSERVING');
+ await userEvent.selectOptions(screen.getByLabelText('Minimum median closed-position spend · SOL'),'1');
+ expect(state.paths.at(-1)).toContain('status=OBSERVING&minMedianPositionSol=1');
+ expect(screen.getByText(/No wallets match this minimum spend/)).toBeVisible();
+ expect(screen.queryByRole('table')).toBeNull();
+ expect(screen.getByText(/Positive minimums exclude unknown sizes/)).toBeVisible();
 });
 it('reports worker configuration instead of implying waiting alone will fetch wallets',()=>{
  state.disabled=true;view();expect(screen.getByText('Automatic history collection is disabled on the worker.')).toBeVisible();

@@ -40,6 +40,10 @@ export async function walletRanking(db: PrismaClient, now: Date, band: WalletEnt
     if (!parsed.success) return [];
     const performance = parsed.data.bands.find(b=>b.band===band);
     if (!performance?.positions) return [];
+    // Positive minimums filter every evaluation group, before counts and limit.
+    // Zero disables the size filter so unknown evidence remains inspectable.
+    if (minMedianPositionSol > 0 && (performance.medianClosedPositionSol == null ||
+      new Prisma.Decimal(performance.medianClosedPositionSol).lt(minMedianPositionSol))) return [];
     const linked = w.clusterId!==null, developer = devs.has(w.address);
     const { reasons, historyComplete } = rankingReasons(parsed.data,performance,values.get(`wallet.history.${w.id}`),now,linked,developer,minMedianPositionSol);
     return [{ address:w.address,label:w.label,review:w.researchReview,status:reasons.length?'OBSERVING' as const:'REVIEW_READY' as const,
