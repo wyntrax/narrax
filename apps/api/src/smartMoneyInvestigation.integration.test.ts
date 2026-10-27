@@ -69,14 +69,14 @@ afterAll(async () => {
 }, 30000);
 
 describe('token investigation on isolated PostgreSQL', () => {
-  it('authenticates, denies lower tiers, allows PRO and admins without membership', async () => {
+  it('authenticates, denies no-access users, and allows Early Access, members, PRO and admins', async () => {
     expect((await app.inject(`/v1/smart-money/investigations/${mint}`)).statusCode).toBe(401);
-    for (const who of ['none', 'early', 'member']) { const r = await get('', who); expect(r.statusCode).toBe(403); expect(r.json()).toMatchObject({ error: 'FEATURE_LOCKED', requiredTier: 'PRO' }); }
-    for (const who of ['pro', 'admin']) expect((await get('', who)).statusCode).toBe(200);
+    const denied=await get('', 'none'); expect(denied.statusCode).toBe(403); expect(denied.json()).toMatchObject({ error: 'FEATURE_LOCKED', requiredTier: 'EARLY_ACCESS' });
+    for (const who of ['early', 'member', 'pro', 'admin']) expect((await get('', who)).statusCode).toBe(200);
   });
   it('queues a bounded token discovery scan only for authorised users and indexed tokens', async () => {
     expect((await post('none')).statusCode).toBe(403);
-    expect((await post('early')).statusCode).toBe(403);
+    expect((await post('early')).statusCode).toBe(202);
     expect((await post('pro', 'not-a-mint')).statusCode).toBe(400);
     expect((await post('pro', address())).statusCode).toBe(404);
     const blacklisted = await newToken(true); expect((await post('pro', blacklisted.mint)).statusCode).toBe(404);
@@ -105,6 +105,7 @@ describe('token investigation on isolated PostgreSQL', () => {
     const r = await app.inject({ method: 'PUT', url: '/v1/admin/entitlements/settings', headers: { authorization: 'Bearer admin' }, payload: { settings: { 'entitlements.features': { 'research.smart_money_investigation': { requiredTier: 'EARLY_ACCESS' } } }, reason: 'Investigation access test' } });
     expect(r.statusCode).toBe(200); expect((await get('', 'early')).statusCode).toBe(200); expect((await get('', 'none')).statusCode).toBe(403);
     await setting('entitlements.features', { 'research.smart_money_investigation': { requiredTier: 'PRO', min_entitlement_age_hours: 72 } });
+    expect((await get('', 'early')).statusCode).toBe(403); expect((await post('early')).statusCode).toBe(403);
     expect((await get('', 'pro')).statusCode).toBe(403); expect((await get('', 'admin')).statusCode).toBe(200);
   });
   it('returns typed observed totals, current qualification, group confidence and transaction provenance', async () => {
