@@ -25,7 +25,12 @@ for(const width of [1440,390])for(const theme of ['dark','light'])test(`smart mo
   const req=route.request(),url=new URL(req.url()),headers={'access-control-allow-origin':origin,'access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,OPTIONS'};
    if(req.method()==='OPTIONS')return route.fulfill({status:204,headers});
    expect(req.method()).toBe('GET');
-     if(url.pathname==='/v1/smart-money/rankings')return route.fulfill({headers,json:{...rankingFixture,band:url.searchParams.get('band'),items:url.searchParams.get('band')==='UNKNOWN'||url.searchParams.get('status')==='REVIEW_READY'?[]:rankingFixture.items}});
+      if(url.pathname==='/v1/smart-money/rankings'){
+       const minimum=Number(url.searchParams.get('minMedianPositionSol'));
+       const items=url.searchParams.get('band')==='UNKNOWN'||url.searchParams.get('status')==='REVIEW_READY'?[]:
+        rankingFixture.items.map(w=>({...w,performance:{...w.performance,medianClosedPositionSol:'0.5'}})).filter(w=>minimum===0||Number(w.performance.medianClosedPositionSol)>=minimum);
+       return route.fulfill({headers,json:{...rankingFixture,band:url.searchParams.get('band'),minMedianPositionSol:minimum,total:items.length,counts:{reviewReady:0,observing:items.length},items}});
+      }
     if(url.pathname==='/v1/smart-money/flows')return route.fulfill({headers,json:{asOf:at,items:[],nextCursor:null}});
     if(url.pathname==='/v1/smart-money/emerging')return route.fulfill({headers,json:{snapshot:null}});
   const body=url.pathname==='/v1/public-config'?{privyAppId:'fixture-app'}:url.pathname==='/v1/early-access/status'?{enabled:true,seatsLeft:12,inviteRequired:false}:url.pathname==='/v1/smart-money/wallets'?wallets:url.pathname===`/v1/wallets/${ADDRESS}/trades`?tradePage:url.pathname===`/v1/wallets/${ADDRESS}`?detail:responses[url.pathname];
@@ -54,9 +59,15 @@ for(const width of [1440,390])for(const theme of ['dark','light'])test(`smart mo
    await expect(page.getByRole('table',{name:'Small-cap wallet leaderboard'})).toBeVisible();
    await expect(page.getByText('12.3457')).toBeVisible();
    await expect(page.getByText('Median first buy: 0.00003')).toBeVisible();
-  await page.getByText('Evidence',{exact:true}).click();
-  await expect(page.getByText('History incomplete or stale')).toBeVisible();
-  await page.getByLabel('Market cap at entry').selectOption('UNKNOWN');
+   await page.getByText('Evidence',{exact:true}).click();
+   await expect(page.getByText('History incomplete or stale')).toBeVisible();
+   await page.getByLabel('Minimum median closed-position spend · SOL').selectOption('1');
+   await expect(page.getByText(/No wallets match this minimum spend/)).toBeVisible();
+   await expect(page.getByRole('table',{name:'Small-cap wallet leaderboard'})).toHaveCount(0);
+   await page.getByLabel('Minimum median closed-position spend · SOL').selectOption('0.1');
+   await expect(page.getByRole('table',{name:'Small-cap wallet leaderboard'})).toBeVisible();
+   await page.getByLabel('Market cap at entry').selectOption('UNKNOWN');
+   await page.getByLabel('Minimum median closed-position spend · SOL').selectOption('0');
   await expect(page.getByText(/historical market caps cannot be inferred/)).toBeVisible();
   await page.getByLabel('Market cap at entry').selectOption('SMALL_CAP');
    await expect(page.getByText('12.3457')).toBeVisible();
