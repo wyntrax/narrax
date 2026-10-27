@@ -24,6 +24,7 @@ Failures preserve the last successful `wallet.history.<id>` continuation checkpo
 - `scannedThroughAt`: earliest provider-row date reached in the current fixed scan, potentially beyond its requested lower bound. Empty results leave it unknown.
 - `verifiedCoveredFrom` / `verifiedCoveredTo`: bounds of completed filtered-history scans only. During a partial head catch-up they retain the preceding completed coverage. Initial partial scans and legacy partial records have unknown verified bounds.
 - `pagesRead`: cumulative successful-batch pages since these diagnostics became available; legacy page counts are unavailable.
+- `searchHops`: validated Helius search-period continuations. A specific HTTP 404 can supply a `before-signature` to continue searching; it is not proof of empty history. Each hop consumes one of the existing three page-budget slots. Search-only batches persist a partial checkpoint with unknown observed dates; other 404s and repeated cursors remain failures. Attempt records and cycle results expose their own hop counts; successful-row pages plus search hops stay within the page budget (existing bounded 429 retries are separate).
 
 Legacy `coveredFrom` / `coveredTo` remain requested bounds for compatibility; `capped=true` never proves that range was completed. `COMPLETE` describes pagination completion, not profitable performance or fully parsed swaps. Skipped records remain qualification blockers. Transfers and live holdings remain outside this collector.
 

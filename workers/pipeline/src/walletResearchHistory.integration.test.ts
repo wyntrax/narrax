@@ -3,7 +3,7 @@ import {afterAll,afterEach,expect,it,vi} from 'vitest';
 import {createPrisma,Prisma} from '@narra/database';
 import {assertTestDatabase} from '../../../scripts/test-database';
 import {refreshResearchHistory,selectResearchHistoryWallets,HISTORY_ATTEMPT_PREFIX,HISTORY_RETRY_MS,HISTORY_REFRESH_MS} from './walletResearchHistory';
-import {type WalletHistoryOptions,WalletHistoryError} from './walletHistory';
+import {collectWalletHistory,type WalletHistoryOptions,WalletHistoryError} from './walletHistory';
 
 assertTestDatabase(new URL(process.env.DATABASE_URL??'invalid:'));
 const db=createPrisma(),tag=`history-fair-${randomUUID()}`;
@@ -26,7 +26,7 @@ it('resumes old checkpoints under continuous two-wallet admission without exceed
  for(const w of old)await setting(`wallet.history.${w.id}`,checkpoint(w.createdAt),w.createdAt);
  const collect=vi.fn(async(_address:string,opts:WalletHistoryOptions)=>({events:[],scanned:300,skipped:0,capped:true,
   nextBefore:`cursor-${collect.mock.calls.length}`,coveredFrom:(opts.since??new Date(+opts.now!-30*86400000)).toISOString(),coveredTo:opts.now!.toISOString(),
-  pagesRead:3,oldestObservedAt:new Date(+opts.now!-collect.mock.calls.length*60000).toISOString(),newestObservedAt:null,scannedThroughAt:new Date(+opts.now!-collect.mock.calls.length*60000).toISOString()}));
+  pagesRead:3,searchHops:0,oldestObservedAt:new Date(+opts.now!-collect.mock.calls.length*60000).toISOString(),newestObservedAt:null,scannedThroughAt:new Date(+opts.now!-collect.mock.calls.length*60000).toISOString()}));
  for(let cycle=0;cycle<6;cycle++){
   const at=new Date(+now+cycle*HISTORY_RETRY_MS);
   await wallet(`new-${cycle}-a`,at);await wallet(`new-${cycle}-b`,at);
@@ -75,4 +75,20 @@ it('rotates failed and interrupted attempts, retains checkpoints, and exposes on
  const newcomer=await wallet('c-new',new Date(+now+1));
  expect((await selectResearchHistoryWallets(db,new Date(+now+1000))).map(w=>w.id)).toEqual([newcomer.id]);
  expect(JSON.stringify(await db.systemSetting.findMany({where:{key:{in:ids.map(id=>HISTORY_ATTEMPT_PREFIX+id)}}}))).not.toContain('secret-provider-url');
+});
+it('persists search-only continuation as partial, then resumes it without claiming observed dates',async()=>{
+ const w=await wallet('search-gap'),cursors=['2'.repeat(88),'3'.repeat(88),'4'.repeat(88)];
+ const fetch=vi.fn();
+ for(const cursor of cursors)fetch.mockResolvedValueOnce(new Response(JSON.stringify({error:`Failed to find events within the search period. To continue search, query the API again with the \`before-signature\` parameter set to ${cursor}.`}),{status:404}));
+ const collect=(address:string,opts:WalletHistoryOptions)=>collectWalletHistory(address,{...opts,fetch});
+ expect(await refreshResearchHistory(db,'test-key',now,collect)).toMatchObject({scanned:1,capped:1,failures:0,pagesRead:0,searchHops:3});
+ const key=`wallet.history.${w.id}`;
+ expect((await db.systemSetting.findUniqueOrThrow({where:{key}})).value).toMatchObject({capped:true,nextBefore:cursors[2],scanned:0,verifiedCoveredFrom:null,verifiedCoveredTo:null,oldestObservedAt:null,scannedThroughAt:null,searchHops:3});
+ fetch.mockResolvedValueOnce(new Response('',{status:503}));
+ expect(await refreshResearchHistory(db,'test-key',new Date(+now+HISTORY_RETRY_MS),collect)).toMatchObject({failures:1});
+ expect((await db.systemSetting.findUniqueOrThrow({where:{key}})).value).toMatchObject({nextBefore:cursors[2],searchHops:3});
+ fetch.mockResolvedValueOnce(new Response('[]'));
+ expect(await refreshResearchHistory(db,'test-key',new Date(+now+2*HISTORY_RETRY_MS),collect)).toMatchObject({resumed:1,scanned:1,capped:0,failures:0});
+ expect(new URL(String(fetch.mock.calls[4]![0])).searchParams.get('before')).toBe(cursors[2]);
+ expect((await db.systemSetting.findUniqueOrThrow({where:{key}})).value).toMatchObject({capped:false,scanned:0,nextBefore:null,verifiedCoveredTo:now.toISOString(),scannedThroughAt:null,searchHops:3});
 });
