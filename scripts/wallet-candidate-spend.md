@@ -10,6 +10,16 @@ This is evidence of matched transfer legs, **not** validation of a DEX swap inst
 
 Never substitute a first-token quote-leg median for `medianClosedPositionSol`, which measures cumulative spend on observed closed positions. Repeated partial buys and sells have different semantics.
 
+### Temporary WSOL account ownership
+
+An account created and closed in one transaction can be absent from both token-balance snapshots. The extractor can now resolve this narrow case when the transaction explicitly creates a 165-byte account owned by classic SPL Token and subsequently initializes it as WSOL for a named owner **before** the consuming outer instruction. Decoded top-level or inner setup instructions are supported. The transfer leg still supplies the amount: rent, wrap funding and closing refunds never substitute for it.
+
+`recoveredWsolAccounts` retains the account, owner, mint, and outer/inner indexes of the creation and initialization instructions beside the existing transaction signature/time. It is optional on both matched and unknown records. Recovery does not upgrade an unknown swap by itself: other blockers still apply.
+
+Transfers' authority fields, associated-token-account declarations alone, `syncNative`, and close recipients do not prove this mapping. Same-call initialization, account reuse, conflicting balance evidence, ownership changes/closure before or inside the consuming call, and undecoded classic-token lifecycle instructions involving the account remain unsupported. Existing balance mappings are not replaced.
+
+The reduced captured fixture `packages/solana/src/wsol-ownership.fixture.ts` comes from mainnet transaction `2ypTZHmoojTLyiqKYwrhyjVsegZY4TaVyEUVvnacACwQpoF76qjE9MoY6Lb4RAinDTnD9hrPZXTrgXVS2j7twC1S`, observed read-only on 2026-10-27. Its temporary WSOL source is initialized under outer instruction 2, used under instruction 6, and closed under instruction 7. The quote transfer is 1,599,244 lamports (0.001599244 SOL); the separately recorded account creation amount is 1,488,440 lamports. With ownership recovered, its result is still `UNKNOWN / UNSUPPORTED_TOKEN_PROGRAM` because the received token is Token-2022. Tests using a classic-token counterpart are explicitly synthetic. This sample demonstrates ownership recovery, not an increase in production matched-spend coverage.
+
 ## Emerging snapshot and read-only preview
 
 Each emerging lead now includes `spend`:

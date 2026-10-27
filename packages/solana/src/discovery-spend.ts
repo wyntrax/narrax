@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ParsedTx } from './rpc';
 import { earlyBuyer } from './funding';
 import { WSOL_MINT } from './helius';
+import { temporaryWsolOwnership, WsolOwnershipEvidence } from './wsol-ownership';
 
 const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
@@ -10,10 +11,11 @@ const raw = z.string().regex(/^[1-9]\d*$/).refine(v => v.length <= 20 && /^[1-9]
 export const DiscoverySpendEvidence = z.discriminatedUnion('status', [
   z.object({ version: z.literal(1), status: z.literal('MATCHED_TRANSFERS'), source: z.literal('RPC_PARSED_INNER_TRANSFERS'),
     quoteAsset: z.enum(['SOL', 'WSOL']), quoteLamports: raw, tokenAmountRaw: raw,
-    outerInstructionIndex: z.number().int().nonnegative(), counterparty: z.string().min(1), programId: z.string().min(1) }),
+    outerInstructionIndex: z.number().int().nonnegative(), counterparty: z.string().min(1), programId: z.string().min(1),
+    recoveredWsolAccounts: z.array(WsolOwnershipEvidence).optional() }),
   z.object({ version: z.literal(1), status: z.literal('UNKNOWN'), reason: z.enum([
     'NO_TOKEN_INCREASE', 'MISSING_ACCOUNT_MAPPING', 'AMBIGUOUS_TRANSFERS', 'NO_MATCHED_QUOTE_TRANSFER', 'UNSUPPORTED_TOKEN_PROGRAM',
-  ]) }),
+  ]), recoveredWsolAccounts: z.array(WsolOwnershipEvidence).optional() }),
 ]);
 export type DiscoverySpendEvidence = z.infer<typeof DiscoverySpendEvidence>;
 type UnknownReason = Extract<DiscoverySpendEvidence, { status: 'UNKNOWN' }>['reason'];
@@ -46,19 +48,29 @@ export function discoverySpendEvidence(tx: ParsedTx, mint: string): DiscoverySpe
     accounts.set(address, { owner: b.owner, mint: b.mint });
   }
   const matches: DiscoverySpendEvidence[] = [];
+  const recovered = new Map<string, WsolOwnershipEvidence>();
   let reason: UnknownReason = 'NO_MATCHED_QUOTE_TRANSFER';
   for (const group of tx.meta.innerInstructions ?? []) {
     if (typeof group.index !== 'number' || !Number.isInteger(group.index) || group.index < 0) continue;
     const parent = object(tx.transaction.message.instructions[group.index]);
     if (typeof parent.programId !== 'string' || [SYSTEM, TOKEN, TOKEN_2022].includes(parent.programId)) continue;
+    const temporary = temporaryWsolOwnership(tx, group.index);
+    const groupRecovered = new Map<string, WsolOwnershipEvidence>();
+    const resolve = (address: unknown): Account | undefined => {
+      if (typeof address !== 'string') return undefined;
+      const existing = accounts.get(address); if (existing) return existing;
+      const proof = temporary.get(address);
+      if (proof) { groupRecovered.set(address,proof); recovered.set(address,proof); }
+      return proof;
+    };
     const transfers: Transfer[] = []; let invalid: UnknownReason | null = null;
     for (const item of group.instructions) {
       const ix = object(item), parsed = object(ix.parsed), info = object(parsed.info);
       if (ix.programId === TOKEN_2022) { invalid = 'UNSUPPORTED_TOKEN_PROGRAM'; break; }
       if (ix.programId === TOKEN) {
         if (parsed.type !== 'transfer' && parsed.type !== 'transferChecked') { invalid = 'AMBIGUOUS_TRANSFERS'; break; }
-        const source = typeof info.source === 'string' ? accounts.get(info.source) : undefined;
-        const dest = typeof info.destination === 'string' ? accounts.get(info.destination) : undefined;
+        const source = resolve(info.source);
+        const dest = resolve(info.destination);
         if (!source || !dest) { invalid = 'MISSING_ACCOUNT_MAPPING'; break; }
         const amount = raw.safeParse(parsed.type === 'transferChecked' ? object(info.tokenAmount).amount : info.amount);
         if (source.mint !== dest.mint || !amount.success || (parsed.type === 'transferChecked' && info.mint !== source.mint)) { invalid = 'AMBIGUOUS_TRANSFERS'; break; }
@@ -82,7 +94,9 @@ export function discoverySpendEvidence(tx: ParsedTx, mint: string): DiscoverySpe
     }
     matches.push({ version: 1, status: 'MATCHED_TRANSFERS', source: 'RPC_PARSED_INNER_TRANSFERS',
       quoteAsset: quote.mint === 'SOL' ? 'SOL' : 'WSOL', quoteLamports: quote.amount, tokenAmountRaw: token.amount,
-      outerInstructionIndex: group.index, counterparty: token.from, programId: parent.programId });
+      outerInstructionIndex: group.index, counterparty: token.from, programId: parent.programId,
+      ...(groupRecovered.size ? { recoveredWsolAccounts: [...groupRecovered.values()] } : {}) });
   }
-  return matches.length === 1 ? matches[0]! : unknown(matches.length > 1 ? 'AMBIGUOUS_TRANSFERS' : reason);
+  return matches.length === 1 ? matches[0]! : { ...unknown(matches.length > 1 ? 'AMBIGUOUS_TRANSFERS' : reason),
+    ...(recovered.size ? { recoveredWsolAccounts: [...recovered.values()] } : {}) };
 }
