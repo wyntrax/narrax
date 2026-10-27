@@ -21,7 +21,7 @@ const amount = (value: string | null, c: InvestigationCopy) => <span className="
 
 export function InvestigationPage({ mint = '' }: { mint?: string }) {
   const { access } = useResearch();
-  if (!hasFeature(access, 'research.smart_money_investigation')) return <Locked tier={access.features['research.smart_money_investigation']?.requiredTier ?? 'PRO'} />;
+  if (!hasFeature(access, 'research.smart_money_investigation')) return <Locked tier={access.features['research.smart_money_investigation']?.requiredTier ?? 'EARLY_ACCESS'} />;
   return <InvestigationDesk key={mint} mint={mint} />;
 }
 function InvestigationDesk({ mint }: { mint: string }) {

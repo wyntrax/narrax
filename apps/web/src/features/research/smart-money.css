@@ -1,5 +1,11 @@
 /* Tracked-wallet directory and profile. Scoped to the smart-money feature. */
 .sm-page{min-width:0}
+.sm-tabs{min-width:0}
+.sm-tab-list{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--bd);padding:4px 0;margin-bottom:20px}
+.sm-tab{flex:none;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--tx2);padding:12px 16px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.sm-tab[data-state=active]{color:var(--tx);border-bottom-color:currentColor;background:var(--s2)}
+.sm-tab:focus-visible,.sm-tab-panel:focus-visible{outline:2px solid currentColor;outline-offset:-2px}
+.sm-tab-panel{min-width:0}
 .sm-page .research-filters{align-items:end}
 .sm-evidence{display:grid;gap:5px;justify-items:start;font-size:12px;min-width:0}
 .sm-evidence b{font-weight:500}

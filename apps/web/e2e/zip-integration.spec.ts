@@ -48,7 +48,8 @@ async function enter(page:Page,path:string,locale:'en'|'id'='en'){
 for(const locale of ['en','id'] as const)test(`${locale}: added workspace pages render genuine empty/missing states and accessible controls`,async({page})=>{
  test.setTimeout(90000);
  const t=locale==='en'?en:id;
- await page.setViewportSize({width:locale==='en'?1440:390,height:1000});await mock(page);await enter(page,'/app/smart-money',locale);
+  await page.setViewportSize({width:locale==='en'?1440:390,height:1000});await mock(page);await enter(page,'/app/smart-money',locale);
+  await page.getByRole('tab',{name:locale==='id'?'Direktori wallet':'Wallet directory',exact:true}).click();
  await expect(page.getByText('Observed wallet',{exact:true})).toBeVisible();
  for(const [path,key] of [['alerts','alerts'],['analytics','analytics'],['agent','agent'],['settings','settings']] as const){
   await enter(page,`/app/${path}`,locale);await expect(page.getByRole('heading',{level:1,name:t[key]})).toBeVisible();

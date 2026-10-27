@@ -12,7 +12,9 @@ vi.mock('@/i18n/navigation',()=>({useRouter:()=>({push:vi.fn()}),Link:({href,chi
 vi.mock('./session',()=>({useResearchQuery:(path:string)=>{
  fixture.paths.push(path);
   const result={isPending:false,isError:false,isFetching:false,refetch:vi.fn()};
-  if(path.startsWith('smart-money/rankings'))return {...result,data:{items:[],pipeline:null}};
+   if(path.startsWith('smart-money/rankings'))return {...result,data:{items:[],pipeline:null}};
+   if(path.startsWith('smart-money/flows'))return {...result,data:{items:[],nextCursor:null}};
+   if(path.startsWith('smart-money/emerging'))return {...result,data:{snapshot:null}};
  if(path.startsWith('smart-money/')){
   const wallet={address:'wallet',source:'MANUAL',observedTrades:299,intelligence};
   return {...result,data:{items:[fixture.dirItem??wallet],nextCursor:null}};
@@ -22,8 +24,9 @@ vi.mock('./session',()=>({useResearchQuery:(path:string)=>{
 }}));
 afterEach(()=>{cleanup();fixture.profile=null;fixture.hasTrade=false;fixture.paths=[];fixture.dirItem=null;});
 function view(node:ReactNode){return render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}>{node}</NextIntlClientProvider>);}
-it('shows computed insufficient sample progress in the directory instead of awaiting computation',()=>{
- view(<SmartMoneyPage/>);
+it('shows computed insufficient sample progress in the directory instead of awaiting computation',async()=>{
+  view(<SmartMoneyPage/>);
+  await userEvent.click(screen.getByRole('tab',{name:'Wallet directory'}));
  expect(screen.getByText('Insufficient matched trades')).toBeVisible();
  expect(screen.getByText(/2 \/ 5 matched closes from 299 trades in the last 30 days/)).toBeVisible();
 });
@@ -39,22 +42,41 @@ it('distinguishes unmatched sells and capped historical coverage on wallet detai
  expect(screen.getAllByText(/You do not need to wait 30 days/).length).toBeGreaterThan(0);
 });
 it('sorts by recorded score through the API and explains the ordering',async()=>{
- const user=userEvent.setup();view(<SmartMoneyPage/>);
+  const user=userEvent.setup();view(<SmartMoneyPage/>);
+  await user.click(screen.getByRole('tab',{name:'Wallet directory'}));
  expect(fixture.paths).toContainEqual(expect.stringContaining('sort=recent'));
  expect(screen.queryByText(messages.smSortNote)).toBeNull();
  await user.selectOptions(screen.getByLabelText(messages.smSort),'score');
  expect(fixture.paths).toContainEqual(expect.stringContaining('sort=score'));
  expect(await screen.findByText(messages.smSortNote)).toBeVisible();
 });
-it('shows a recorded profile chip only when a profile exists, never inventing a score',()=>{
+it('shows a recorded profile chip only when a profile exists, never inventing a score',async()=>{
  fixture.dirItem={address:'wallet',source:'MANUAL',observedTrades:299,intelligence,profileAt:at,score:81.5,style:'SNIPER'};
- const first=view(<SmartMoneyPage/>);
+  const first=view(<SmartMoneyPage/>);
+  await userEvent.click(screen.getByRole('tab',{name:'Wallet directory'}));
  expect(screen.getByText('Score 81.5')).toBeVisible();expect(screen.getByText('SNIPER')).toBeVisible();
  first.unmount();
  fixture.dirItem=null;
- view(<SmartMoneyPage/>);
+  view(<SmartMoneyPage/>);
+  await userEvent.click(screen.getByRole('tab',{name:'Wallet directory'}));
  expect(screen.queryByText(/^Score /)).toBeNull();
  expect(screen.getByText('Insufficient matched trades')).toBeVisible();
+});
+it('opens only rankings initially and supports keyboard tab navigation without fetching hidden views',async()=>{
+ view(<SmartMoneyPage/>);
+ expect(screen.getByRole('tab',{name:'Rankings'})).toHaveAttribute('aria-selected','true');
+ expect(fixture.paths.every(p=>p.startsWith('smart-money/rankings'))).toBe(true);
+ const rankings=screen.getByRole('tab',{name:'Rankings'});rankings.focus();
+ await userEvent.keyboard('{ArrowRight}');
+ expect(screen.getByRole('tab',{name:'Wallet directory'})).toHaveFocus();
+ expect(await screen.findByLabelText(messages.enhance.walletSearch)).toBeVisible();
+ expect(fixture.paths.some(p=>p.startsWith('smart-money/wallets'))).toBe(true);
+ expect(screen.queryByRole('heading',{name:'Small-cap wallet leaderboard'})).toBeNull();
+ await userEvent.click(screen.getByRole('tab',{name:'Token flows'}));
+ expect(fixture.paths.some(p=>p.startsWith('smart-money/flows'))).toBe(true);
+ expect(screen.queryByLabelText(messages.enhance.walletSearch)).toBeNull();
+ await userEvent.click(screen.getByRole('tab',{name:'Emerging wallets'}));
+ expect(fixture.paths).toContain('smart-money/emerging');
 });
 it('renders real recorded-profile values on the detail page and keeps a missing pattern unknown',()=>{
  fixture.profile={score:81.5,leaderScore:70,style:'SNIPER',medianHoldSeconds:3600,bestPattern:null,weakPattern:'Slow exits',updatedAt:at};

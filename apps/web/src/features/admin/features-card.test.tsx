@@ -19,12 +19,13 @@ it('offers all features with Early, Member and Pro, without Elite',()=>{
  expect(screen.getAllByRole('combobox')).toHaveLength(Object.keys(FEATURE_TIERS).length);
   expect(screen.getByLabelText('Agent')).toHaveValue('EARLY_ACCESS');
    expect(screen.getByLabelText('Personal Radar')).toHaveValue('PRO');
-   expect(screen.getByLabelText('Smart Money Investigation')).toHaveValue('PRO');
+   expect(screen.getByLabelText('Smart Money Investigation')).toHaveValue('EARLY_ACCESS');
  expect(screen.queryByRole('option',{name:'Elite'})).toBeNull();
  expect(screen.getByRole('button',{name:messages.featureAccess.save})).toBeDisabled();
 });
 it('saves the full feature map with a reason, preserving existing age restrictions',async()=>{
- const save=view({'research.chat':{requiredTier:'ELITE',min_entitlement_age_hours:24}});
+  const save=view({'research.chat':{requiredTier:'ELITE',min_entitlement_age_hours:24},'research.smart_money_investigation':{requiredTier:'PRO'}});
+  expect(screen.getByLabelText('Smart Money Investigation')).toHaveValue('PRO');
   fireEvent.change(screen.getByLabelText('Agent'),{target:{value:'MEMBER'}});
   fireEvent.change(screen.getByLabelText('Smart Money Investigation'),{target:{value:'EARLY_ACCESS'}});
  fireEvent.change(screen.getByLabelText(messages.adminReason),{target:{value:'Member agent access'}});

@@ -10,7 +10,7 @@ export const FEATURE_TIERS = {
   'research.analysis': 'EARLY_ACCESS', 'research.wallet_detail': 'EARLY_ACCESS', 'research.decision_analytics': 'EARLY_ACCESS',
   'research.advanced_analytics': 'EARLY_ACCESS', 'research.chat': 'EARLY_ACCESS',
   'research.personal_radar': 'PRO', 'research.thesis_tracker': 'PRO', 'research.personal_briefing': 'PRO',
-  'research.smart_money_investigation': 'PRO',
+  'research.smart_money_investigation': 'EARLY_ACCESS',
 } as const satisfies Record<string, AccessTier>;
 export type FeatureKey = keyof typeof FEATURE_TIERS;
 export const RESEARCH_PAGE_LIMITS: Record<AccessTier, number> = { NONE: 0, EARLY_ACCESS: 20, MEMBER: 40, PRO: 70, ELITE: 70 };
