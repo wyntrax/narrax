@@ -21,9 +21,15 @@ it('rejects future timestamps and invalid evidence rather than upgrading them to
 it('retains half-lamport precision when averaging large raw amounts',()=>{
  expect(summarizeDiscoverySpend([observation('a','18446744073709551615'),observation('b','18446744073709551614')],now).medianMatchedQuoteSol).toBe('18446744073.7095516145');
 });
-it('retains the unknown denominator when recovered WSOL ownership exposes an unsupported received token',()=>{
- const tx=capturedTemporaryWsolTx(),spendEvidence=discoverySpendEvidence(tx,capturedTemporaryWsol.mint);
+it('retains the unknown denominator when recovered WSOL ownership has a received-token amount mismatch',()=>{
+ const tx=capturedTemporaryWsolTx();
+ tx.meta!.postTokenBalances!.find(b=>b.accountIndex===2)!.uiTokenAmount.amount='18807903080';
+ const spendEvidence=discoverySpendEvidence(tx,capturedTemporaryWsol.mint);
  expect(spendEvidence.recoveredWsolAccounts).toHaveLength(1);
  const result=summarizeDiscoverySpend([{tokenId:'captured',signature:'2ypTZHmoojTLyiqKYwrhyjVsegZY4TaVyEUVvnacACwQpoF76qjE9MoY6Lb4RAinDTnD9hrPZXTrgXVS2j7twC1S',at:new Date(tx.blockTime!*1000).toISOString(),spendEvidence}],now);
- expect(result).toMatchObject({matchedTokens:0,unknownTokens:1,medianMatchedQuoteSol:null,unknownReasons:{UNSUPPORTED_TOKEN_PROGRAM:1}});
+ expect(result).toMatchObject({matchedTokens:0,unknownTokens:1,medianMatchedQuoteSol:null,unknownReasons:{TOKEN_2022_AMOUNT_MISMATCH:1}});
+});
+it('includes the captured checked Token-2022 transfer leg in a size preview without granting qualification',()=>{
+ const tx=capturedTemporaryWsolTx(),spendEvidence=discoverySpendEvidence(tx,capturedTemporaryWsol.mint);
+ expect(summarizeDiscoverySpend([{tokenId:'captured',signature:'captured',at:new Date(tx.blockTime!*1000).toISOString(),spendEvidence}],now)).toMatchObject({matchedTokens:1,unknownTokens:0,medianMatchedQuoteSol:'0.001599244'});
 });

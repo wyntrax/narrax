@@ -5,18 +5,18 @@ import {capturedTemporaryWsol,capturedTemporaryWsolTx} from './wsol-ownership.fi
 const {account,wallet,mint}=capturedTemporaryWsol;
 const TOKEN='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',SYSTEM='11111111111111111111111111111111',WSOL='So11111111111111111111111111111111111111112';
 const ix=(programId:string,type:string,info:Record<string,unknown>)=>({programId,parsed:{type,info}});
-it('recovers ownership from captured creation and initialization, while retaining the Token-2022 blocker',()=>{
+it('recovers ownership from captured creation and initialization, retaining the proof alongside checked Token-2022 evidence',()=>{
  const tx=capturedTemporaryWsolTx();
  const proof=temporaryWsolOwnership(tx,6).get(account);
  expect(proof).toEqual({account,owner:wallet,mint:WSOL,source:'RPC_CREATE_AND_INITIALIZE',createdAt:{outerIndex:2,innerIndex:1},initializedAt:{outerIndex:2,innerIndex:3}});
  const evidence=discoverySpendEvidence(tx,mint);
- expect(evidence).toEqual({version:1,status:'UNKNOWN',reason:'UNSUPPORTED_TOKEN_PROGRAM',recoveredWsolAccounts:[proof]});
+ expect(evidence).toMatchObject({version:1,status:'MATCHED_TRANSFERS',quoteLamports:'1599244',recoveredWsolAccounts:[proof],token2022Transfers:[{destinationPreEvidence:'CREATED_AND_INITIALIZED'}]});
  expect(DiscoverySpendEvidence.safeParse(evidence).success).toBe(true);
 });
 it('uses the exact transfer leg, not creation rent or wrap funding, for a synthetic classic-token counterpart',()=>{
  const tx=capturedTemporaryWsolTx();
  // Synthetic variant, not a claim that the captured target uses classic SPL.
- const group=tx.meta!.innerInstructions![1]!;
+ const group=tx.meta!.innerInstructions!.find(g=>g.index===6)!;
  group.instructions[1]={...group.instructions[1] as object,programId:TOKEN};
  tx.transaction.message.instructions[3]=ix(SYSTEM,'transfer',{source:wallet,destination:account,lamports:5000000});
  const result=discoverySpendEvidence(tx,mint);
@@ -56,7 +56,7 @@ it.each(['no create','no init','wrong create program','wrong init program','wron
 it.each(['closeAccount','setAuthority'])('rejects %s before or inside the consuming call, but allows close afterwards',type=>{
  for(const inside of [false,true]){
   const tx=capturedTemporaryWsolTx(),change=ix(TOKEN,type,{account,authorityType:'accountOwner',newAuthority:'other'});
-  if(inside)tx.meta!.innerInstructions![1]!.instructions.unshift(change);else tx.transaction.message.instructions[4]=change;
+  if(inside)tx.meta!.innerInstructions!.find(g=>g.index===6)!.instructions.unshift(change);else tx.transaction.message.instructions[4]=change;
   expect(temporaryWsolOwnership(tx,6).size).toBe(0);
  }
  expect(temporaryWsolOwnership(capturedTemporaryWsolTx(),6).has(account)).toBe(true);
@@ -71,7 +71,7 @@ it('rejects same-call setup, malformed grouping and opaque token instructions in
  expect(temporaryWsolOwnership(tx,6).size).toBe(0);
  const opaque=capturedTemporaryWsolTx();opaque.transaction.message.instructions[4]={programId:TOKEN,accounts:[account],data:'undecoded'};
  expect(temporaryWsolOwnership(opaque,6).size).toBe(0);
- const same=capturedTemporaryWsolTx();same.meta!.innerInstructions![1]!.instructions.unshift({programId:TOKEN,accounts:[account],data:'undecoded'});
+ const same=capturedTemporaryWsolTx();same.meta!.innerInstructions!.find(g=>g.index===6)!.instructions.unshift({programId:TOKEN,accounts:[account],data:'undecoded'});
  expect(temporaryWsolOwnership(same,6).size).toBe(0);
 });
 it('does not reuse a closed account even if it is created again',()=>{
