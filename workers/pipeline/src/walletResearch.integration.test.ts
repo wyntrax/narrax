@@ -145,7 +145,7 @@ it('reports discovery missingness and repeats without treating one observation a
   }
   const result=await discoverCandidates(db,at);
   expect(result).toMatchObject({completeScans:4,noPrice:2,insufficientObservations:1,tokensJudged:1,winners:1,candidates:0,emerging:1});
-  expect((await db.systemSetting.findUniqueOrThrow({where:{key:DISCOVERY_EMERGING_KEY}})).value).toMatchObject({items:[{address,scannedTokens:4}]});
+  expect((await db.systemSetting.findUniqueOrThrow({where:{key:DISCOVERY_EMERGING_KEY}})).value).toMatchObject({items:[{address,scannedTokens:4,spend:{observedTokens:4,matchedTokens:0,unknownTokens:4,medianMatchedQuoteSol:null,unknownReasons:{LEGACY_NO_SPEND_EVIDENCE:4}}}]});
   expect(await db.walletCandidate.count({where:{address}})).toBe(0);
   expect(await db.trackedWallet.count({where:{address}})).toBe(0);
  }finally{
