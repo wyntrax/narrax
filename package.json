@@ -20,6 +20,7 @@
     "wallets:audit": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/audit-tracked-wallets.ts",
     "wallets:scorecard": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/wallet-research-scorecard.ts",
     "wallets:history-status": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/wallet-history-status.ts",
+    "wallets:candidate-spend": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/wallet-candidate-spend.ts",
     "wallets:seed": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/seed-tracked-wallets.ts",
     "wallets:backfill": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/backfill-wallet-history.ts",
     "wallets:reconcile-valuations": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/reconcile-wallet-valuations.ts",

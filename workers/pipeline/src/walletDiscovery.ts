@@ -1,7 +1,8 @@
 import type { PrismaClient } from '@narra/database';
 import { DISCOVERY, rankCandidates, type TokenScan } from '@narra/smart-money';
-import { earlyBuyer, WSOL_MINT } from '@narra/solana';
+import { earlyBuyer, WSOL_MINT, discoverySpendEvidence, type DiscoverySpendEvidence } from '@narra/solana';
 import { oldestSignatures, type HistoryPort } from './walletFunding';
+import { summarizeDiscoverySpend, type DiscoverySpendObservation } from './walletDiscoverySpend';
 
 /** Starting values, not validated against outcomes. */
 export const DISCOVERY_LIMITS = {
@@ -42,14 +43,14 @@ export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: D
   for (const t of tokens) {
     try {
       const { oldestFirst, complete } = await oldestSignatures(rpc, t.mint, L.maxPages, L.pageSize);
-        const buyers: { wallet: string; rank: number; signature: string; at: string | null }[] = [];
+        const buyers: { wallet: string; rank: number; signature: string; at: string | null; spendEvidence: DiscoverySpendEvidence }[] = [];
       if (complete) {
         const seen = new Set<string>();
         for (const sig of oldestFirst.slice(0, L.maxTxsPerToken)) {
           if (buyers.length >= DISCOVERY.maxRank) break;
           const tx = await rpc.getParsedTransaction(sig);
           const buyer = tx ? earlyBuyer(tx, t.mint) : null;
-          if (buyer && !seen.has(buyer)) { seen.add(buyer); buyers.push({ wallet: buyer, rank: buyers.length + 1, signature: sig, at: typeof tx?.blockTime === 'number' ? new Date(tx.blockTime * 1000).toISOString() : null }); }
+          if (buyer && tx && !seen.has(buyer)) { seen.add(buyer); buyers.push({ wallet: buyer, rank: buyers.length + 1, signature: sig, at: typeof tx.blockTime === 'number' ? new Date(tx.blockTime * 1000).toISOString() : null, spendEvidence: discoverySpendEvidence(tx,t.mint) }); }
         }
       }
       const data = { complete, buyers, scannedAt: now };
@@ -100,10 +101,13 @@ export async function discoverCandidates(db: PrismaClient, now: Date = new Date(
   let winners = 0;
   const out: DiscoverySummary = { tokensJudged: 0, winners: 0, candidates: 0, completeScans: rows.length, noPrice: 0, stalePrice: 0, insufficientObservations: 0, invalidPrice: 0, emerging: 0 };
   const repeat = new Map<string, Set<string>>();
+  const spend = new Map<string, DiscoverySpendObservation[]>();
   for (const r of rows) {
     for (const b of Array.isArray(r.buyers) ? r.buyers : []) {
       if (!b || typeof b !== 'object' || Array.isArray(b) || typeof b.wallet !== 'string' || typeof b.rank !== 'number' || b.rank < 1 || b.rank > DISCOVERY.maxRank) continue;
       const ids = repeat.get(b.wallet) ?? new Set<string>(); ids.add(r.token.id); repeat.set(b.wallet, ids);
+      const observations = spend.get(b.wallet) ?? [];
+      observations.push({ tokenId:r.token.id,signature:b.signature,at:b.at,spendEvidence:b.spendEvidence });spend.set(b.wallet,observations);
     }
     const [first, last] = await Promise.all([
       db.tokenMetric.findFirst({ where: { tokenId: r.token.id }, orderBy: { at: 'asc' }, select: { id: true, at: true, priceUsd: true } }),
@@ -133,7 +137,7 @@ export async function discoverCandidates(db: PrismaClient, now: Date = new Date(
     // Existing PENDING suggestions are re-scored. A reviewed address is excluded above, so its status is never touched.
     await db.walletCandidate.upsert({ where: { address: c.address }, create: { address: c.address, ...data }, update: data });
   }
-  const emerging = [...repeat].filter(([address, ids]) => ids.size >= 2 && !exclude.has(address)).map(([address, ids]) => ({ address, scannedTokens: ids.size })).sort((a,b) => b.scannedTokens - a.scannedTokens || a.address.localeCompare(b.address));
+  const emerging = [...repeat].filter(([address, ids]) => ids.size >= 2 && !exclude.has(address)).map(([address, ids]) => ({ address, scannedTokens: ids.size, spend: summarizeDiscoverySpend(spend.get(address)??[],now) })).sort((a,b) => b.scannedTokens - a.scannedTokens || a.address.localeCompare(b.address));
   Object.assign(out, { tokensJudged: scans.length, winners, candidates: ranked.length, emerging: emerging.length });
   const health = { ...out, checkedAt: now.toISOString(), lookbackHours: 48 };
   const candidates = { checkedAt: now.toISOString(), total: emerging.length, capped: emerging.length > 50, items: emerging.slice(0,50) };

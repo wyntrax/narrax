@@ -298,20 +298,32 @@ describe.skipIf(!up)('tracked wallets on a real Postgres', () => {
         meta: { err, innerInstructions: [], preTokenBalances: [bal(payer, pre, mint)], postTokenBalances: [bal(payer, post, mint)] },
       } as unknown as ParsedTx);
       const A = addr('BUYA'), B = addr('BUYB');
+      const purchase=parsed(A,'0','100',addr('SCAN1'));
+      purchase.transaction.message.accountKeys=[A,'pool-token','buyer-token'];
+      purchase.transaction.message.instructions=[{programId:'swap-program'}];
+      purchase.meta!.preTokenBalances=[{...bal('pool','1000',addr('SCAN1')),accountIndex:1},{...bal(A,'0',addr('SCAN1')),accountIndex:2}];
+      purchase.meta!.postTokenBalances=[{...bal('pool','900',addr('SCAN1')),accountIndex:1},{...bal(A,'100',addr('SCAN1')),accountIndex:2}];
+      purchase.meta!.innerInstructions=[{index:0,instructions:[
+        {programId:'11111111111111111111111111111111',parsed:{type:'transfer',info:{source:A,destination:'pool',lamports:30000}}},
+        {programId:'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',parsed:{type:'transfer',info:{source:'pool-token',destination:'buyer-token',amount:'100'}}},
+      ]}];
       const calls: string[] = [];
+      const transactions: string[] = [];
       const rpc: HistoryPort = {
         getSignaturesForAddress: async (a) => {
           calls.push(a);
           if (a === addr('SCAN2')) return Array.from({ length: DISCOVERY_LIMITS.pageSize }, (_, i) => ({ signature: `busy-${calls.length}-${i}`, blockTime: 1, failed: false }));
           return [{ signature: 'x4', blockTime: 4, failed: false }, { signature: 'x3', blockTime: 3, failed: false }, { signature: 'x2', blockTime: 2, failed: true }, { signature: 'x1', blockTime: 1, failed: false }];
         },
-        getParsedTransaction: async (sig) => ({ x1: parsed(A, '0', '100', addr('SCAN1')), x3: parsed(B, '0', '50', addr('SCAN1')), x4: parsed(A, '100', '300', addr('SCAN1')) } as Record<string, ParsedTx>)[sig] ?? null,
+        getParsedTransaction: async (sig) => {transactions.push(sig);return ({ x1: purchase, x3: parsed(B, '0', '50', addr('SCAN1')), x4: parsed(A, '100', '300', addr('SCAN1')) } as Record<string, ParsedTx>)[sig] ?? null;},
       };
       const r = await scanEarlyBuyers(db, rpc, NOW, { tokenIds: [young.id, busy.id, old.id] });
       expect(r).toMatchObject({ scanned: 2, complete: 1, tooLong: 1, errors: [] });
       const row1 = await db.tokenEarlyBuyers.findUniqueOrThrow({ where: { tokenId: young.id } });
       expect(row1.complete).toBe(true);
-      expect(row1.buyers).toEqual([{ wallet: A, rank: 1, signature:'x1', at:'1970-01-01T00:00:01.000Z' }, { wallet: B, rank: 2, signature:'x3', at:'1970-01-01T00:00:01.000Z' }]);
+      const spendEvidence={version:1,status:'UNKNOWN',reason:'NO_MATCHED_QUOTE_TRANSFER'};
+      expect(row1.buyers).toEqual([{ wallet: A, rank: 1, signature:'x1', at:'1970-01-01T00:00:01.000Z',spendEvidence:{version:1,status:'MATCHED_TRANSFERS',source:'RPC_PARSED_INNER_TRANSFERS',quoteAsset:'SOL',quoteLamports:'30000',tokenAmountRaw:'100',outerInstructionIndex:0,counterparty:'pool',programId:'swap-program'} }, { wallet: B, rank: 2, signature:'x3', at:'1970-01-01T00:00:01.000Z',spendEvidence }]);
+      expect(transactions).toEqual(['x1','x3','x4']);
       expect(await db.tokenEarlyBuyers.findUniqueOrThrow({ where: { tokenId: busy.id } })).toMatchObject({ complete: false, buyers: [] });
       expect(await db.tokenEarlyBuyers.findUnique({ where: { tokenId: old.id } })).toBeNull(); // outside the scan window
       const callsBefore = calls.length;
