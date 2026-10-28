@@ -1,5 +1,7 @@
 # Candidate quote-transfer evidence (preview)
 
+For capacity-aware candidate ordering and threshold scenarios, see [Wallet admission preview](wallet-admission-preview.md) and `npm run wallets:admission-preview`.
+
 Early-buyer discovery now records `spendEvidence` beside each existing wallet, rank, signature and block time. It uses the **same** parsed RPC transactions already fetched by `scanEarlyBuyers`; no new provider requests or rescans are added. Existing discovery, admission, and review rules continue to operate as before while evidence accumulates.
 
 ## What a matched observation means
