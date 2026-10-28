@@ -36,6 +36,23 @@ Production audit on 2026-10-28 at 02:04–02:08 UTC confirmed API/worker/web rev
 
 Discovery now spaces its own RPC attempts at least one second apart. HTTP 429 receives at most **two retries across the entire run**, with 2s/4s backoff and `Retry-After` honored when longer. Every attempt counts against the original ceiling of five tokens × (two signature pages + forty transactions) = **210 calls**. Smaller `maxTokens` bounds shrink that ceiling. A server delay over 30 seconds, exhausted retry allowance or exhausted call budget ends the cycle; sustained 429s do not fan out to the remaining tokens. A persisted cooldown lasts at least 15 minutes, or the longer server-specified delay. Other HTTP/parse failures are not automatically retried. This local pacing does not coordinate other worker jobs or processes sharing the provider.
 
+#### Optional second RPC key
+
+Set these in the worker's deployment environment (the standard host setup loads `/srv/narrax/.env`), then recreate/redeploy the worker to load the values:
+
+```dotenv
+HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_PRIMARY_KEY
+HELIUS_RPC_FALLBACK_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_SECOND_KEY
+```
+
+Use full Solana **mainnet** RPC URLs. Leaving `HELIUS_RPC_FALLBACK_URL` empty retains primary-only operation. The worker validates URL syntax, requires the primary, and rejects identical URLs; diagnostics never print their values. Keep keys in the deployment environment rather than the repository.
+
+When configured, a primary HTTP 429 switches the same read (with the same signature or pagination cursor) to the secondary after the normal one-second pacing delay. This consumes one of the **same two retry slots** and the **same 210-call budget**. Primary `Retry-After` is respected by recording an endpoint-specific cooldown; it does not delay reads against the separate secondary. Discovery stays on the secondary for the remainder of that run and starts subsequent runs there while the primary cooldown remains active. The primary is tried again on a later run after its cooldown expires.
+
+If the secondary also returns 429, the remaining retry allowance/backoff applies, then collection pauses and saves progress. It never bounces between keys in a retry loop. Authentication errors, unsupported responses, and null transactions do not trigger failover. Provider account-level limits can cover both keys, so two keys do not establish independent capacity.
+
+This fallback applies to early-buyer discovery's signature/transaction reads. `HELIUS_API_KEY` continues to configure the separate enhanced-history/webhook APIs. `collection.health` exposes `fallbackConfigured`, `primaryRequests`, `fallbackRequests`, `failovers`, and `primaryCooldownUntil`, with no URLs or keys. Existing progress records remain compatible.
+
 `wallet.discovery.scanProgress` stores at most five checkpoints. Each retains a signature-page cursor, only the oldest forty successful signature candidates, the next transaction index, and up to thirty first buyers with their original signature/block time and transfer evidence. Successful reads are checkpointed before proceeding. A resumed scan is prioritized over a new one; no already-read transaction or completed scan is automatically rescanned. A crash between a provider response and its database checkpoint can still repeat that read, within the next run's budget.
 
 Fresh scans still start within the six-hour token window. Once a signature page has anchored the history, its continuation can resume for up to 24 hours from initial selection; it never refreshes the newest page or adds a third page. First-page failures cannot start outside the original six-hour eligibility window. Expired, blacklisted, deleted or already-completed checkpoints are removed without publishing their partial buyers. Invalid stored checkpoint shapes stop collection with `INVALID_PROGRESS` rather than silently resetting it. Completion atomically publishes `TokenEarlyBuyers` and removes the checkpoint, so partial buyer lists do not feed emerging wallets or intake. The existing single-concurrency discovery worker owns this bounded progress record.

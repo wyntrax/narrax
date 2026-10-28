@@ -16,6 +16,8 @@ u.searchParams.set('options','-c default_transaction_read_only=on -c statement_t
 const db = createPrisma(u.toString());
 const ScanHealth = z.object({ checkedAt:z.string().datetime(),scanned:z.number(),complete:z.number(),tooLong:z.number(),buyersFound:z.number(),
   requests:z.number(),retries:z.number(),rateLimits:z.number(),resumed:z.number(),pending:z.number(),expired:z.number(),
+  primaryRequests:z.number().optional(),fallbackRequests:z.number().optional(),failovers:z.number().optional(),
+  fallbackConfigured:z.boolean().optional(),primaryCooldownUntil:z.string().datetime().nullable().optional(),
   stopReason:z.enum(['RATE_LIMITED','REQUEST_BUDGET','COOLDOWN','INVALID_PROGRESS']).nullable(),cooldownUntil:z.string().datetime().nullable(),errors:z.array(z.string()) });
 async function main() {
   const health=ScanHealth.safeParse((await db.systemSetting.findUnique({where:{key:DISCOVERY_SCAN_HEALTH_KEY}}))?.value);

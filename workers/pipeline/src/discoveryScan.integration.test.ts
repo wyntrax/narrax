@@ -103,3 +103,23 @@ it('drops a blacklisted checkpoint and never restarts first-page failures outsid
  const hour=new Date(+NOW+2*3600000);
  expect(await scanEarlyBuyers(db,rpc,hour,{tokenIds:[second.id],clock:clock(+hour)})).toMatchObject({expired:1,pending:0,requests:0});
 });
+
+it('uses the secondary for the same transaction and persists primary cooldown across scheduled runs',async()=>{
+ const t=await token(),primaryCalls:string[]=[],fallbackCalls:string[]=[];
+ const rpc:HistoryPort={getSignaturesForAddress:async()=>[sig('s')],getParsedTransaction:async s=>{primaryCalls.push(s);throw new RpcHttpError('getTransaction',429,3600000);}};
+ const fallback:HistoryPort={getSignaturesForAddress:async()=>[sig('second')],getParsedTransaction:async s=>{fallbackCalls.push(s);return buy(t.mint);}};
+ expect(await scanEarlyBuyers(db,rpc,NOW,{tokenIds:[t.id],clock:clock(),fallbackRpc:fallback})).toMatchObject({complete:1,requests:3,retries:1,primaryRequests:2,fallbackRequests:1,failovers:1});
+ expect(primaryCalls).toEqual(['s']);expect(fallbackCalls).toEqual(['s']);
+ expect(Date.parse((await state()).primaryCooldownUntil!)).toBeGreaterThan(+NOW+3500000);
+ const second=await token(),later=new Date(+NOW+20*60000);
+ expect(await scanEarlyBuyers(db,rpc,later,{tokenIds:[second.id],clock:clock(+later),fallbackRpc:fallback})).toMatchObject({complete:1,primaryRequests:0,fallbackRequests:2,failovers:0});
+ expect(primaryCalls).toEqual(['s']);
+});
+
+it('passes the saved pagination cursor unchanged to the fallback after a 429',async()=>{
+ const t=await token(),before:(string|undefined)[]=[];
+ const rpc:HistoryPort={getSignaturesForAddress:async(_mint,opts)=>{if(opts?.before)throw new RpcHttpError('getSignaturesForAddress',429);return Array.from({length:1000},(_,i)=>sig(`page-${i}`,true));},getParsedTransaction:async()=>null};
+ const fallback:HistoryPort={getSignaturesForAddress:async(mint,opts)=>{expect(mint).toBe(t.mint);before.push(opts?.before);return [sig('oldest')];},getParsedTransaction:async s=>{expect(s).toBe('oldest');return buy(t.mint);}};
+ expect(await scanEarlyBuyers(db,rpc,NOW,{tokenIds:[t.id],clock:clock(),fallbackRpc:fallback})).toMatchObject({complete:1,requests:4,primaryRequests:2,fallbackRequests:2,failovers:1});
+ expect(before).toEqual(['page-999']);
+});

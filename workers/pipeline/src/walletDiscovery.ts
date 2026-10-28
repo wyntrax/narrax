@@ -30,6 +30,7 @@ export const DISCOVERY_LIMITS = {
 export interface ScanSummary {
   scanned: number; complete: number; tooLong: number; buyersFound: number; errors: string[];
   requests: number; retries: number; rateLimits: number; resumed: number; pending: number; expired: number;
+  primaryRequests: number; fallbackRequests: number; failovers: number; fallbackConfigured: boolean; primaryCooldownUntil: string | null;
   stopReason: 'RATE_LIMITED' | 'REQUEST_BUDGET' | 'COOLDOWN' | 'INVALID_PROGRESS' | null;
   cooldownUntil: string | null;
 }
@@ -40,16 +41,21 @@ export interface ScanSummary {
  * and never used. It looks for transactions that mention the mint, which is an assumption: swaps that do not list
  * the mint account are missed. The fee payer is treated as the buyer, like the webhook parser.
  */
-export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: Date = new Date(), opts: { maxTokens?: number; /** Restrict both fresh scans and resumes. */ tokenIds?: string[]; clock?: DiscoveryClock } = {}): Promise<ScanSummary> {
+export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: Date = new Date(), opts: { maxTokens?: number; /** Restrict both fresh scans and resumes. */ tokenIds?: string[]; clock?: DiscoveryClock; fallbackRpc?: HistoryPort } = {}): Promise<ScanSummary> {
   const L = DISCOVERY_LIMITS;
   const maxTokens = opts.maxTokens ?? L.maxTokensPerRun;
   if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > L.maxTokensPerRun || !Number.isFinite(+now)) throw new Error('Invalid discovery scan limits');
-  const budget = discoveryRpcBudget(maxTokens * (L.maxPages + L.maxTxsPerToken), opts.clock);
-  const out: ScanSummary = { scanned: 0, complete: 0, tooLong: 0, buyersFound: 0, errors: [], requests: 0, retries: 0, rateLimits: 0, resumed: 0, pending: 0, expired: 0, stopReason: null, cooldownUntil: null };
   const stored = await db.systemSetting.findUnique({ where: { key: DISCOVERY_PROGRESS_KEY } });
   const parsed = DiscoveryScanProgress.safeParse(stored ? stored.value : { version: 1, cooldownUntil: null, pending: [] });
+  const budget = discoveryRpcBudget(maxTokens * (L.maxPages + L.maxTxsPerToken), opts.clock, {
+    fallback: !!opts.fallbackRpc, primaryCooldownUntil: parsed.success && parsed.data.primaryCooldownUntil ? Date.parse(parsed.data.primaryCooldownUntil) : undefined,
+  });
+  const out: ScanSummary = { scanned: 0, complete: 0, tooLong: 0, buyersFound: 0, errors: [], requests: 0, retries: 0, rateLimits: 0, resumed: 0, pending: 0, expired: 0, stopReason: null, cooldownUntil: null,
+    primaryRequests: 0, fallbackRequests: 0, failovers: 0, fallbackConfigured: !!opts.fallbackRpc, primaryCooldownUntil: null };
+  const readRpc = (endpoint: 'primary' | 'fallback') => endpoint === 'fallback' ? opts.fallbackRpc! : rpc;
   const finish = async () => {
     Object.assign(out, budget.stats);
+    out.primaryCooldownUntil = budget.primaryCooldownUntil === null ? null : new Date(budget.primaryCooldownUntil).toISOString();
     const value = { ...out, checkedAt: now.toISOString() };
     await db.systemSetting.upsert({ where: { key: DISCOVERY_SCAN_HEALTH_KEY }, create: { key: DISCOVERY_SCAN_HEALTH_KEY, value }, update: { value } });
     return out;
@@ -80,7 +86,10 @@ export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: D
     orderBy: [{ createdOnChainAt: 'desc' }, { id: 'asc' }], take: slots, select: { id: true, mint: true },
   }) : [];
   const work: DiscoveryCheckpoint[] = [...resumed, ...fresh.map(t=>({ tokenId: t.id, mint: t.mint, startedAt: now.toISOString(), pagesRead: 0, before: null, candidates: [], historyComplete: false, nextTransaction: 0, buyers: [] }))];
-  const save = () => db.systemSetting.upsert({ where: { key: DISCOVERY_PROGRESS_KEY }, create: { key: DISCOVERY_PROGRESS_KEY, value: progress }, update: { value: progress } });
+  const save = () => {
+    progress.primaryCooldownUntil = budget.primaryCooldownUntil === null ? null : new Date(budget.primaryCooldownUntil).toISOString();
+    return db.systemSetting.upsert({ where: { key: DISCOVERY_PROGRESS_KEY }, create: { key: DISCOVERY_PROGRESS_KEY, value: progress }, update: { value: progress } });
+  };
   await save();
   for (const p of work) {
     if (resumed.includes(p)) out.resumed++;
@@ -89,7 +98,7 @@ export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: D
     try {
       while (!p.historyComplete && p.pagesRead < L.maxPages) {
         phase = 'READ';
-        const sigs = await budget.call(()=>rpc.getSignaturesForAddress(p.mint, { limit: L.pageSize, ...(p.before ? { before: p.before } : {}) }));
+        const sigs = await budget.call(endpoint=>readRpc(endpoint).getSignaturesForAddress(p.mint, { limit: L.pageSize, ...(p.before ? { before: p.before } : {}) }));
         if (sigs.length > L.pageSize || new Set(sigs.map(s=>s.signature)).size !== sigs.length || sigs.some(s=>s.signature===p.before || p.candidates.includes(s.signature))) throw new Error('Invalid signature page');
         p.candidates = [...p.candidates, ...sigs.filter(s=>!s.failed).map(s=>s.signature)].slice(-L.maxTxsPerToken);
         p.before = sigs.at(-1)?.signature ?? p.before;
@@ -101,7 +110,7 @@ export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: D
         const oldestFirst = p.candidates.slice().reverse(), seen = new Set(p.buyers.map(b=>b.wallet));
         while (p.nextTransaction < oldestFirst.length && p.buyers.length < DISCOVERY.maxRank) {
           const signature = oldestFirst[p.nextTransaction]!;
-          phase = 'READ'; const tx = await budget.call(()=>rpc.getParsedTransaction(signature));
+          phase = 'READ'; const tx = await budget.call(endpoint=>readRpc(endpoint).getParsedTransaction(signature));
           phase = 'EXTRACT';
           const buyer = tx ? earlyBuyer(tx, p.mint) : null;
           if (buyer && tx && !seen.has(buyer)) {
@@ -133,6 +142,7 @@ export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: D
         break; // A provider-wide rejection must not trigger a burst at the next token.
       }
       out.errors.push(`${p.mint.slice(0,6)}: ${e instanceof RpcHttpError ? `RPC_HTTP_${e.status}` : phase === 'EXTRACT' ? 'EXTRACTION_FAILED' : 'RPC_READ_FAILED'}`);
+      await save(); // Retain an endpoint cooldown even if its fallback read failed.
     }
   }
   out.pending = progress.pending.length;

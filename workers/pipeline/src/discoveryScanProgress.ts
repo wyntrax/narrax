@@ -25,6 +25,7 @@ export const DiscoveryCheckpoint = z.object({
 });
 export type DiscoveryCheckpoint = z.infer<typeof DiscoveryCheckpoint>;
 export const DiscoveryScanProgress = z.object({
-  version: z.literal(1), cooldownUntil: z.string().datetime().nullable(), pending: z.array(DiscoveryCheckpoint).max(5),
+  version: z.literal(1), cooldownUntil: z.string().datetime().nullable(),
+  primaryCooldownUntil: z.string().datetime().nullable().optional(), pending: z.array(DiscoveryCheckpoint).max(5),
 }).refine(p=>new Set(p.pending.map(c=>c.tokenId)).size===p.pending.length);
 export type DiscoveryScanProgress = z.infer<typeof DiscoveryScanProgress>;
