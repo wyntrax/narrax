@@ -22,6 +22,7 @@
     "wallets:history-status": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/wallet-history-status.ts",
     "wallets:candidate-spend": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/wallet-candidate-spend.ts",
     "wallets:admission-preview": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/wallet-admission-preview.ts",
+    "wallets:entry-cap-audit": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/wallet-entry-cap-audit.ts",
     "wallets:seed": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/seed-tracked-wallets.ts",
     "wallets:backfill": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/backfill-wallet-history.ts",
     "wallets:reconcile-valuations": "node --require ./apps/web/scripts/no-env-files.cjs --import tsx scripts/reconcile-wallet-valuations.ts",
