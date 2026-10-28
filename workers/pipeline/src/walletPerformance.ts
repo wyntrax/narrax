@@ -8,7 +8,7 @@ export interface PerformanceTrade {
   id: string; tokenId: string; side: 'BUY' | 'SELL'; amountSol: { toString(): string };
   tokenAmount: { toString(): string } | null; marketCapUsd: { toString(): string } | null; evidence: unknown; at: Date;
 }
-type Position = { token: string; band: WalletEntryBand; start: number; last: number; firstSell: number | null;
+type Position = { entryTradeId: string; token: string; band: WalletEntryBand; start: number; last: number; firstSell: number | null;
   close: number | null; qty: Decimal; cost: Decimal; invested: Decimal; entry: Decimal; pnl: Decimal; sold: boolean };
 const decimalMedian = (xs: Decimal[]) => {
   const s = [...xs].sort((a,b) => a.cmp(b)), mid = Math.floor(s.length / 2);
@@ -28,7 +28,7 @@ function entryBand(t: PerformanceTrade): WalletEntryBand {
 
 /** Swap-only average-cost accounting. One observed flat-to-flat position is one trial,
  * not one sell leg. Transfers, fees, live balances and open-position mark-to-market are unknown. */
-export function computeWalletPerformance(rows: PerformanceTrade[], now: Date, capped = false): WalletPerformance {
+function accountPositions(rows: PerformanceTrade[], now: Date) {
   const since = +now - 30 * 86_400_000, positions: Position[] = [], active = new Map<string, Position>();
   const contaminated = new Set<string>();
   let unmatchedSells = 0, invalidTrades = 0;
@@ -40,7 +40,7 @@ export function computeWalletPerformance(rows: PerformanceTrade[], now: Date, ca
     }
     let p = active.get(t.tokenId);
     if (t.side === 'BUY') {
-      if (!p) { p = { token: t.tokenId, band: entryBand(t), start: +t.at, last: +t.at, firstSell: null, close: null,
+      if (!p) { p = { entryTradeId: t.id, token: t.tokenId, band: entryBand(t), start: +t.at, last: +t.at, firstSell: null, close: null,
         qty: new D(0), cost: new D(0), invested: new D(0), entry: sol, pnl: new D(0), sold: false }; positions.push(p); active.set(t.tokenId,p); }
       p.qty = p.qty.plus(qty); p.cost = p.cost.plus(sol); p.invested = p.invested.plus(sol); p.last = +t.at;
     } else {
@@ -53,6 +53,17 @@ export function computeWalletPerformance(rows: PerformanceTrade[], now: Date, ca
   }
   // Incomplete basis can distort even earlier positions for that token; exclude all of them.
   const valid = positions.filter(p => !contaminated.has(p.token));
+  return { valid, trades, invalidTrades, unmatchedSells };
+}
+
+/** Same observed, uncontaminated flat-to-flat positions as performance reporting.
+ * An add or partial exit is not a new entry. The caller supplies the same row cap. */
+export function walletEntryCapPositions(rows: PerformanceTrade[], now: Date) {
+  return accountPositions(rows,now).valid.map(p=>({ entryTradeId:p.entryTradeId,tokenId:p.token,band:p.band,closed:p.close!==null }));
+}
+
+export function computeWalletPerformance(rows: PerformanceTrade[], now: Date, capped = false): WalletPerformance {
+  const { valid, trades, invalidTrades, unmatchedSells } = accountPositions(rows,now);
   const bands = WalletEntryBand.options.map(band => {
     const mine = valid.filter(p => band === 'ALL' || p.band === band || band === 'SMALL_CAP' && ['UNDER_100K','100K_500K','500K_1M'].includes(p.band));
     const closed = mine.filter(p => p.close !== null), sold = mine.filter(p => p.sold);
