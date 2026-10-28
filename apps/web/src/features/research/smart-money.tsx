@@ -4,12 +4,12 @@ import {useLocale,useTranslations} from 'next-intl';
 import * as Tabs from '@radix-ui/react-tabs';
 import {useState} from 'react';
 import {Link} from '@/i18n/navigation';
-import {useResearchQuery} from './session';
+import {hasFeature,useResearch,useResearchQuery} from './session';
 import {SmartWalletsSchema,WalletDetailSchema,WalletTradesSchema} from './contracts';
 import {isSolanaAddress} from '@narra/shared';
 import {pagePath} from './api';
 import {usePagination} from './pagination';
-import {PageHeading,Section,Metrics,Facts,DataTable,Loading,ResourceError,Empty,Pager,Stamp,useFormat} from './ui';
+import {PageHeading,Section,Metrics,Facts,DataTable,Loading,ResourceError,Empty,Pager,Stamp,Locked,useFormat} from './ui';
 import './smart-money.css';
 import {QualificationBadge,WalletFlows,EmergingWallets} from './wallet-research';
 import {InvestigationLink} from '../investigation/link';
@@ -32,12 +32,13 @@ function useHold(){const t=useTranslations('workspace');return (seconds:number|n
 /** Tracked-wallet directory. Scores are labelled unverified model estimates, and a missing value never becomes zero. */
 export function SmartMoneyPage(){
   const t=useTranslations('workspace'),[input,setInput]=useState(''),[search,setSearch]=useState(''),[source,setSource]=useState(''),[sort,setSort]=useState<Sort>('recent');
+  const {access}=useResearch(),rankingsAllowed=hasFeature(access,'research.smart_money_rankings');
  const id=useLocale()==='id',research=useTranslations('workspace.smartResearch');
  const labels={rankings:id?'Peringkat':'Rankings',directory:id?'Direktori wallet':'Wallet directory',flows:research('flows'),emerging:research('emerging')};
    return <div className="sm-page"><PageHeading title={t('smartMoney')} body={t('enhance.walletBody')} actions={<InvestigationLink/>}/>
    <Tabs.Root defaultValue="rankings" className="sm-tabs">
-    <Tabs.List className="sm-tab-list" aria-label={t('smartMoney')}>{Object.entries(labels).map(([value,label])=><Tabs.Trigger key={value} className="sm-tab" value={value}>{label}</Tabs.Trigger>)}</Tabs.List>
-    <Tabs.Content className="sm-tab-panel" value="rankings"><WalletLeaderboard/></Tabs.Content>
+    <Tabs.List className="sm-tab-list" aria-label={t('smartMoney')}>{Object.entries(labels).map(([value,label])=><Tabs.Trigger key={value} className="sm-tab" value={value}>{label}{value==='rankings'&&!rankingsAllowed&&<span className="sm-chip">{access.features['research.smart_money_rankings']?.requiredTier??'PRO'}</span>}</Tabs.Trigger>)}</Tabs.List>
+    <Tabs.Content className="sm-tab-panel" value="rankings">{rankingsAllowed?<WalletLeaderboard/>:<Locked tier={access.features['research.smart_money_rankings']?.requiredTier??'PRO'}/>}</Tabs.Content>
     <Tabs.Content className="sm-tab-panel" value="directory">
   <form className="research-search" onSubmit={e=>{e.preventDefault();setSearch(input.trim());}}><label htmlFor="wallet-search">{t('enhance.walletSearch')}</label><div><input id="wallet-search" type="search" maxLength={64} value={input} onChange={e=>setInput(e.target.value)}/><button className="research-control" type="submit">{t('searchButton')}</button>{search&&<button className="research-control" type="button" onClick={()=>{setInput('');setSearch('');}}>{t('clear')}</button>}</div></form>
   <div className="research-filters"><label>{t('trench.source')}<select value={source} onChange={e=>setSource(e.target.value)}><option value="">{t('alAll')}</option>{['MANUAL','IMPORT','DISCOVERED'].map(s=><option key={s} value={s}>{t(`enhance.sources.${s}`)}</option>)}</select></label><label>{t('smSort')}<select value={sort} onChange={e=>setSort(e.target.value as Sort)}><option value="recent">{t('smSortRecent')}</option><option value="score">{t('smSortScore')}</option></select></label></div>

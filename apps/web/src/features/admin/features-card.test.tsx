@@ -19,7 +19,8 @@ it('offers all features with Early, Member and Pro, without Elite',()=>{
  expect(screen.getAllByRole('combobox')).toHaveLength(Object.keys(FEATURE_TIERS).length);
   expect(screen.getByLabelText('Agent')).toHaveValue('EARLY_ACCESS');
    expect(screen.getByLabelText('Personal Radar')).toHaveValue('PRO');
-   expect(screen.getByLabelText('Smart Money Investigation')).toHaveValue('EARLY_ACCESS');
+    expect(screen.getByLabelText('Smart Money Investigation')).toHaveValue('PRO');
+    expect(screen.getByLabelText('Smart Money Rankings')).toHaveValue('PRO');
  expect(screen.queryByRole('option',{name:'Elite'})).toBeNull();
  expect(screen.getByRole('button',{name:messages.featureAccess.save})).toBeDisabled();
 });

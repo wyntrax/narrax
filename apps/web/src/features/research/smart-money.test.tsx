@@ -5,11 +5,12 @@ import {NextIntlClientProvider} from 'next-intl';
 import type {ReactNode} from 'react';
 import messages from '../../../messages/research/en.json';
 import {SmartMoneyPage,SmartWalletPage} from './smart-money';
-const fixture=vi.hoisted(()=>({profile:null as unknown,hasTrade:false,paths:[] as string[],dirItem:null as unknown}));
+import {empty} from '@/test/fixtures';
+const fixture=vi.hoisted(()=>({profile:null as unknown,hasTrade:false,paths:[] as string[],dirItem:null as unknown,rankingsAllowed:true,admin:false}));
 const at='2026-10-18T05:29:31.064Z';
 const intelligence={checkedAt:at,windowDays:30,observedTrades:299,observedBuys:296,observedSells:3,unmatchedSells:1,closedTrades:2,requiredClosedTrades:5,status:'INSUFFICIENT_HISTORY'};
 vi.mock('@/i18n/navigation',()=>({useRouter:()=>({push:vi.fn()}),Link:({href,children}:{href:string;children:ReactNode})=><a href={href}>{children}</a>}));
-vi.mock('./session',()=>({useResearchQuery:(path:string)=>{
+vi.mock('./session',async importOriginal=>({...await importOriginal<typeof import('./session')>(),useResearch:()=>({access:{...empty,admin:fixture.admin,features:{...empty.features,'research.smart_money_rankings':{requiredTier:'PRO',allowed:fixture.rankingsAllowed,min_entitlement_age_hours:0}}}}),useResearchQuery:(path:string)=>{
  fixture.paths.push(path);
   const result={isPending:false,isError:false,isFetching:false,refetch:vi.fn()};
    if(path.startsWith('smart-money/rankings'))return {...result,data:{items:[],pipeline:null}};
@@ -22,8 +23,25 @@ vi.mock('./session',()=>({useResearchQuery:(path:string)=>{
  if(path.includes('/trades'))return {...result,data:{items:fixture.hasTrade?[{id:'t',at,side:'BUY',amountSol:1,signature:'sig',token:{mint:'mint',symbol:'REAL',name:'Resolved Token'}}]:[],nextCursor:null}};
  return {...result,data:{address:'wallet',source:'MANUAL',trackedSince:at,profile:fixture.profile,intelligence,history:{checkedAt:at,scanned:300,accepted:299,skipped:0,capped:true,windowDays:30},performance:{},narrativeHistory:{scannedTrades:0,lookbackDays:90,items:[]},cluster:null,funding:null}};
 }}));
-afterEach(()=>{cleanup();fixture.profile=null;fixture.hasTrade=false;fixture.paths=[];fixture.dirItem=null;});
+afterEach(()=>{cleanup();fixture.profile=null;fixture.hasTrade=false;fixture.paths=[];fixture.dirItem=null;fixture.rankingsAllowed=true;fixture.admin=false;});
 function view(node:ReactNode){return render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}>{node}</NextIntlClientProvider>);}
+it('locks rankings without fetching them and keeps the other tabs usable',async()=>{
+ fixture.rankingsAllowed=false;view(<SmartMoneyPage/>);
+ expect(screen.getByRole('tab',{name:/Rankings.*PRO/})).toHaveAttribute('aria-selected','true');
+ expect(screen.getByText(messages.locked)).toBeVisible();
+ expect(fixture.paths).toEqual([]);
+ for(const [tab,path] of [['Wallet directory','smart-money/wallets'],['Token flows','smart-money/flows'],['Emerging wallets','smart-money/emerging']]){
+  await userEvent.click(screen.getByRole('tab',{name:tab}));
+  expect(fixture.paths.some(p=>p.startsWith(path!))).toBe(true);
+ }
+ await userEvent.click(screen.getByRole('tab',{name:/Rankings.*PRO/}));
+ expect(fixture.paths.some(p=>p.startsWith('smart-money/rankings'))).toBe(false);
+});
+it('honors admin ranking access',()=>{
+ fixture.rankingsAllowed=false;fixture.admin=true;view(<SmartMoneyPage/>);
+ expect(screen.queryByText(messages.locked)).toBeNull();
+ expect(fixture.paths.some(p=>p.startsWith('smart-money/rankings'))).toBe(true);
+});
 it('shows computed insufficient sample progress in the directory instead of awaiting computation',async()=>{
   view(<SmartMoneyPage/>);
   await userEvent.click(screen.getByRole('tab',{name:'Wallet directory'}));

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { InvestigationDiscoveryRequest } from '@narra/shared';
+import { InvestigationDiscoveryRequest, featureAllowed } from '@narra/shared';
 import { InvestigationPage } from './page';
 import { investigationFixture } from './fixture';
 import { investigationCopy } from './copy';
@@ -24,6 +24,12 @@ function view(mint: string | undefined = investigationFixture().token.mint, loca
 it('denies direct page reads at a configured higher tier', () => {
   state.access = { ...empty, features: { ...empty.features, 'research.smart_money_investigation': { allowed: false, requiredTier: 'MEMBER', min_entitlement_age_hours: 0 } } };
   view(); expect(screen.getByText(en.locked)).toBeVisible(); expect(state.read).not.toHaveBeenCalled();
+});
+it.each(['NONE', 'EARLY_ACCESS', 'MEMBER'] as const)('locks direct investigation reads and discovery for %s by default', tier => {
+  state.access = { ...empty, effectiveTier: tier, features: { ...empty.features, 'research.smart_money_investigation': { requiredTier: 'PRO', allowed: featureAllowed(tier, 'research.smart_money_investigation'), min_entitlement_age_hours: 0 } } };
+  view(); expect(screen.getByText(en.locked)).toBeVisible();
+  expect(screen.getByText('Pro', { exact: true })).toBeVisible();
+  expect(state.read).not.toHaveBeenCalled(); expect(state.send).not.toHaveBeenCalled();
 });
 it.each(['admin', 'early'] as const)('honors %s access independently of the default tier', async who => {
   state.access = { ...empty, admin: who === 'admin', features: { ...empty.features, 'research.smart_money_investigation': { allowed: who === 'early', requiredTier: 'EARLY_ACCESS', min_entitlement_age_hours: 0 } } };

@@ -69,14 +69,18 @@ afterAll(async () => {
 }, 30000);
 
 describe('token investigation on isolated PostgreSQL', () => {
-  it('authenticates, denies no-access users, and allows Early Access, members, PRO and admins', async () => {
+  it('requires PRO for investigation reads, with admin bypass', async () => {
     expect((await app.inject(`/v1/smart-money/investigations/${mint}`)).statusCode).toBe(401);
-    const denied=await get('', 'none'); expect(denied.statusCode).toBe(403); expect(denied.json()).toMatchObject({ error: 'FEATURE_LOCKED', requiredTier: 'EARLY_ACCESS' });
-    for (const who of ['early', 'member', 'pro', 'admin']) expect((await get('', who)).statusCode).toBe(200);
+    for (const who of ['none', 'early', 'member']) {
+      const denied=await get('', who); expect(denied.statusCode).toBe(403); expect(denied.json()).toMatchObject({ error: 'FEATURE_LOCKED', requiredTier: 'PRO' });
+    }
+    for (const who of ['pro', 'admin']) expect((await get('', who)).statusCode).toBe(200);
   });
   it('queues a bounded token discovery scan only for authorised users and indexed tokens', async () => {
     expect((await post('none')).statusCode).toBe(403);
-    expect((await post('early')).statusCode).toBe(202);
+    expect((await post('early')).statusCode).toBe(403);
+    expect((await post('member')).statusCode).toBe(403);
+    expect(discoveryRequests).toHaveLength(0);
     expect((await post('pro', 'not-a-mint')).statusCode).toBe(400);
     expect((await post('pro', address())).statusCode).toBe(404);
     const blacklisted = await newToken(true); expect((await post('pro', blacklisted.mint)).statusCode).toBe(404);

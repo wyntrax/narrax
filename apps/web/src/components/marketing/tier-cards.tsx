@@ -11,7 +11,7 @@ export function TierCards({requirements}:{requirements:Requirements|null}){
  const t=useTranslations('landing'),c=useTranslations('tierCards'),locale=useLocale();
   const number=new Intl.NumberFormat(locale);
   const pro=proCopy[locale==='id'?'id':'en'];
-  const featureLabel=(feature:string)=>feature==='research.smart_money_investigation'?pro.investigation:feature==='research.personal_radar'?pro.radar:feature==='research.thesis_tracker'?pro.thesis:feature==='research.personal_briefing'?pro.briefing:t(`features.${feature.replace('research.','')}`);
+  const featureLabel=(feature:string)=>feature==='research.smart_money_rankings'?pro.rankings:feature==='research.smart_money_investigation'?pro.investigation:feature==='research.personal_radar'?pro.radar:feature==='research.thesis_tracker'?pro.thesis:feature==='research.personal_briefing'?pro.briefing:t(`features.${feature.replace('research.','')}`);
  return <section id="access" className="section container"><Reveal>
   <div className="section-heading"><p className="eyebrow">{t('accessEyebrow')}</p><h2>{t('accessTitle')}</h2><p>{t('accessBody')}</p></div>
   <div className="tier-grid">{TIER_LEVELS.map(tier=>{

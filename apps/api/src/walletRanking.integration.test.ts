@@ -69,12 +69,14 @@ it('enforces authentication, tier access and admin bypass, and validates query b
  const get=(who?:string,query='')=>app.inject({method:'GET',url:`/v1/smart-money/rankings${query}`,headers:who?{authorization:`Bearer ${who}`}:{}});
  expect((await get()).statusCode).toBe(401);
  expect((await get('none')).statusCode).toBe(403);
- expect((await get('early')).statusCode).toBe(200);
+  const denied=await get('early');expect(denied.statusCode).toBe(403);
+  expect(denied.json()).toMatchObject({error:'FEATURE_LOCKED',requiredTier:'PRO'});
+  expect((await app.inject({url:'/v1/smart-money/wallets',headers:{authorization:'Bearer early'}})).statusCode).toBe(200);
   expect((await get('admin','?band=made-up')).statusCode).toBe(400);
   expect((await get('admin','?minMedianPositionSol=-1')).statusCode).toBe(400);
   expect((await get('admin','?status=APPROVED')).statusCode).toBe(400);
- await setting('entitlements.features',{'research.smart_money':{requiredTier:'PRO'}});
- expect((await get('early')).statusCode).toBe(403);
+  await setting('entitlements.features',{'research.smart_money':{requiredTier:'PRO'},'research.smart_money_rankings':{requiredTier:'EARLY_ACCESS'}});
+  expect((await get('early')).statusCode).toBe(200);
  expect((await get('admin')).statusCode).toBe(200);
 });
 it('filters before limiting, exposes group counts and recomputes readiness with the selected size threshold',async()=>{

@@ -61,7 +61,7 @@ export function requireFeature(db: PrismaClient, key: FeatureKey, now = () => ne
       const decision = await featureDecision(db, req.userId!, key, now(), entry => req.log.info(entry, 'research access decision'));
       if (!decision.allowed) return reply.code(403).send({ error: 'FEATURE_LOCKED', requiredTier: decision.requiredTier, requestId: req.requestId });
       const q = req.query as Record<string, unknown>;
-      if (q && ('limit' in q || ['research.narratives', 'research.tokens', 'research.screener', 'research.smart_money', 'research.smart_money_investigation', 'research.decision_analytics'].includes(key))) {
+      if (q && ('limit' in q || ['research.narratives', 'research.tokens', 'research.screener', 'research.smart_money', 'research.smart_money_rankings', 'research.smart_money_investigation', 'research.decision_analytics'].includes(key))) {
         const limit = q.limit === undefined ? (key === 'research.smart_money_investigation' ? INVESTIGATION_LIMITS.pageSize : 25) : Number(q.limit);
         if (Number.isInteger(limit) && limit > 0 && limit <= 100) q.limit = Math.min(limit, decision.pageLimit);
       }
