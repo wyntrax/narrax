@@ -2,6 +2,19 @@ import { z } from 'zod';
 
 export class RpcError extends Error {}
 
+/** Structured HTTP diagnostics; never retains a provider URL or response body. */
+export class RpcHttpError extends RpcError {
+  constructor(readonly method: string, readonly status: number, readonly retryAfterMs: number | null = null) {
+    super(`${method} returned HTTP ${status}`);
+  }
+}
+
+function retryAfter(value: string | null): number | null {
+  if (!value) return null;
+  const ms = /^\d+$/.test(value.trim()) ? Number(value) * 1000 : Date.parse(value) - Date.now();
+  return Number.isSafeInteger(ms) && ms >= 0 && ms <= 8_640_000_000_000_000 - Date.now() ? ms : null;
+}
+
 export interface RpcOptions {
   /** Full JSON-RPC URL including any API key, e.g. a Helius RPC endpoint. */
   url: string;
@@ -82,7 +95,7 @@ export class SolanaRpc {
     } finally {
       clearTimeout(timer);
     }
-    if (!res.ok) throw new RpcError(`${method} returned HTTP ${res.status}`);
+    if (!res.ok) throw new RpcHttpError(method, res.status, retryAfter(res.headers.get('retry-after')));
     const env = Envelope.safeParse(await res.json().catch(() => null));
     if (!env.success) throw new RpcError(`${method} returned an unreadable response`);
     if (env.data.error) throw new RpcError(`${method} error: ${env.data.error.message}`);

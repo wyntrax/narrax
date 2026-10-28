@@ -88,6 +88,8 @@ async function main(): Promise<void> {
   // Wallet jobs. History scans need an RPC URL. Webhook sync needs the Helius API key, the public webhook URL and the shared secret.
   // Each job does nothing when its inputs are missing, and none of them can trade.
   const historyRpc = process.env.HELIUS_RPC_URL ? new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 }) : null;
+  const fallbackUrl = process.env.HELIUS_RPC_FALLBACK_URL?.trim();
+  const discoveryFallbackRpc = fallbackUrl ? new SolanaRpc({ url: fallbackUrl, timeoutMs: 15_000 }) : undefined;
   // $WYNTRAX holding checks write local entitlements. The optional outbound notification keeps Wyntrax membership in sync.
   const membershipWebhook = process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_URL && process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_SECRET
     ? { url: process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_URL, secret: process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_SECRET }
@@ -153,7 +155,7 @@ async function main(): Promise<void> {
       const ingest = historyRpc ? await ingestWalletFunding(db, historyRpc) : null;
       return JSON.stringify({ ingest, graph: await rebuildFundingGraph(db) });
     }, { connection, concurrency: 1 }),
-    new Worker(QUEUE_NAMES.walletDiscovery, async () => (historyRpc ? JSON.stringify({ scan: await scanEarlyBuyers(db, historyRpc), discovery: await discoverCandidates(db) }) : 'needs HELIUS_RPC_URL'), { connection, concurrency: 1 }),
+    new Worker(QUEUE_NAMES.walletDiscovery, async () => (historyRpc ? JSON.stringify({ scan: await scanEarlyBuyers(db, historyRpc, new Date(), { fallbackRpc: discoveryFallbackRpc }), discovery: await discoverCandidates(db) }) : 'needs HELIUS_RPC_URL'), { connection, concurrency: 1 }),
     // User-requested, token-scoped discovery. It adds provisional wallets and bounded recent history, then asks for a webhook sync.
     new Worker(QUEUE_NAMES.tokenDiscovery, async (job) => {
       const { mint } = TokenDiscoveryJobSchema.parse(job.data);

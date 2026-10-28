@@ -45,6 +45,9 @@ export function checkEnv(env: Env, role: EnvRole, options: { runtimeAuth?: boole
     if (!get('EXECUTOR_ALLOWLIST_USER_IDS')) warnings.push('EXECUTOR_ALLOWLIST_USER_IDS is empty: no order will be dry-run (paper fills, shadow logs and confirmations still work).');
   }
   if (role === 'worker') {
+    const fallback = needUrl('HELIUS_RPC_FALLBACK_URL', ['http:', 'https:'], false, 'http:// or https://');
+    if (fallback && !rpc) errors.push('HELIUS_RPC_FALLBACK_URL requires HELIUS_RPC_URL.');
+    if (fallback && rpc && fallback.href === rpc.href) errors.push('HELIUS_RPC_FALLBACK_URL must differ from HELIUS_RPC_URL.');
     if (!get('HELIUS_RPC_URL')) warnings.push('HELIUS_RPC_URL is not set: SEMI_AUTO and AUTO users are skipped, because their balances cannot be read.');
     if (market === 'false') warnings.push('MARKET_DATA_ENABLED is false: no new prices are stored, so paper fills, the monitor and snapshots will go stale.');
   }

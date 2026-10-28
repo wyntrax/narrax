@@ -6,6 +6,17 @@ const base = { DATABASE_URL: 'postgresql://narra:pw@localhost:5432/narra', REDIS
 const api = { ...base, PRIVY_APP_ID: 'app', PRIVY_VERIFICATION_KEY: PEM };
 
 describe('checkEnv', () => {
+  it('validates the optional worker fallback URL without exposing keys', () => {
+    const primary='https://mainnet.helius-rpc.com/?api-key=primary-secret';
+    const fallback='https://mainnet.helius-rpc.com/?api-key=secondary-secret';
+    expect(checkEnv({...base,HELIUS_RPC_URL:primary,HELIUS_RPC_FALLBACK_URL:fallback},'worker').errors).toEqual([]);
+    expect(checkEnv({...base,HELIUS_RPC_URL:primary,HELIUS_RPC_FALLBACK_URL:''},'worker').errors).toEqual([]);
+    expect(checkEnv({...base,HELIUS_RPC_URL:primary,HELIUS_RPC_FALLBACK_URL:primary},'worker').errors).toEqual(['HELIUS_RPC_FALLBACK_URL must differ from HELIUS_RPC_URL.']);
+    expect(checkEnv({...base,HELIUS_RPC_FALLBACK_URL:fallback},'worker').errors).toContain('HELIUS_RPC_FALLBACK_URL requires HELIUS_RPC_URL.');
+    const invalid=checkEnv({...base,HELIUS_RPC_URL:primary,HELIUS_RPC_FALLBACK_URL:'ftp://secondary-secret'},'worker');
+    expect(invalid.errors).toEqual(['HELIUS_RPC_FALLBACK_URL must be a http:// or https:// URL.']);
+    expect(JSON.stringify(invalid)).not.toContain('secondary-secret');
+  });
   it('accepts the minimum for the API and for the worker', () => {
     expect(checkEnv(api, 'api').errors).toEqual([]);
     expect(checkEnv(base, 'worker').errors).toEqual([]);
