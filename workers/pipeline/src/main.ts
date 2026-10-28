@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   // Two pipeline processes would double-consume every queue, and Telegram delivery has no
   // per-chat cursor lock, so a second process could send the same alert twice.
   const lock = await acquireWorkerLock(connection, `${process.pid}:${Date.now()}`, WORKER_LOCK_TTL_MS, () => {
-    console.error(JSON.stringify({msg:'worker_lock_lost',detail:'another process took over the pipeline worker slot'}));
+    console.error(JSON.stringify({msg:'worker_lock_lost',detail:'pipeline lease expired, was removed, or changed owner'}));
     process.exit(1);
   });
   if (!lock) {
