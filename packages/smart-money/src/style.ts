@@ -12,8 +12,22 @@ const HOUR = 3600;
 export function rotationRate(trades: TradeRow[], windowMs = 10 * 60_000): number {
   const sells = trades.filter((t) => t.side === 'SELL');
   if (sells.length < MIN_CLOSED_LEGS) return 0;
-  const buys = trades.filter((t) => t.side === 'BUY');
-  const rotated = sells.filter((s) => buys.some((b) => b.token !== s.token && b.at > s.at && b.at.getTime() - s.at.getTime() <= windowMs)).length;
+  const buys = trades.filter((t) => t.side === 'BUY').map(t => ({ token: t.token, at: t.at.getTime() }))
+    .filter(t => Number.isFinite(t.at)).sort((a,b) => a.at-b.at);
+  // Index the next different token so a long run of same-token buys can be
+  // skipped in constant time. Each sell then needs only a binary search for
+  // the first strictly later buy, rather than scanning all buys (quadratic).
+  const nextDifferent = new Int32Array(buys.length);
+  for (let i=buys.length-1;i>=0;i--) nextDifferent[i] = i+1===buys.length || buys[i]!.token!==buys[i+1]!.token ? i+1 : nextDifferent[i+1]!;
+  let rotated = 0;
+  for (const s of sells) {
+    const at = s.at.getTime();
+    if (!Number.isFinite(at)) continue;
+    let lo=0,hi=buys.length;
+    while (lo<hi) { const mid=Math.floor((lo+hi)/2); if (buys[mid]!.at<=at) lo=mid+1; else hi=mid; }
+    const candidate = buys[lo]?.token===s.token ? buys[nextDifferent[lo]!] : buys[lo];
+    if (candidate && candidate.at-at<=windowMs) rotated++;
+  }
   return rotated / sells.length;
 }
 

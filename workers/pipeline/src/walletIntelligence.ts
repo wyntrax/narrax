@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@narra/database';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
 import {
   classifyStyle, computeConsensus, computeLeaderStats, computeWalletStats, detectTimingClusters, holdingPatterns, rotationRate, walletScore, MIN_CLOSED_LEGS, researchSample,
@@ -42,15 +43,28 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
 
   // Deactivated wallets keep their history but take no part in scores, clusters or consensus.
   const activeIds = new Set(wallets.map((w) => w.id));
-  const trades: TradeRow[] = rows.filter((r) => activeIds.has(r.walletId) && r.tokenAmount !== null && +r.at >= +since).map((r) => ({ wallet: r.walletId, token: r.tokenId, side: r.side, sol: toNum(r.amountSol), qty: toNum(r.tokenAmount), at: r.at }));
+  const trades: TradeRow[] = [];
   const performanceRows = new Map<string, PerformanceTrade[]>();
-  for (const row of rows) { if (+row.at < +now-30*86_400_000) continue; const mine = performanceRows.get(row.walletId) ?? []; mine.push(row); performanceRows.set(row.walletId,mine); }
   const byWallet = new Map<string, TradeRow[]>();
-  for (const t of trades) byWallet.set(t.wallet, [...(byWallet.get(t.wallet) ?? []), t]);
+  let processed=0;
+  for (const row of rows) {
+    if (+row.at >= +now-30*86_400_000) {
+      const mine = performanceRows.get(row.walletId) ?? []; mine.push(row); performanceRows.set(row.walletId,mine);
+    }
+    if (activeIds.has(row.walletId) && row.tokenAmount !== null && +row.at >= +since) {
+      const t: TradeRow = { wallet: row.walletId, token: row.tokenId, side: row.side, sol: toNum(row.amountSol), qty: toNum(row.tokenAmount), at: row.at };
+      trades.push(t);
+      const mine = byWallet.get(t.wallet) ?? []; mine.push(t); byWallet.set(t.wallet,mine);
+    }
+    if (++processed%2000===0) await yieldToEventLoop();
+  }
 
   const buys: Entry[] = trades.filter((t) => t.side === 'BUY').map((t) => ({ wallet: t.wallet, token: t.token, at: t.at }));
+  await yieldToEventLoop();
   const leaders = computeLeaderStats(buys);
+  await yieldToEventLoop();
   const { clusters, edges } = detectTimingClusters(buys);
+  await yieldToEventLoop();
 
   // Only wallets with no cluster, or a timing cluster, can be reassigned. Clusters from other evidence are left alone.
   const reassignable = new Set(wallets.filter((w) => !w.cluster || w.cluster.label === 'timing').map((w) => w.id));
@@ -63,6 +77,9 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   let scored = 0;
 
   for (const w of wallets) {
+    // Prisma operations below are lazy: yield while preparing them so Redis
+    // leases and other queues stay responsive, then publish atomically as before.
+    await yieldToEventLoop();
     const performanceKey = `wallet.performance.${w.id}`, observed = performanceRows.get(w.id) ?? [];
     const performance = computeWalletPerformance(observed.slice(0,10_000),now,observed.length>10_000);
     ops.push(db.systemSetting.upsert({ where: { key: performanceKey }, create: { key: performanceKey, value: performance }, update: { value: performance } }));
@@ -113,9 +130,13 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   const cutoff = now.getTime() - consensusMinutes * 60_000;
   const recent = trades.filter((t) => t.at.getTime() >= cutoff);
   const perToken = new Map<string, ConsensusEvent[]>();
-  for (const t of recent) perToken.set(t.token, [...(perToken.get(t.token) ?? []), { wallet: t.wallet, side: t.side, sol: t.sol, at: t.at }]);
+  for (const t of recent) {
+    const events = perToken.get(t.token) ?? [];
+    events.push({ wallet: t.wallet, side: t.side, sol: t.sol, at: t.at }); perToken.set(t.token,events);
+  }
   let signals = 0;
   for (const [tokenId, events] of perToken) {
+    if (++processed%2000===0) await yieldToEventLoop();
     const c = computeConsensus(events, info);
     if (!c) continue;
     signals++;
