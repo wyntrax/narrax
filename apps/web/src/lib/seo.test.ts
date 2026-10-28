@@ -1,6 +1,9 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {languageAlternates,localizedPath,pageMetadata,searchIndexable,serializeJsonLd} from './seo';
-import {articleSchema,breadcrumbSchema,websiteSchema} from './structured-data';
+import {articleSchema,breadcrumbSchema,websiteSchema,productFaqSchema} from './structured-data';
+import {productFacts} from '@/content/product-facts';
+import {socialImageUrl,socialPreview} from './social-preview';
+import {GET as llmsDirectory} from '@/app/llms.txt/route';
 import {researchCopy,researchGuides} from '@/content/research-guides';
 import {methodologyContent} from '@/content/methodology';
 import sitemap from '@/app/sitemap';
@@ -28,7 +31,7 @@ describe('localized canonical metadata',()=>{
  it('gives each public page its own canonical and localized share metadata',()=>{
   production();const m=pageMetadata('id','/research/test','Judul','Deskripsi');
   expect(m.alternates?.canonical).toBe('https://narrax.example/id/research/test');
-  expect(m.openGraph).toMatchObject({url:'https://narrax.example/id/research/test',locale:'id_ID',title:'Judul | Narrax',images:[{url:'https://narrax.example/id/opengraph-image',width:1200,height:630}]});
+   expect(m.openGraph).toMatchObject({url:'https://narrax.example/id/research/test',locale:'id_ID',title:'Judul | Narrax',images:[{url:'https://narrax.example/share/id/home.png?v=2',width:1200,height:630}]});
   expect(m.twitter).toMatchObject({card:'summary_large_image',description:'Deskripsi'});
   expect(m.robots).toMatchObject({index:true,follow:true});
  });
@@ -41,6 +44,24 @@ describe('localized canonical metadata',()=>{
  });
 });
 describe('truthful structured data and editorial coverage',()=>{
+  it.each(['en','id'] as const)('uses the same visible answers in %s structured data',locale=>{
+   production();const schema=productFaqSchema(locale);
+   expect(schema.mainEntity.map(item=>({question:item.name,answer:item.acceptedAnswer.text}))).toEqual(productFacts[locale].questions);
+  });
+  it('lists only authored public reading pages in the AI directory',async()=>{
+   production();const response=llmsDirectory(),text=await response.text();
+   expect(response.headers.get('content-type')).toContain('text/plain');
+   for(const locale of ['en','id'] as const)for(const guide of researchGuides[locale])expect(text).toContain(`${locale==='id'?'/id':''}/research/${guide.slug}`);
+   expect(text).not.toMatch(/\/app|\/early-access/);expect(text).toContain(productFacts.en.summary);
+   vi.stubEnv('NARRA_SEO_INDEXABLE','false');expect(llmsDirectory().headers.get('x-robots-tag')).toBe('noindex, nofollow');
+  });
+  it('gives each authored page a bounded localized image and rejects unknown copy',()=>{
+   production();const urls=new Set<string>();
+   for(const locale of ['en','id'] as const)for(const path of ['', '/research','/methodology',...researchGuides[locale].map(guide=>`/research/${guide.slug}`)]){
+    const image=socialImageUrl('https://narrax.example',locale,path);expect(image).toMatch(/\/share\/(en|id)\/[a-z-]+\.png\?v=2$/);urls.add(image);
+   }
+   expect(urls.size).toBe(12);expect(socialPreview('en','<script>')).toBeNull();
+  });
  it('escapes script injection and round-trips JSON-LD',()=>{
   const value={text:'</script><script>alert("x")</script>&\u2028\u2029'};const output=serializeJsonLd(value);
   expect(output).not.toContain('<');expect(output).not.toContain('&');expect(JSON.parse(output)).toEqual(value);
