@@ -1,6 +1,7 @@
 import {FEATURE_TIERS} from '@narra/shared';
 import type {Entitlements,Challenge} from '@/lib/schemas';
 export const ADDRESS='So11111111111111111111111111111111111111112';
+export const publicResearchSnapshot={at:'2026-10-28T12:00:00.000Z',narrativeHeat:35,narrativeSampleSize:5,narrativeAsOf:'2026-10-28T11:55:00.000Z',activeNarratives:7,trackedWallets:200,discoveredWallets:200,discoveryCapacity:200,opportunities24h:17};
 export const status={enabled:true,seatsLeft:12,inviteRequired:false};
 export const link={id:'fixture-link',chain:'solana' as const,address:ADDRESS,verifiedAt:'2026-01-01T00:00:00.000Z'};
 export const empty:Entitlements={effectiveTier:'NONE',sources:[],nextExpiry:null,researchPageLimit:0,features:Object.fromEntries(Object.entries(FEATURE_TIERS).map(([key,requiredTier])=>[key,{requiredTier,allowed:false,min_entitlement_age_hours:0}])),rollout:{enforced:true,shadow_log:true},links:[],grants:[],memberships:[]};

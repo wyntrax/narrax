@@ -1,0 +1,20 @@
+export const snapshotCopy={
+ en:{eyebrow:'RESEARCH / AT A GLANCE',title:'Behind the numbers.',intro:'A snapshot of what Narrax is observing—not a promise of what happens next.',
+  heat:'Narrative heat',heatHelp:'Mean score of up to five highest-scoring non-dead narratives. Describes attention in the configured watchlist.',
+  wallets:'Tracked wallets',walletsHelp:'Active wallets being observed. Tracking is not approval, verified profitability or a copy-trade recommendation.',
+  opportunities:'Opportunity records · 24h',opportunitiesHelp:'Research records created in the past 24 hours. Updates can count more than once for a token; these are not executed trades.',
+  topics:'Narratives in scope',topicsHelp:'Non-dead narratives stored from the configured watchlist. This is selected coverage, not all Solana narratives.',
+  seats:'Automatic discovery seats',seatsHelp:'When these seats are full, discovery can keep finding leads while automatic intake pauses. Manual tracking is counted separately.',
+  loading:'Loading recorded counts…',unavailable:'Counts are temporarily unavailable.',retry:'Refresh snapshot',snapshot:'Counts fetched',source:'Oldest observation among the heat sample',unknown:'Observation time unavailable',stale:'Older narrative observations',
+  radar:'Explore the radar',methodology:'How the research works',listTitle:'Narratives in scope',listHelp:'Showing up to 10 highest-scoring non-dead narratives from the configured watchlist. Open the radar to browse every recorded narrative.',
+ },
+ id:{eyebrow:'RISET / SEKILAS',title:'Di balik angka.',intro:'Snapshot pengamatan Narrax—bukan janji tentang apa yang terjadi berikutnya.',
+  heat:'Panas narasi',heatHelp:'Rata-rata skor hingga lima narasi non-mati dengan skor tertinggi. Menggambarkan perhatian dalam watchlist yang dikonfigurasi.',
+  wallets:'Wallet dipantau',walletsHelp:'Wallet aktif yang sedang diamati. Pemantauan bukan persetujuan, profit terverifikasi, atau rekomendasi copy trade.',
+  opportunities:'Catatan peluang · 24 jam',opportunitiesHelp:'Catatan riset yang dibuat dalam 24 jam terakhir. Pembaruan satu token bisa dihitung lebih dari sekali; ini bukan transaksi yang dieksekusi.',
+  topics:'Narasi dalam cakupan',topicsHelp:'Narasi non-mati yang tersimpan dari watchlist yang dikonfigurasi. Cakupan ini terpilih, bukan seluruh narasi Solana.',
+  seats:'Slot penemuan otomatis',seatsHelp:'Saat slot penuh, penemuan tetap dapat menemukan kandidat sementara penerimaan otomatis berhenti. Pemantauan manual dihitung terpisah.',
+  loading:'Memuat jumlah tercatat…',unavailable:'Jumlah untuk sementara tidak tersedia.',retry:'Segarkan snapshot',snapshot:'Jumlah diambil',source:'Pengamatan tertua dalam sampel panas narasi',unknown:'Waktu pengamatan tidak tersedia',stale:'Pengamatan narasi lebih lama',
+  radar:'Jelajahi radar',methodology:'Cara kerja riset',listTitle:'Narasi dalam cakupan',listHelp:'Menampilkan hingga 10 narasi non-mati dengan skor tertinggi dari watchlist yang dikonfigurasi. Buka radar untuk menjelajahi semua narasi tercatat.',
+ }
+} as const;
