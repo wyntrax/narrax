@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { RpcError, SolanaRpc } from './rpc';
+import { RpcError, RpcHttpError, SolanaRpc } from './rpc';
 
 const reply = (result: unknown, init: ResponseInit = {}) => (async () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }), init)) as unknown as typeof fetch;
 const OWNER = 'Owner'.padEnd(40, '1');
 const tokenAcct = (amount: string) => ({ account: { data: { parsed: { info: { tokenAmount: { amount } } } } } });
 
 describe('SolanaRpc', () => {
+  it('retains only HTTP status and Retry-After diagnostics for rate-limit handling', async () => {
+    const rpc = new SolanaRpc({ url: 'https://example.invalid/?api-key=secret', fetch: reply({}, { status: 429, headers: { 'retry-after': '7' } }) });
+    await expect(rpc.getBalanceLamports(OWNER)).rejects.toMatchObject({ status: 429, method: 'getBalance', retryAfterMs: 7000, message: 'getBalance returned HTTP 429' });
+    const invalid = new SolanaRpc({ url: 'http://test', fetch: reply({}, { status: 429, headers: { 'retry-after': 'not-a-date' } }) });
+    await expect(invalid.getBalanceLamports(OWNER)).rejects.toMatchObject({ retryAfterMs: null });
+    const date = new Date(Date.now()+60_000).toUTCString();
+    try { await new SolanaRpc({ url: 'http://test', fetch: reply({}, { status: 429, headers: { 'retry-after': date } }) }).getBalanceLamports(OWNER); }
+    catch(e) { expect(e).toBeInstanceOf(RpcHttpError); expect((e as RpcHttpError).retryAfterMs).toBeGreaterThan(55_000); expect((e as RpcHttpError).retryAfterMs).toBeLessThanOrEqual(60_000); }
+  });
   it('exposes the simulation context slot as optional evidence', async () => {
     const rpc = new SolanaRpc({ url: 'http://test', fetch: reply({ context: { slot: 42 }, value: { err: null, accounts: [null] } }) });
     expect((await rpc.simulateTransaction('unsigned', ['a'])).slot).toBe(42);

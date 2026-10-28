@@ -7,6 +7,7 @@ import { FUNDING_LIMITS, ingestWalletFunding, rebuildFundingGraph, type HistoryP
 import { SYNC_STATUS_SETTING, WEBHOOK_SETTING, syncWalletWebhook, type WebhookPort } from './walletSync';
 import { makeWalletEventStore } from './prismaStores';
 import { recomputeWalletIntelligence } from './walletIntelligence';
+import { DISCOVERY_PROGRESS_KEY, DISCOVERY_SCAN_HEALTH_KEY } from './discoveryScanProgress';
 
 const url = process.env.DATABASE_URL ?? 'postgresql://narra:narra@localhost:5432/narra';
 async function dbUp() {
@@ -317,7 +318,8 @@ describe.skipIf(!up)('tracked wallets on a real Postgres', () => {
         },
         getParsedTransaction: async (sig) => {transactions.push(sig);return ({ x1: purchase, x3: parsed(B, '0', '50', addr('SCAN1')), x4: parsed(A, '100', '300', addr('SCAN1')) } as Record<string, ParsedTx>)[sig] ?? null;},
       };
-      const r = await scanEarlyBuyers(db, rpc, NOW, { tokenIds: [young.id, busy.id, old.id] });
+      await db.systemSetting.deleteMany({where:{key:{in:[DISCOVERY_PROGRESS_KEY,DISCOVERY_SCAN_HEALTH_KEY]}}});
+      const r = await scanEarlyBuyers(db, rpc, NOW, { tokenIds: [young.id, busy.id, old.id], clock:{now:()=>+NOW,sleep:async()=>{}} });
       expect(r).toMatchObject({ scanned: 2, complete: 1, tooLong: 1, errors: [] });
       const row1 = await db.tokenEarlyBuyers.findUniqueOrThrow({ where: { tokenId: young.id } });
       expect(row1.complete).toBe(true);
@@ -329,6 +331,7 @@ describe.skipIf(!up)('tracked wallets on a real Postgres', () => {
       const callsBefore = calls.length;
       expect((await scanEarlyBuyers(db, rpc, NOW, { tokenIds: [young.id, busy.id] })).scanned).toBe(0); // never rescanned
       expect(calls.length).toBe(callsBefore);
+      await db.systemSetting.deleteMany({where:{key:{in:[DISCOVERY_PROGRESS_KEY,DISCOVERY_SCAN_HEALTH_KEY]}}});
     });
   });
 });

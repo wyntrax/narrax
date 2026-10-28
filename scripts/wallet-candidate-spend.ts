@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import { createPrisma, Prisma } from '@narra/database';
 import { z } from 'zod';
+import { DiscoveryScanProgress, DISCOVERY_PROGRESS_KEY, DISCOVERY_SCAN_HEALTH_KEY } from '../workers/pipeline/src/discoveryScanProgress';
 
 /** Read-only preview of the latest bounded emerging snapshot. No provider calls. */
 const { values } = parseArgs({ options: { 'min-quote-sol': { type:'string',default:'0.01' } } });
@@ -13,9 +14,17 @@ const Snapshot = z.object({checkedAt:z.string().datetime(),total:z.number().int(
 const u = new URL(process.env.DATABASE_URL??'invalid:');
 u.searchParams.set('options','-c default_transaction_read_only=on -c statement_timeout=20000');
 const db = createPrisma(u.toString());
+const ScanHealth = z.object({ checkedAt:z.string().datetime(),scanned:z.number(),complete:z.number(),tooLong:z.number(),buyersFound:z.number(),
+  requests:z.number(),retries:z.number(),rateLimits:z.number(),resumed:z.number(),pending:z.number(),expired:z.number(),
+  stopReason:z.enum(['RATE_LIMITED','REQUEST_BUDGET','COOLDOWN','INVALID_PROGRESS']).nullable(),cooldownUntil:z.string().datetime().nullable(),errors:z.array(z.string()) });
 async function main() {
+  const health=ScanHealth.safeParse((await db.systemSetting.findUnique({where:{key:DISCOVERY_SCAN_HEALTH_KEY}}))?.value);
+  const progressRow=await db.systemSetting.findUnique({where:{key:DISCOVERY_PROGRESS_KEY}});
+  const progress=DiscoveryScanProgress.safeParse(progressRow?.value);
+  const collection={health:health.success?health.data:null,progressStatus:!progressRow?'NOT_RECORDED':progress.success?'VALID':'INVALID',
+    pending:progress.success?progress.data.pending.map(p=>({mint:p.mint,startedAt:p.startedAt,pagesRead:p.pagesRead,historyComplete:p.historyComplete,transactionsRead:p.nextTransaction,transactionsToRead:p.candidates.length,buyersBuffered:p.buyers.length})):null};
   const snapshot = Snapshot.safeParse((await db.systemSetting.findUnique({where:{key:'wallet.discovery.emerging'}}))?.value);
-  if (!snapshot.success) { console.log(JSON.stringify({readOnly:true,status:'NO_VALID_SNAPSHOT'}));return; }
+  if (!snapshot.success) { console.log(JSON.stringify({readOnly:true,status:'NO_VALID_SNAPSHOT',collection}));return; }
   const s = snapshot.data,now=new Date(),age=+now-Date.parse(s.checkedAt);
   const items=s.items.map(w=>{
     const p=Spend.safeParse(w.spend),spend=p.success?p.data:null;
@@ -27,6 +36,6 @@ async function main() {
   });
   console.log(JSON.stringify({readOnly:true,asOf:now.toISOString(),snapshotAt:s.checkedAt,stale:age<0||age>3_600_000,total:s.total,displayed:items.length,capped:s.capped,
     previewMinQuoteSol:threshold.toFixed(),note:'Descriptive first-token transfer legs, not verified swaps, total position spend, closed-position profitability, or approval. Threshold is unvalidated and changes no intake rules. Unknowns remain unknown; matched-only medians can be biased.',
-    counts:items.reduce<Record<string,number>>((a,w)=>(a[w.classification]=(a[w.classification]??0)+1,a),{}),items},null,2));
+    collection,counts:items.reduce<Record<string,number>>((a,w)=>(a[w.classification]=(a[w.classification]??0)+1,a),{}),items},null,2));
 }
 main().catch(()=>{console.error('Candidate spend preview failed. No data was changed.');process.exitCode=1;}).finally(()=>db.$disconnect());
