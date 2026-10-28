@@ -79,6 +79,23 @@ test('signed-out → sign-in → external wallet → exact-message proof → joi
  const api=await mockApi(page);await page.goto('/early-access');await expect(page.getByRole('heading',{name:'Your research starts here.'})).toBeVisible();await shot(page,'signed-out');await signIn(page);await shot(page,'no-wallet');await connect(page);await expect(page.getByRole('heading',{name:'Read before you sign.'})).toBeVisible();await shot(page,'challenge');await page.getByRole('button',{name:'Sign this message'}).click();await expect(page.getByRole('heading',{name:'Wallet verified. You’re ready.'})).toBeVisible();await shot(page,'linked');await completeCommunity(page);await page.getByRole('button',{name:'Join early access',exact:true}).click();await expect(page.getByRole('heading',{name:'You’re in.'})).toBeVisible();await shot(page,'active');expect(api.verifyCount).toBe(1);expect(api.writes.filter(x=>x.endsWith('/join'))).toHaveLength(1);
  await page.getByRole('button',{name:'Leave early access',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();await page.getByRole('button',{name:'Confirm',exact:true}).click();await expect(page.getByRole('heading',{name:'Wallet verified. You’re ready.'})).toBeVisible();await page.getByRole('button',{name:'Unlink',exact:true}).click();await page.getByRole('button',{name:'Confirm',exact:true}).click();await expect(page.getByRole('heading',{name:'Make it your wallet.'})).toBeVisible();
 });
+for(const width of [1280,390])test(`wallet selection stays clickable without hidden card scrolling at ${width}px`,async({page})=>{
+ const api=await mockApi(page);await page.setViewportSize({width,height:720});await page.goto('/early-access');await signIn(page);
+ await page.getByRole('button',{name:'Connect external wallet'}).click();
+ const card=page.locator('.access-card'),wallet=page.getByRole('button',{name:/Phantom \(test fixture\)/});
+ await expect(wallet).toBeVisible();
+ // The card's decorative glow extends beyond its bounds. Focusing/scrolling a
+ // descendant must scroll the page, never a hidden internal card viewport.
+ await wallet.scrollIntoViewIfNeeded();
+ // Reproduce the programmatic offset from the CI trace deterministically.
+ // A clipped decoration must not create an internally scrollable card.
+ await card.evaluate(el=>{el.scrollTop=100;});
+ await wallet.focus();
+ await expect.poll(()=>card.evaluate(el=>el.scrollTop)).toBe(0);
+ await wallet.click();
+ await expect(page.getByRole('heading',{name:'Read before you sign.'})).toBeVisible();
+ expect(api.writes.filter(w=>w.endsWith('/challenge'))).toHaveLength(1);
+});
 for(const [name,value,title] of [
  ['disabled',{enabled:false,seatsLeft:null,inviteRequired:false},'Early access is not open yet.'],
  ['full',{enabled:true,seatsLeft:0,inviteRequired:false},'Early access is currently full.'],
