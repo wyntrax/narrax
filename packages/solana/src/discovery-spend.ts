@@ -3,6 +3,7 @@ import type { ParsedTx } from './rpc';
 import { earlyBuyer } from './funding';
 import { WSOL_MINT } from './helius';
 import { temporaryWsolOwnership, WsolOwnershipEvidence } from './wsol-ownership';
+import { token2022TransferEvidence, Token2022TransferEvidence } from './token2022-evidence';
 
 const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
@@ -12,9 +13,10 @@ export const DiscoverySpendEvidence = z.discriminatedUnion('status', [
   z.object({ version: z.literal(1), status: z.literal('MATCHED_TRANSFERS'), source: z.literal('RPC_PARSED_INNER_TRANSFERS'),
     quoteAsset: z.enum(['SOL', 'WSOL']), quoteLamports: raw, tokenAmountRaw: raw,
     outerInstructionIndex: z.number().int().nonnegative(), counterparty: z.string().min(1), programId: z.string().min(1),
-    recoveredWsolAccounts: z.array(WsolOwnershipEvidence).optional() }),
+    recoveredWsolAccounts: z.array(WsolOwnershipEvidence).optional(),token2022Transfers:z.array(Token2022TransferEvidence).optional() }),
   z.object({ version: z.literal(1), status: z.literal('UNKNOWN'), reason: z.enum([
     'NO_TOKEN_INCREASE', 'MISSING_ACCOUNT_MAPPING', 'AMBIGUOUS_TRANSFERS', 'NO_MATCHED_QUOTE_TRANSFER', 'UNSUPPORTED_TOKEN_PROGRAM',
+    'TOKEN_2022_BALANCE_EVIDENCE_MISSING', 'TOKEN_2022_AMOUNT_MISMATCH', 'TOKEN_2022_LIFECYCLE_AMBIGUOUS',
   ]), recoveredWsolAccounts: z.array(WsolOwnershipEvidence).optional() }),
 ]);
 export type DiscoverySpendEvidence = z.infer<typeof DiscoverySpendEvidence>;
@@ -28,7 +30,7 @@ const unknown = (reason: UnknownReason): DiscoverySpendEvidence => ({ version: 1
 /** Narrow evidence of reciprocal quote/token transfers in ONE inner-instruction group.
  * Not a decoded DEX instruction or proof of a swap, total position cost, fees, or profit.
  * No native-balance subtraction: network fees, rent and top-level tips are not quote legs.
- * Complex routes, missing ownership, Token-2022 and multiple legs stay unknown.
+ * Complex routes, missing ownership, unsupported Token-2022 and multiple legs stay unknown.
  */
 export function discoverySpendEvidence(tx: ParsedTx, mint: string): DiscoverySpendEvidence {
   const wallet = earlyBuyer(tx, mint);
@@ -64,16 +66,23 @@ export function discoverySpendEvidence(tx: ParsedTx, mint: string): DiscoverySpe
       return proof;
     };
     const transfers: Transfer[] = []; let invalid: UnknownReason | null = null;
+    const token2022Transfers:Token2022TransferEvidence[]=[];
     for (const item of group.instructions) {
       const ix = object(item), parsed = object(ix.parsed), info = object(parsed.info);
-      if (ix.programId === TOKEN_2022) { invalid = 'UNSUPPORTED_TOKEN_PROGRAM'; break; }
-      if (ix.programId === TOKEN) {
+      if (ix.programId === TOKEN_2022 && (parsed.type!=='transferChecked'||info.mint!==mint)) { invalid = 'UNSUPPORTED_TOKEN_PROGRAM'; break; }
+      if (ix.programId === TOKEN || ix.programId === TOKEN_2022) {
         if (parsed.type !== 'transfer' && parsed.type !== 'transferChecked') { invalid = 'AMBIGUOUS_TRANSFERS'; break; }
         const source = resolve(info.source);
         const dest = resolve(info.destination);
         if (!source || !dest) { invalid = 'MISSING_ACCOUNT_MAPPING'; break; }
         const amount = raw.safeParse(parsed.type === 'transferChecked' ? object(info.tokenAmount).amount : info.amount);
         if (source.mint !== dest.mint || !amount.success || (parsed.type === 'transferChecked' && info.mint !== source.mint)) { invalid = 'AMBIGUOUS_TRANSFERS'; break; }
+        if(ix.programId===TOKEN_2022){
+          if(dest.owner!==wallet){invalid='UNSUPPORTED_TOKEN_PROGRAM';break;}
+          const proof=token2022TransferEvidence(tx,info,group.index);
+          if('reason' in proof){invalid=proof.reason;break;}
+          token2022Transfers.push(proof.evidence);
+        }
         transfers.push({ from: source.owner, to: dest.owner, mint: source.mint, amount: amount.data });
       } else if (ix.programId === SYSTEM) {
         // createAccount rent and any other system operation inside the same call
@@ -95,6 +104,7 @@ export function discoverySpendEvidence(tx: ParsedTx, mint: string): DiscoverySpe
     matches.push({ version: 1, status: 'MATCHED_TRANSFERS', source: 'RPC_PARSED_INNER_TRANSFERS',
       quoteAsset: quote.mint === 'SOL' ? 'SOL' : 'WSOL', quoteLamports: quote.amount, tokenAmountRaw: token.amount,
       outerInstructionIndex: group.index, counterparty: token.from, programId: parent.programId,
+      ...(token2022Transfers.length ? { token2022Transfers } : {}),
       ...(groupRecovered.size ? { recoveredWsolAccounts: [...groupRecovered.values()] } : {}) });
   }
   return matches.length === 1 ? matches[0]! : { ...unknown(matches.length > 1 ? 'AMBIGUOUS_TRANSFERS' : reason),
