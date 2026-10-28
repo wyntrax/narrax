@@ -13,7 +13,8 @@ import type {Metadata} from 'next';
 import {pageMetadata,seoLocale} from '@/lib/seo';
 import {researchCopy,researchGuides} from '@/content/research-guides';
 import {StructuredData} from '@/components/marketing/structured-data';
-import {websiteSchema} from '@/lib/structured-data';
+import {websiteSchema,productFaqSchema} from '@/lib/structured-data';
+import {productFacts} from '@/content/product-facts';
 import './research.css';
 
 export async function generateMetadata({params}:{params:Promise<{locale:string}>}):Promise<Metadata>{
@@ -24,12 +25,17 @@ export default async function Landing({params}:{params:Promise<{locale:string}>}
  const locale=seoLocale((await params).locale),copy=researchCopy[locale];
  const t=await getTranslations('landing'),c=await getTranslations('common'),v=await getTranslations('visual'),requirements=await fetchRequirements();
   return <main id="main" className="landing-page">
-   <StructuredData data={websiteSchema(locale)}/>
+   <StructuredData data={[websiteSchema(locale),productFaqSchema(locale)]}/>
   <section className="hero container" id="home">
    <div className="hero-intro"><div><div className="hero-badges"><span className="badge"><BrandMark/>{v('solana')}</span><span className="badge">{c('earlyAccess')}</span></div><h1>{t('headlineStart')}<br/><span>{t('headlineAccent')}</span></h1><p className="hero-subcopy">{t('howBody')}</p></div><div className="hero-actions"><Link className="button button-primary" href="/early-access" prefetch={false}>{c('getAccess')}<ArrowUpRight size={17}/></Link><a className="button button-ghost" href="#how">{t('explore')}<span aria-hidden="true">↓</span></a></div></div>
    <SignalGraph/>
    <div className="hero-footnote"><ShieldCheck size={15}/><span>{t('messageOnly')}</span></div>
    <PoweredBy className="powered-by-hero"/>
+  </section>
+  <section id="about-narrax" className="section container product-facts" aria-labelledby="product-facts-title">
+    <div className="section-heading"><p className="eyebrow">NARRAX / SOLANA</p><h2 id="product-facts-title">{productFacts[locale].title}</h2><p>{productFacts[locale].summary}</p></div>
+    <div className="product-facts-grid">{productFacts[locale].questions.map((item,index)=><article key={item.question} id={`product-answer-${index+1}`}><h3>{item.question}</h3><p>{item.answer}</p></article>)}</div>
+    <Link className="button button-ghost" href="/methodology">{copy.methodologyCta}<ArrowUpRight size={15}/></Link>
   </section>
   <section id="how" className="section container process-section"><Reveal><div className="section-heading"><p className="eyebrow">{t('howEyebrow')}</p><h2>{t('howTitle')}</h2><p>{t('howBody')}</p></div><div className="three-grid">{[ScanLine,Waypoints,ShieldCheck].map((Icon,i)=><article className="how-card" key={i}><div className="how-top"><span className="feature-orb"><Icon size={24}/></span><span>0{i+1}</span></div><h3>{t(`step${i+1}Title`)}</h3><p>{t(`step${i+1}Body`)}</p></article>)}</div></Reveal></section>
   <section id="preview" className="section container"><Reveal><div className="section-heading"><p className="eyebrow">{t('previewEyebrow')}</p><h2>{t('previewTitle')}</h2></div><LazyPreview/></Reveal></section>

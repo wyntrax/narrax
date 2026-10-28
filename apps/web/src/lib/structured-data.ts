@@ -1,5 +1,8 @@
 import {publicUrl, type SeoLocale} from './seo';
 import {siteOrigin} from '@/config/site';
+import {socialImageUrl} from './social-preview';
+import {productFacts} from '@/content/product-facts';
+import {researchReferences} from '@/content/research-guides';
 
 export function organizationSchema() {
   const origin = siteOrigin();
@@ -9,7 +12,11 @@ export function websiteSchema(locale: SeoLocale) {
   return {'@context': 'https://schema.org', '@graph': [organizationSchema(), {
     '@type': 'WebSite', '@id': `${siteOrigin()}/#website`, name: 'Narrax', url: siteOrigin(), inLanguage: ['en', 'id'],
     publisher: {'@id': `${siteOrigin()}/#organization`},
-  }, {'@type': 'WebPage', '@id': `${publicUrl(locale)}#webpage`, url: publicUrl(locale), name: locale === 'id' ? 'Riset Narasi & Smart Money Solana' : 'Solana Narrative & Smart Money Research', inLanguage: locale, isPartOf: {'@id': `${siteOrigin()}/#website`}}]};
+  }, {'@type': 'WebPage', '@id': `${publicUrl(locale)}#webpage`, url: publicUrl(locale), name: locale === 'id' ? 'Riset Narasi & Smart Money Solana' : 'Solana Narrative & Smart Money Research', description: productFacts[locale].summary, inLanguage: locale, about: {'@id': `${siteOrigin()}/#organization`}, isPartOf: {'@id': `${siteOrigin()}/#website`}}]};
+}
+export function productFaqSchema(locale: SeoLocale) {
+  return {'@context': 'https://schema.org', '@type': 'FAQPage', '@id': `${publicUrl(locale)}#product-questions`, inLanguage: locale,
+    mainEntity: productFacts[locale].questions.map(item => ({'@type': 'Question', name: item.question, acceptedAnswer: {'@type': 'Answer', text: item.answer}}))};
 }
 export function breadcrumbSchema(locale: SeoLocale, items: {name: string; path: string}[]) {
   return {'@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: items.map((item, index) => ({'@type': 'ListItem', position: index + 1, name: item.name, item: publicUrl(locale, item.path)}))};
@@ -17,7 +24,8 @@ export function breadcrumbSchema(locale: SeoLocale, items: {name: string; path: 
 export function articleSchema(locale: SeoLocale, path: string, title: string, description: string) {
   const url = publicUrl(locale, path);
   return {'@context': 'https://schema.org', '@type': 'Article', '@id': `${url}#article`, headline: title, description, inLanguage: locale,
-    mainEntityOfPage: {'@type': 'WebPage', '@id': url}, url, image: publicUrl(locale, '/opengraph-image'),
+    mainEntityOfPage: {'@type': 'WebPage', '@id': url}, url, image: socialImageUrl(siteOrigin(), locale, path),
+    ...(path.startsWith('/research/') ? {citation: researchReferences.map(source => source.url)} : {}),
     author: {'@type': 'Organization', name: 'Narrax research team', url: publicUrl(locale, '/methodology')}, publisher: organizationSchema(),
   };
 }

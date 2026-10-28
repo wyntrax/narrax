@@ -1,5 +1,6 @@
 import type {Metadata} from 'next';
 import {siteOrigin} from '@/config/site';
+import {socialImageUrl} from './social-preview';
 
 export const SEO_LOCALES = ['en', 'id'] as const;
 export type SeoLocale = typeof SEO_LOCALES[number];
@@ -22,7 +23,7 @@ export function languageAlternates(path = '') {
 }
 export function pageMetadata(locale: SeoLocale, path: string, title: string, description: string, kind: 'website' | 'article' = 'website'): Metadata {
   const url = publicUrl(locale, path);
-  const image = {url: publicUrl(locale, '/opengraph-image'), width: 1200, height: 630, alt: locale === 'id' ? 'Narrax — riset narasi dan smart money Solana' : 'Narrax — Solana narrative and smart money research'};
+  const image = {url: socialImageUrl(siteOrigin(), locale, path), width: 1200, height: 630, type: 'image/png', alt: `${title} | Narrax`};
   return {
     title, description,
     alternates: {canonical: url, languages: languageAlternates(path)},
