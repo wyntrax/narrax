@@ -140,7 +140,9 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
+          # Quiet image pulls and worker lease waits can outlast network idle timeouts.
+          # Keep SSH active and fail after three unanswered 15-second probes.
+          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 15\n  ServerAliveCountMax 3\n' "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
 
       - name: Ship the deploy files (the host's .env and base compose file are never touched or sent)
         run: |
@@ -245,7 +247,8 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
+          # Apply the same idle-connection protection to frontend deploys and scp.
+          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 15\n  ServerAliveCountMax 3\n' "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
       - name: Ship frontend deployment files (host .env and .env.web remain untouched)
         run: |
           ssh deploy "mkdir -p '$DEPLOY_PATH/docker' '$DEPLOY_PATH/.deploy/web'"
