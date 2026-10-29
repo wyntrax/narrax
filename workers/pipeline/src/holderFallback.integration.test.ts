@@ -57,18 +57,26 @@ it('cached Gecko refresh cannot relabel newer RPC holder evidence',async()=>{
 });
 it('fresh RPC holders can cross publication and delivery gates; failed fallback cannot',async()=>{
  const t=tokens[0]!;
- await db.$transaction(tx=>storeMarketSnapshot(tx,t.id,snapshot(t.mint,{marketCapUsd:40000}),'dexscreener',now));
- const metric=await db.tokenMetric.findFirstOrThrow({where:{tokenId:t.id},orderBy:{at:'desc'}});
+ // Equal observation times do not identify a row: the preceding collection test
+ // also writes a fixture-source metric at `now`. Keep the exact verified row.
+ const unverified=await db.$transaction(tx=>storeMarketSnapshot(tx,t.id,snapshot(t.mint,{marketCapUsd:40000}),'fixture',now));
+ const metric=await db.$transaction(tx=>storeMarketSnapshot(tx,t.id,snapshot(t.mint,{marketCapUsd:40000}),'dexscreener',now));
  const stale=await db.tokenHolderMetric.create({data:{tokenId:t.id,holders:200,top10Pct:30,at:new Date(+now-12*3600000)}});
  const input={tokenId:t.id,mint:t.mint,profile:'trencher' as const,tier:'WATCH' as const,route:'SOCIAL' as const,matchKind:'MINT' as const,score:60,metricId:metric.id,holderMetricId:stale.id,title:'Research fixture',body:'Research only'};
  expect(await createEarlyRadarAlert(db,input,now)).toEqual({created:false,reason:'HOLDERS_STALE'});
  await refreshHolderFallback(db,{get:async()=>({ok:false,reason:'INVALID_OR_INCOMPLETE'})},[t],()=>now);
  expect(await createEarlyRadarAlert(db,input,now)).toEqual({created:false,reason:'HOLDERS_STALE'});
  await db.systemSetting.deleteMany({where:{key:HOLDER_FALLBACK_KEY}});
- await refreshHolderFallback(db,source(),[t],()=>now);
+ expect(await refreshHolderFallback(db,source(),[t],()=>now)).toMatchObject({holderFallbackAttempts:1,holderFallbackWritten:1});
  const fresh=await db.tokenHolderMetric.findFirstOrThrow({where:{tokenId:t.id},orderBy:{at:'desc'}});
+ expect(fresh.at).toEqual(new Date(+now-10000));
+ // Even with fresh holders, the same-timestamp fixture row must remain rejected.
+ expect(await createEarlyRadarAlert(db,{...input,metricId:unverified.id,holderMetricId:fresh.id},now)).toEqual({created:false,reason:'MARKET_UNVERIFIED'});
  const previous=process.env.RADAR_SAFETY_MODE;process.env.RADAR_SAFETY_MODE='shadow';
- try{expect(await createEarlyRadarAlert(db,{...input,holderMetricId:fresh.id},now)).toMatchObject({created:true,safety:{status:'UNKNOWN'}});}finally{if(previous===undefined)delete process.env.RADAR_SAFETY_MODE;else process.env.RADAR_SAFETY_MODE=previous;}
+ try{
+  const published=await createEarlyRadarAlert(db,{...input,holderMetricId:fresh.id},now);
+  expect(published,JSON.stringify(published)).toMatchObject({created:true,safety:{status:'UNKNOWN'}});
+ }finally{if(previous===undefined)delete process.env.RADAR_SAFETY_MODE;else process.env.RADAR_SAFETY_MODE=previous;}
  const transport={send:vi.fn(async()=>({ok:true,messageId:'fixture'}))};
  // Isolate this test's delivery selection without altering the production cursor logic.
  const isolated={...db,alert:{findMany:async(args:any)=>db.alert.findMany({...args,where:{AND:[args.where,{refId:t.id}]}})}} as unknown as typeof db;
