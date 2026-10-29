@@ -5,7 +5,7 @@ import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {AuthContext,type AuthAdapter} from '@/components/auth/context';
 import {accessKey} from '@/lib/queries';
 import {ApiError} from '@/lib/api';
-import {active,ADDRESS,challenge,empty,linked,status} from '@/test/fixtures';
+import {active,ADDRESS,challenge,empty,linked,status,wyntraxEarly} from '@/test/fixtures';
 import type {AccessView} from './view';
 import {AccessFlow} from './controller';
 
@@ -68,6 +68,13 @@ describe('identity and operation cancellation',()=>{
   await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
   expect(api.refreshMembership).toHaveBeenCalled();
   expect(state().name).toBe('active');expect(state().data.effectiveTier).toBe('PRO');
+ });
+ it.each([{...status,enabled:false},{...status,seatsLeft:0},{...status,inviteRequired:true}])('opens Wyntrax early access while local admission is unavailable: %j',async policy=>{
+  api.status.mockResolvedValue(policy);mount();await flush();expect(state().name).not.toBe('active');
+  api.entitlements.mockResolvedValue(wyntraxEarly);
+  await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
+  expect(state().name).toBe('active');expect(state().data.effectiveTier).toBe('EARLY_ACCESS');expect(api.join).not.toHaveBeenCalled();
+  const reads=api.entitlements.mock.calls.length;await act(async()=>{await vi.advanceTimersByTimeAsync(130000);});expect(api.entitlements).toHaveBeenCalledTimes(reads);
  });
  it('discards pending post-sign-in access refreshes when identity changes',async()=>{
   const app=mount();await flush();expect(state().name).toBe('linked');

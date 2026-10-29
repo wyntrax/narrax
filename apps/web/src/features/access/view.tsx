@@ -8,6 +8,7 @@ import {Link} from '@/i18n/navigation';
 import {errorKey,ApiError} from '@/lib/api';
 import {busyStates,stepFor,type AccessState} from './machine';
 import {CommunitySteps,COMMUNITY_STEP_COUNT,type CommunityStepKey} from './community';
+import {WyntraxLink} from './wyntrax-link';
 export interface AccessActions {login:()=>void;retry:()=>void;connect:()=>void;select:(address:string)=>void;sign:()=>void;join:()=>void;unlink:(id:string)=>void;leave:()=>void;logout:()=>void;createWallet:()=>void}
 export function AccessView({state,actions,wallets=[]}: {state:AccessState;actions:AccessActions;wallets?:{address:string;name:string}[]}) {
  const t=useTranslations('flow'),c=useTranslations('common'),d=useTranslations('design'),errors=useTranslations('errors'),locale=useLocale();
@@ -31,6 +32,7 @@ export function AccessView({state,actions,wallets=[]}: {state:AccessState;action
    <div className="actions centered linked-more"><Button variant="ghost" onClick={actions.connect}>{t('connect')}</Button><Button variant="ghost" onClick={actions.createWallet}>{t('embedded')}</Button></div>
   </>}
   {state.name==='active'&&state.data&&<><div className="tier-result"><Badge>{state.data.effectiveTier.replace('_',' ')}</Badge><p>{state.data.nextExpiry?t('nextExpiry',{date:new Intl.DateTimeFormat(locale,{dateStyle:'medium',timeStyle:'short'}).format(new Date(state.data.nextExpiry))}):t('noExpiry')}</p></div><Link className="button button-primary" href="/app">{t('openNarra')} ↗</Link></>}
+  {!busy&&<WyntraxLink/>}
   {state.name==='error'&&<Button disabled={disabled} onClick={actions.retry}>{c('retry')}</Button>}
   {canManage&&!!state.data?.links.length&&<div className="linked-wallets"><h3>{t('verifiedWallets')}</h3>{state.data.links.map(w=><div key={w.id}><span title={w.address}>{w.address.slice(0,7)}…{w.address.slice(-7)}</span><ConfirmDialog trigger={t('unlink')} title={t('unlinkTitle')} description={t('unlinkBody')} disabled={disabled} onConfirm={()=>actions.unlink(w.id)}/></div>)}</div>}
   {canManage&&state.data?.grants.some(g=>g.source==='EARLY_ACCESS'&&g.status==='ACTIVE')&&<ConfirmDialog trigger={t('leave')} title={t('leaveTitle')} description={t('leaveBody')} disabled={disabled} onConfirm={actions.leave}/>}
