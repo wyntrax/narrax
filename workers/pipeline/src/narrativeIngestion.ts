@@ -4,6 +4,7 @@ import {
   type MentionPoint, type NarrativeProvider, type RawMention,
 } from '@narra/narrative';
 import type { NarrativeStage } from '@narra/shared';
+import {bulkCreatorRoles} from './bulkPublication';
 
 export interface IngestOptions {
   /** How far back to ask providers for activity. */
@@ -102,7 +103,7 @@ export async function ingestNarratives(db: PrismaClient, providers: NarrativePro
     const ops: Prisma.PrismaPromise<unknown>[] = [
       db.narrative.update({ where: { id }, data: { stage: c.stage, score: c.score, velocity: c.mentionVelocity, acceleration: c.acceleration, organicScore: c.organicScore, saturationRisk: c.saturationRisk } }),
       db.narrativeMetric.create({ data: { narrativeId: id, score: c.score, velocity: c.mentionVelocity, acceleration: c.acceleration, organicScore: c.organicScore, manipulationRisk: c.manipulationRisk, mentionVelocity: c.mentionVelocity, creatorVelocity: c.creatorVelocity, engagementVelocity: c.engagementVelocity, at: now } }),
-      ...[...c.roles].filter(([creator]) => knownCreators.has(creator)).map(([creator, role]) => db.narrativeCreator.upsert({ where: { narrativeId_creatorId: { narrativeId: id, creatorId: creator } }, create: { narrativeId: id, creatorId: creator, role }, update: { role } })),
+      ...bulkCreatorRoles(db,[...c.roles].filter(([creator]) => knownCreators.has(creator)).map(([creator,role])=>({narrativeId:id,creatorId:creator,role}))),
     ];
     const changed = c.stage !== prev.stage;
     const alert = changed ? ALERT_FOR[c.stage] : undefined;

@@ -84,9 +84,9 @@ it.each(['unknown version','null'])('refuses malformed checkpoints (%s) and make
 
 it('keeps its durable checkpoint if atomic publication fails, then publishes without another provider read',async()=>{
  const t=await token();
- const interrupted=new Proxy(db,{get(target,key){if(key==='$transaction')return async()=>{throw new Error('database interruption');};return Reflect.get(target,key);}});
+ const interrupted=new Proxy(db,{get(target,key){if(key==='$transaction')return async()=>{throw Object.assign(new Error('private database context https://example.invalid/secret'),{code:'P2028'});};return Reflect.get(target,key);}});
  const rpc:HistoryPort={getSignaturesForAddress:async()=>[sig('s')],getParsedTransaction:async()=>buy(t.mint)};
- await expect(scanEarlyBuyers(interrupted,rpc,NOW,{tokenIds:[t.id],clock:clock()})).rejects.toThrow('checkpoint persistence failed');
+ await expect(scanEarlyBuyers(interrupted,rpc,NOW,{tokenIds:[t.id],clock:clock()})).rejects.toThrow(new Error('Discovery checkpoint persistence failed (P2028)'));
  expect(await db.tokenEarlyBuyers.findUnique({where:{tokenId:t.id}})).toBeNull();
  expect((await state()).pending[0]).toMatchObject({nextTransaction:1,buyers:[{signature:'s'}]});
  expect(await scanEarlyBuyers(db,rpc,NOW,{tokenIds:[t.id],clock:clock()})).toMatchObject({requests:0,scanned:1,complete:1,resumed:1,pending:0});

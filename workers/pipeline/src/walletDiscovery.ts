@@ -134,7 +134,11 @@ export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: D
       out.scanned++; out.buyersFound += p.buyers.length;
       if (p.historyComplete) out.complete++; else out.tooLong++;
     } catch (e) {
-      if (phase === 'STORE') throw new Error('Discovery checkpoint persistence failed');
+      // Preserve the sanitized category without leaking provider/DB messages.
+      if (phase === 'STORE') {
+        const code=e&&typeof e==='object'&&'code' in e&&typeof e.code==='string'&&/^P\d{4}$/.test(e.code)?e.code:'UNKNOWN';
+        throw new Error(`Discovery checkpoint persistence failed (${code})`);
+      }
       if (e instanceof DiscoveryPause) {
         out.stopReason = e.reason;
         progress.cooldownUntil = e.retryAt === null ? null : new Date(e.retryAt).toISOString();

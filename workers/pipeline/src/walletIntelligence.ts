@@ -1,5 +1,7 @@
 import type { Prisma, PrismaClient } from '@narra/database';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
+import {bulkSettings,bulkProfiles,PUBLICATION_BATCH_SIZE,type ProfilePublication} from './bulkPublication';
+import {readIntelligenceInputs} from './walletIntelligenceRead';
 import { computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
 import {
   classifyStyle, computeConsensus, computeLeaderStats, computeWalletStats, detectTimingClusters, holdingPatterns, rotationRate, walletScore, MIN_CLOSED_LEGS, researchSample,
@@ -17,6 +19,11 @@ export interface RecomputeSummary {
   clusters: number;
   consensusSignals: number;
   tradesUsed: number;
+  readPages: number;
+  loadMs: number;
+  computeMs: number;
+  publishMs: number;
+  publicationOperations: number;
 }
 
 const WINDOW = '30D';
@@ -32,14 +39,9 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   const consensusMinutes = opts.consensusMinutes ?? 60;
   const since = new Date(now.getTime() - windowDays * 86_400_000);
 
-  const [wallets, rows] = await Promise.all([
-    db.trackedWallet.findMany({ where: { active: true }, select: { id: true, clusterId: true, cluster: { select: { label: true } } } }),
-    db.walletTrade.findMany({
-      where: { at: { gte: new Date(Math.min(+since,+now-30*86_400_000)), lte: now }, wallet: { active: true } },
-      select: { id: true, walletId: true, tokenId: true, side: true, amountSol: true, tokenAmount: true, at: true, marketCapUsd: true, evidence: true },
-      orderBy: [{ at: 'asc' }, { id: 'asc' }],
-    }),
-  ]);
+  const started=performance.now();
+  const {wallets,rows,pages}=await readIntelligenceInputs(db,new Date(Math.min(+since,+now-30*86_400_000)),now);
+  const loaded=performance.now();
 
   // Deactivated wallets keep their history but take no part in scores, clusters or consensus.
   const activeIds = new Set(wallets.map((w) => w.id));
@@ -72,6 +74,9 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   clusters.forEach((c, i) => c.wallets.forEach((w) => reassignable.has(w) && clusterOf.set(w, `timing-${i}`)));
 
   const ops: Prisma.PrismaPromise<unknown>[] = [];
+  const settings:{key:string;value:Prisma.InputJsonValue}[]=[];
+  const profiles:ProfilePublication[]=[];
+  const metrics:Prisma.WalletMetricCreateManyInput[]=[];
   const info = new Map<string, WalletInfo>();
   const unscored: string[] = [];
   let scored = 0;
@@ -82,16 +87,16 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
     await yieldToEventLoop();
     const performanceKey = `wallet.performance.${w.id}`, observed = performanceRows.get(w.id) ?? [];
     const performance = computeWalletPerformance(observed.slice(0,10_000),now,observed.length>10_000);
-    ops.push(db.systemSetting.upsert({ where: { key: performanceKey }, create: { key: performanceKey, value: performance }, update: { value: performance } }));
+    settings.push({key:performanceKey,value:performance});
     const mine = byWallet.get(w.id) ?? [];
     const stats = computeWalletStats(mine);
     const score = walletScore(stats);
     const sample = researchSample(mine, stats, score, now);
     const researchKey = `wallet.research.${w.id}`;
-    ops.push(db.systemSetting.upsert({ where: { key: researchKey }, create: { key: researchKey, value: { ...sample } }, update: { value: { ...sample } } }));
+    settings.push({key:researchKey,value:{...sample}});
     const key = `wallet.intelligence.${w.id}`;
     const value = { checkedAt: now.toISOString(), windowDays, observedTrades: mine.length, observedBuys: mine.filter(t=>t.side==='BUY').length, observedSells: mine.filter(t=>t.side==='SELL').length, unmatchedSells: stats.unmatchedSells, closedTrades: stats.legs.length, requiredClosedTrades: MIN_CLOSED_LEGS, status: score === null ? 'INSUFFICIENT_HISTORY' : 'READY' };
-    ops.push(db.systemSetting.upsert({ where: { key }, create: { key, value }, update: { value } }));
+    settings.push({key,value});
     if (score === null) { unscored.push(w.id); continue; }
     const leader = leaders.get(w.id);
     const style = classifyStyle(stats, leader, rotationRate(mine));
@@ -102,11 +107,11 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
     scored++;
 
     const profile = { score, leaderScore, style, medianHoldSeconds: stats.medianHoldSeconds == null ? null : Math.round(stats.medianHoldSeconds), bestPattern: pat.best, weakPattern: pat.weak };
-    ops.push(db.walletProfile.upsert({ where: { walletId: w.id }, create: { walletId: w.id, ...profile }, update: profile }));
-    ops.push(db.walletMetric.create({
-      data: { walletId: w.id, window: WINDOW, winRate: stats.winRate ?? 0, pnlSol: stats.pnlSol, closedTrades: stats.legs.length, avgRoi: stats.avgRoi ?? 0, medianRoi: stats.medianRoi ?? 0, maxDrawdown: stats.maxDrawdown, computedAt: now },
-    }));
+    profiles.push({walletId:w.id,...profile});
+    metrics.push({ walletId: w.id, window: WINDOW, winRate: stats.winRate ?? 0, pnlSol: stats.pnlSol, closedTrades: stats.legs.length, avgRoi: stats.avgRoi ?? 0, medianRoi: stats.medianRoi ?? 0, maxDrawdown: stats.maxDrawdown, computedAt: now });
   }
+  ops.push(...bulkSettings(db,settings),...bulkProfiles(db,profiles));
+  for(let i=0;i<metrics.length;i+=PUBLICATION_BATCH_SIZE)ops.push(db.walletMetric.createMany({data:metrics.slice(i,i+PUBLICATION_BATCH_SIZE)}));
   // A wallet that no longer has enough closed trades loses its profile instead of keeping a stale score.
   if (unscored.length) ops.push(db.walletProfile.deleteMany({ where: { walletId: { in: unscored } } }));
 
@@ -143,6 +148,8 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
     ops.push(db.consensusSignal.create({ data: { tokenId, score: c.score, walletCount: c.walletCount, independentEntities: c.independentEntities, leaderCount: c.leaderCount, netFlowSol: c.netFlowSol, timingConcentration: c.timingConcentration, at: now } }));
   }
 
+  const prepared=performance.now();
   await db.$transaction(ops);
-  return { walletsScored: scored, walletsUnscored: unscored.length, clusters: clusterCount, consensusSignals: signals, tradesUsed: trades.length };
+  return { walletsScored: scored, walletsUnscored: unscored.length, clusters: clusterCount, consensusSignals: signals, tradesUsed: trades.length,
+    readPages:pages,loadMs:Math.round(loaded-started),computeMs:Math.round(prepared-loaded),publishMs:Math.round(performance.now()-prepared),publicationOperations:ops.length };
 }
