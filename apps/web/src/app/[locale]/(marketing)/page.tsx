@@ -15,6 +15,8 @@ import {researchCopy,researchGuides} from '@/content/research-guides';
 import {StructuredData} from '@/components/marketing/structured-data';
 import {websiteSchema,productFaqSchema} from '@/lib/structured-data';
 import {productFacts} from '@/content/product-facts';
+import {ResearchSnapshot} from '@/components/marketing/research-snapshot';
+import '@/components/marketing/research-snapshot.css';
 import './research.css';
 
 export async function generateMetadata({params}:{params:Promise<{locale:string}>}):Promise<Metadata>{
@@ -32,7 +34,8 @@ export default async function Landing({params}:{params:Promise<{locale:string}>}
    <div className="hero-footnote"><ShieldCheck size={15}/><span>{t('messageOnly')}</span></div>
    <PoweredBy className="powered-by-hero"/>
   </section>
-  <section id="about-narrax" className="section container product-facts" aria-labelledby="product-facts-title">
+   <ResearchSnapshot/>
+   <section id="about-narrax" className="section container product-facts" aria-labelledby="product-facts-title">
     <div className="section-heading"><p className="eyebrow">NARRAX / SOLANA</p><h2 id="product-facts-title">{productFacts[locale].title}</h2><p>{productFacts[locale].summary}</p></div>
     <div className="product-facts-grid">{productFacts[locale].questions.map((item,index)=><article key={item.question} id={`product-answer-${index+1}`}><h3>{item.question}</h3><p>{item.answer}</p></article>)}</div>
     <Link className="button button-ghost" href="/methodology">{copy.methodologyCta}<ArrowUpRight size={15}/></Link>

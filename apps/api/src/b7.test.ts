@@ -248,6 +248,15 @@ describe.skipIf(!up)('B7 API routes (needs Postgres)', () => {
       expect((await call('GET', '/v1/overview', bob)).body.me.unreadAlerts).toBe(2);
     });
 
+    it('shows up to ten narratives while heat still uses only the strongest five',async()=>{
+      for(let i=0;i<7;i++)await db.narrative.create({data:{name:`Scope ${i} ${tag}`,slug:`scope-${i}-${tag}`,stage:'SEED',score:98-i}});
+      const expected=await db.narrative.findMany({where:{stage:{not:'DEAD'}},orderBy:[{score:'desc'},{id:'asc'}],take:10});
+      const r=await call('GET','/v1/overview');
+      expect(r.body.strip.topNarratives.map((n:{id:string})=>n.id)).toEqual(expected.map(n=>n.id));
+      expect(r.body.strip.topNarratives.length).toBeGreaterThan(5);
+      expect(r.body.bar.narrativeHeat).toBe(Math.round(expected.slice(0,5).reduce((s,n)=>s+n.score,0)/5));
+    });
+
     it('finds the rotation from falling to rising narratives, and says what it could not compare', async () => {
       const r = await call('GET', '/v1/narratives/rotation?window=24h');
       expect(r.status).toBe(200);

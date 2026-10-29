@@ -3,6 +3,7 @@ export * from './execution';
 export * from './prismaStores';
 export * from './chainPorts';
 export * from './walletIntelligence';
+export { WALLET_INTAKE_LIMITS } from './walletCandidateIntake';
 export * from './narrativeIngestion';
 export * from './tokenResolution';
 export * from './narrativeTokens';

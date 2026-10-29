@@ -42,6 +42,15 @@ export const TOPIC_PACKS = {
     ],
   },
   /** Longer-term holders: real products, builders, and community-backed projects on Solana. */
+  sectors: {
+    description: 'Three sector themes that fit alongside trencher and chatter: DePIN, RWA and DeFi.',
+    topics: [
+      { name: 'Solana DePIN', query: 'solana (DePIN OR "decentralized physical infrastructure" OR "physical infrastructure")' },
+      { name: 'Solana RWA', query: 'solana (RWA OR "real world assets" OR "tokenized" OR "tokenised")' },
+      { name: 'Solana DeFi', query: 'solana (DeFi OR "liquid staking" OR perps OR "yield vault" OR "lending protocol")' },
+    ],
+  },
+  /** Full holder pack, including gaming and builder activity. */
   holder: {
     description: 'Long-term holders: DePIN, RWA, DeFi, gaming and builder or community activity on Solana.',
     topics: [

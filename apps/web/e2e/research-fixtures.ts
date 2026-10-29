@@ -1,5 +1,5 @@
 import {expect,type Page} from '@playwright/test';
-import {empty,ADDRESS} from '../src/test/fixtures';
+import {empty,ADDRESS,publicResearchSnapshot} from '../src/test/fixtures';
 const at='2026-10-12T12:00:00.000Z';
 export const narrative={id:'n1',slug:'robotics',name:'Robotics',stage:'ACCELERATING',score:82,velocity:124,acceleration:12,organicScore:76,saturationRisk:18,firstDetectedAt:at,updatedAt:at,tokenCount:1};
 export const observation={source:'dexscreener',at,stale:false,marketCapIsFdv:true,priceChange1hPct:0,pairAddress:ADDRESS,dexId:'raydium',pairCreatedAt:at};
@@ -29,7 +29,11 @@ export async function researchApi(page:Page,override?:(path:string,url:URL)=>{st
   if(req.method()==='OPTIONS')return route.fulfill({headers,status:204});
   expect(req.method()).toBe('GET');
    if(url.pathname==='/v1/early-access/status')return route.fulfill({headers,json:{enabled:true,seatsLeft:12,inviteRequired:false}});
-   if(url.pathname==='/v1/public-config')return route.fulfill({headers,json:{privyAppId:null}});
+    if(url.pathname==='/v1/public-config')return route.fulfill({headers,json:{privyAppId:null}});
+    if(url.pathname==='/v1/public-research-snapshot'){
+     expect(req.headers().authorization).toBeUndefined();const value=override?.(url.pathname,url);
+     return route.fulfill({headers,status:value?.status??200,json:value?.body??publicResearchSnapshot});
+    }
   expect(req.headers().authorization).toBe('Bearer fixture-public-test-token');requests.push(url.pathname+url.search);
   const value=override?.(url.pathname,url);return route.fulfill({headers,status:value?.status??(value||responses[url.pathname]?200:404),json:value?.body??responses[url.pathname]??{error:'NOT_FOUND'}});
  });return requests;

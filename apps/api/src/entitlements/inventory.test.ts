@@ -10,6 +10,8 @@ it('every literal HTTP registration is deliberately classified; generated accoun
   newRoutes.add('GET /v1/early-access/status');
   // Authenticated four-number teaser, explicitly tier-independent; all detailed research stays gated.
   newRoutes.add('GET /v1/market-preview');
+  // Unauthenticated aggregate landing snapshot; no narrative/wallet identities or detailed research.
+  newRoutes.add('GET /v1/public-research-snapshot');
   // Own-account paper-only routes: authentication/ownership/governor, never research-tier authority.
   for(const route of ['GET /v1/paper-trades/account','POST /v1/paper-trades/preview','POST /v1/paper-trades/confirm'])newRoutes.add(route);
   // Public, unauthenticated, no per-user data: the $Wyntrax tier amounts and the early-access window.

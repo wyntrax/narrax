@@ -1,6 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import {empty,linked,active,status,challenge,link,ADDRESS} from '../src/test/fixtures';
+import {empty,linked,active,status,challenge,link,ADDRESS,publicResearchSnapshot} from '../src/test/fixtures';
 import type {Entitlements,PublicStatus} from '../src/lib/schemas';
 import bs58 from 'bs58';
 const BASE_URL=process.env.E2E_BASE_URL??'http://localhost:4010';
@@ -12,7 +12,8 @@ async function mockApi(page:Page,options:{status?:PublicStatus;failure?:boolean;
   const req=route.request(),path=new URL(req.url()).pathname;const origin=req.headers().origin??BASE_URL,headers={'access-control-allow-origin':origin,'access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,POST,DELETE,OPTIONS'};
   const reply=(json:unknown,statusCode=200)=>route.fulfill({status:statusCode,headers,contentType:'application/json',body:JSON.stringify(json)});
    if(req.method()==='OPTIONS')return reply({});
-   if(path==='/v1/public-config')return reply({privyAppId:null});
+    if(path==='/v1/public-config')return reply({privyAppId:null});
+    if(path==='/v1/public-research-snapshot')return reply(publicResearchSnapshot);
   if(path==='/v1/early-access/status')return reply(options.status??status);
   expect(req.headers().authorization).toBe('Bearer fixture-public-test-token');
   if(path==='/v1/me/entitlements'){
