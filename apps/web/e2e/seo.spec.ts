@@ -12,7 +12,7 @@ test('public product answers and preview metadata are readable without JavaScrip
  for(const agent of ['Twitterbot/1.0','TelegramBot (like TwitterBot)']){
   const response=await request.get('/',{headers:{'user-agent':agent}}),html=await response.text(),head=html.split('</head>')[0];
   expect(response.status()).toBe(200);
-  expect(head).toContain('summary_large_image');expect(head).toContain('/share/en/home.png?v=2');
+   expect(head).toContain('summary_large_image');expect(head).toContain('/share/en/home.png?v=3');
   expect(html).toContain(productFacts.en.summary);
   for(const item of productFacts.en.questions)expect(html).toContain(item.question);
   expect(html).toContain('FAQPage');
@@ -78,7 +78,7 @@ test('unknown guides return a real 404 and are not indexed',async({request})=>{
 
 test('localized social preview images are valid PNGs',async({request})=>{
  test.setTimeout(120000);
-  for(const path of ['/opengraph-image','/id/opengraph-image','/share/en/home.png?v=2','/share/id/home.png?v=2','/share/en/smart-money-wallet-research.png?v=2','/share/id/early-token-risk-checklist.png?v=2']){
+   for(const path of ['/opengraph-image','/id/opengraph-image',...(['en','id'] as const).flatMap(locale=>['home','research','methodology',...researchGuides[locale].map(g=>g.slug)].map(key=>`/share/${locale}/${key}.png?v=3`))]){
    const response=await request.get(path,{headers:{'user-agent':'TelegramBot (like TwitterBot)'}});expect(response.status()).toBe(200);
   expect(response.headers()['content-type']).toContain('image/png');const bytes=await response.body();
    expect(bytes.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');expect(bytes.readUInt32BE(16)).toBe(1200);expect(bytes.readUInt32BE(20)).toBe(630);
