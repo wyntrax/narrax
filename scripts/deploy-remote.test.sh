@@ -22,6 +22,9 @@ new_host() {
 echo "docker $*" >> "$CALLS"
 case "$*" in
   login*) cat >/dev/null ;;
+  *" pull "*)
+    count="$(cat "$CALLS.pulls" 2>/dev/null || echo 0)"; count=$((count + 1)); echo "$count" > "$CALLS.pulls"
+    if [ "$count" -le "${FAKE_PULL_FAILURES:-0}" ]; then exit 1; fi ;;
   *" run "*) exit "${FAKE_MIGRATE_RC:-0}" ;;
   *" ps "*) printf '%b' "${FAKE_RUNNING:-api\nworker\nexecutor\npersonal-research\n}" ;;
   *" up "*) if [ -n "${FAKE_UP_FAIL_FOR:-}" ] && [ "${NARRA_IMAGE:-}" = "$FAKE_UP_FAIL_FOR" ]; then exit 1; fi ;;
@@ -32,6 +35,15 @@ FAKE
   chmod +x "$BIN/docker" "$BIN/curl"
   printf '#!/usr/bin/env bash\necho "sleep $*" >> "$CALLS"\n' > "$BIN/sleep"
   chmod +x "$BIN/sleep"
+  cat > "$BIN/timeout" <<'FAKE'
+#!/usr/bin/env bash
+echo "timeout $*" >> "$CALLS"
+[ "$1" = --kill-after=15s ] && [ "$2" = 180s ] || exit 2
+shift 2
+if [ "${FAKE_PULL_TIMEOUT:-0}" = 1 ]; then exit 124; fi
+exec "$@"
+FAKE
+  chmod +x "$BIN/timeout"
 }
 run() { # run <image> [registry_user]; the fake registry token is sent on stdin like the workflow does
   ( export PATH="$BIN:$PATH" CALLS DEPLOY_PATH="$DEP" NARRA_IMAGE="$1" HEALTH_TRIES=2 HEALTH_SLEEP=0
@@ -45,7 +57,7 @@ new_host; run "ghcr.io/o/r@sha256:new" ci-user
 ok "success: exits 0" '[ "$RC" -eq 0 ]'
 ok "success: logs in to the registry and logs out afterwards" 'grep -q "docker login ghcr.io" "$CALLS" && grep -q "docker logout ghcr.io" "$CALLS"'
 ok "success: the token is never on a command line" '! grep -q tok123 "$CALLS" "$HOST/out.log"'
-ok "success: migrates before the app starts" 'm=$(grep -n " run --rm --no-deps migrate" "$CALLS" | head -1 | cut -d: -f1); u=$(grep -n "up -d --no-build --no-deps --pull never api worker executor" "$CALLS" | head -1 | cut -d: -f1); [ -n "$m" ] && [ -n "$u" ] && [ "$m" -lt "$u" ]'
+ok "success: migrates from the pulled image before the app starts" 'm=$(grep -n " run --rm --no-deps --pull never migrate" "$CALLS" | head -1 | cut -d: -f1); u=$(grep -n "up -d --no-build --no-deps --pull never api worker executor" "$CALLS" | head -1 | cut -d: -f1); [ -n "$m" ] && [ -n "$u" ] && [ "$m" -lt "$u" ]'
 ok "success: explicitly loads the host env and preserves unrelated services" 'grep -q "compose --env-file .env" "$CALLS" && ! grep -q -- --remove-orphans "$CALLS"'
 ok "success: records the current image" '[ "$(cat "$DEP/.deploy/current_image")" = "ghcr.io/o/r@sha256:new" ]'
 ok "success: starts personal research and records rollback support" 'grep -q "up -d --no-build --no-deps --pull never api worker executor personal-research" "$CALLS" && [ "$(cat "$DEP/.deploy/personal_research_image")" = "ghcr.io/o/r@sha256:new" ]'
@@ -100,5 +112,17 @@ new_host; rm "$DEP/.env"; run "ghcr.io/o/r@sha256:s"
 ok "missing .env: fails before any docker command" '[ "$RC" -ne 0 ] && [ ! -s "$CALLS" ] && grep -q "missing .env" "$HOST/out.log"'
 new_host; rm "$DEP/docker/docker-compose.prod.yml"; run "ghcr.io/o/r@sha256:s"
 ok "missing base compose file: fails with a clear message" '[ "$RC" -ne 0 ] && grep -q "docker-compose.prod.yml" "$HOST/out.log"'
+
+# Registry failures must be retried only before any application side effects.
+new_host; FAKE_PULL_FAILURES=2 run "ghcr.io/o/r@sha256:new" ci-user
+ok "transient pull failure: third attempt succeeds with backoff" '[ "$RC" -eq 0 ] && [ "$(cat "$CALLS.pulls")" -eq 3 ] && grep -qx "sleep 10" "$CALLS" && grep -qx "sleep 20" "$CALLS"'
+ok "transient pull failure: migration runs exactly once after successful pull" '[ "$(grep -c "^docker .* run " "$CALLS")" -eq 1 ] && [ "$(grep -n "^docker .* pull " "$CALLS" | tail -1 | cut -d: -f1)" -lt "$(grep -n "^docker .* run " "$CALLS" | cut -d: -f1)" ]'
+new_host; printf 'ghcr.io/o/r@sha256:old\n' > "$DEP/.deploy/current_image"
+FAKE_PULL_FAILURES=9 run "ghcr.io/o/r@sha256:new" ci-user
+ok "persistent pull failure: stops after three attempts" '[ "$RC" -ne 0 ] && [ "$(cat "$CALLS.pulls")" -eq 3 ] && grep -q "after 3 attempts" "$HOST/out.log"'
+ok "persistent pull failure: no migrations, stops, starts or release changes" '! grep -Eq " (run|stop|up) " "$CALLS" && [ "$(cat "$DEP/.deploy/current_image")" = "ghcr.io/o/r@sha256:old" ] && [ ! -f "$DEP/.deploy/previous_image" ]'
+ok "persistent pull failure: registry logout still happens" 'grep -q "docker logout ghcr.io" "$CALLS"'
+new_host; FAKE_PULL_TIMEOUT=1 run "ghcr.io/o/r@sha256:new"
+ok "pull timeout: bounded attempts without migrations or service changes" '[ "$RC" -ne 0 ] && [ "$(grep -c "^timeout --kill-after=15s 180s" "$CALLS")" -eq 3 ] && ! grep -Eq " (run|stop|up) " "$CALLS" && [ ! -f "$DEP/.deploy/current_image" ]'
 
 echo; if [ "$FAILS" -eq 0 ]; then echo "All deploy script checks passed."; else echo "$FAILS check(s) failed."; exit 1; fi
