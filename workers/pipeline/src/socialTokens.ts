@@ -8,6 +8,7 @@ import type { RadarSafetyEvidence, RadarSafetySource } from './radarSafetyEviden
 import type { TradeabilityEvidence, TradeabilitySource } from './tradeabilityEvidence';
 import { storeMarketSnapshot } from './marketSnapshot';
 import { COVERAGE_LIMITS, saveSocialPriority, saveResearchDiagnostics } from './researchDiagnostics';
+import {holderGrowthBaseline} from './holderHistory';
 
 export interface SocialScanSummary {
   rowsRead: number;
@@ -184,13 +185,13 @@ export async function scanSocialTokens(db: PrismaClient, deps: { quotes: MarketQ
     const [p1, p3] = await Promise.all([priceAt(1), priceAt(3)]);
     const growth = (then: number | null) => (then && then > 0 ? (price / then - 1) * 100 : null);
     const growth1h = growth(p1), growth3h = growth(p3);
-    const thenRow = await db.tokenHolderMetric.findFirst({ where: { tokenId, at: { lte: new Date(now.getTime() - 3 * HOUR) } }, orderBy: { at: 'desc' }, select: { holders: true } });
+    const holdersThen=await holderGrowthBaseline(db,tokenId,h.id,new Date(now.getTime()-3*HOUR));
 
     // The chatter about this one token is scored like a narrative: velocity, organic quality (copy-paste and burst checks) and stage.
     const c = computeNarrativeMetrics(group.points, now);
     const divergence = attentionPriceDivergence(c.mentionVelocity, growth3h);
     const earlyInput = (devHoldingPct: number | null) => evaluateEarlyBoth({
-      marketCapUsd, liquidityUsd, volume24hUsd: num(m.volume24hUsd) ?? NaN, holders: h.holders, holdersThen: thenRow?.holders ?? null,
+      marketCapUsd, liquidityUsd, volume24hUsd: num(m.volume24hUsd) ?? NaN, holders: h.holders, holdersThen,
       top10Pct: h.top10Pct, devHoldingPct, smartWalletHolders: h.smartWalletHolders,
       tokenAgeMinutes: t.createdOnChainAt ? (now.getTime() - t.createdOnChainAt.getTime()) / 60_000 : null,
       relation: 'UNKNOWN', ogScore: null, symbolOnlyMatch: via === 'CASHTAG', narrativeScore: c.score, narrativeStage: c.stage,

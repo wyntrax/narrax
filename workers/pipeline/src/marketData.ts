@@ -7,6 +7,9 @@ import {discoveryPriceCandidates} from './walletDiscovery';
 import { storeMarketSnapshot } from './marketSnapshot';
 import { SOL_HISTORY_PREFIX } from './walletResearchEvidence';
 import { COVERAGE_LIMITS, readSocialPriority, saveResearchDiagnostics, SOCIAL_INFO_CURSOR_KEY } from './researchDiagnostics';
+import {refreshHolderFallback} from './holderFallback';
+import type {HolderRpcSource} from './holderRpc';
+import {EARLY_RULES} from '@narra/token-intel';
 
 /** Starting values. None is validated against outcomes, and each should become an admin-editable setting. */
 export const MARKET_DATA_LIMITS = {
@@ -47,6 +50,7 @@ export interface PriceCoverageCounts {
 }
 
 export interface MarketDataDeps {
+  holderFallback?: HolderRpcSource | null;
   metadata?: MetadataSource | null;
   developerHoldings?: DeveloperHoldingSource | null;
   quotes: MarketQuoteSource;
@@ -74,6 +78,10 @@ export interface MarketDataSummary {
   infoCalls: number;
   infoUnavailable: number;
   holderRowsWritten: number;
+  holderFallbackAttempts: number;
+  holderFallbackWritten: number;
+  holderFallbackUnknown: number;
+  holderFallbackThrottled: number;
   riskRowsWritten: number;
   solUsd: number | null;
   errors: string[];
@@ -94,7 +102,7 @@ export async function refreshMarketData(
 ): Promise<MarketDataSummary> {
   const L = MARKET_DATA_LIMITS;
   const emptyCoverage = (): PriceCoverageCounts => ({ selected: 0, written: 0, unavailable: 0, failed: 0, notRequested: 0 });
-  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, priceCoverage: { outcomes: emptyCoverage(), discovery: emptyCoverage(), wallets: emptyCoverage(), social: emptyCoverage(), launches: emptyCoverage(), unpriced: emptyCoverage(), general: emptyCoverage() }, priceOmissions: {}, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, riskRowsWritten: 0, solUsd: null, errors: [] };
+  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, priceCoverage: { outcomes: emptyCoverage(), discovery: emptyCoverage(), wallets: emptyCoverage(), social: emptyCoverage(), launches: emptyCoverage(), unpriced: emptyCoverage(), general: emptyCoverage() }, priceOmissions: {}, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, holderFallbackAttempts:0,holderFallbackWritten:0,holderFallbackUnknown:0,holderFallbackThrottled:0,riskRowsWritten: 0, solUsd: null, errors: [] };
   if(deps.metadata){try{await refreshTokenMetadata(db,deps.metadata,now);}catch(e){out.errors.push(errText('token metadata',e));}}
 
   // 1. SOL/USD, kept in one settings row so every later consumer reads the same number.
@@ -338,7 +346,11 @@ export async function refreshMarketData(
       // A holder row needs both numbers. With either missing, nothing is written and the token stays unranked.
       if (info && info.holders != null && info.top10Pct != null) {
         const key=`research.holders.${t.id}`,value={mint:t.mint,source:deps.info.name,sourceAt:holderAt&&Number.isFinite(+holderAt)?holderAt.toISOString():null,retrievedAt:now.toISOString(),holders:info.holders,top10Pct:info.top10Pct,devHoldingPct};
-        await db.systemSetting.upsert({where:{key},create:{key,value},update:{value}});
+        const previous=(await db.systemSetting.findUnique({where:{key},select:{value:true}}))?.value as {sourceAt?:string|null}|null;
+        // A cached Gecko response cannot overwrite newer RPC provenance.
+        if(!previous?.sourceAt||(value.sourceAt&&Date.parse(value.sourceAt)>=Date.parse(previous.sourceAt))){
+          await db.systemSetting.upsert({where:{key},create:{key,value},update:{value}});
+        }
         if (holderAt && Number.isFinite(+holderAt) && +holderAt<=+now) {
           await db.tokenHolderMetric.create({ data: { tokenId: t.id, holders: info.holders, top10Pct: info.top10Pct, devHoldingPct, at: holderAt } });
           out.holderRowsWritten++;
@@ -348,6 +360,17 @@ export async function refreshMarketData(
       out.riskRowsWritten++;
       await writeCursor(db, cursorKey, t.id);
     }
+  }
+  // Complete on-chain holder observations for a bounded subset that can still reach an early profile.
+  // Failed/missing RPC evidence never changes the stored observation time.
+  if(deps.holderFallback){
+    const candidates=tokens.filter(t=>{
+      const s=snaps.get(t.mint),created=t.createdOnChainAt??s?.pairCreatedAt;
+      const age=created?(+now-+created)/60000:null;
+      return s&&s.marketCapUsd>=EARLY_RULES.minMarketCapUsd&&s.marketCapUsd<EARLY_RULES.maxMarketCapUsd&&age!=null&&
+        [EARLY_RULES.trencher,EARLY_RULES.holder].some(p=>s.liquidityUsd>=p.minLiquidityUsd&&s.liquidityUsd/s.marketCapUsd>=p.minLiquidityToCap&&age>=p.minAgeMinutes&&age<=p.maxAgeMinutes);
+    });
+    Object.assign(out,await refreshHolderFallback(db,deps.holderFallback,candidates));
   }
   // Advance only through attempted members of each rotating group.
   const lastDiscovery = discoveryIds.filter(id => attempted.has(discoveryById.get(id)?.mint ?? '')).at(-1);
