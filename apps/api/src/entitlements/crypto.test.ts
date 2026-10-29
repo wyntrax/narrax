@@ -36,7 +36,7 @@ describe('wire payload schema', () => {
     const e = event(); e.data.validUntil = '2020-01-01T00:00:00Z'; expect(WyntraxEvent.safeParse(e).success).toBe(true);
     e.type = 'membership.revoked'; e.data.validUntil = null; expect(WyntraxEvent.safeParse(e).success).toBe(true);
   });
-  it.each(['NONE', 'UNKNOWN', 'EARLY_ACCESS', 'pro'])('rejects key %s', key => { const e = event(); e.data.key = key; expect(WyntraxEvent.safeParse(e).success).toBe(false); });
+  it.each(['NONE', 'UNKNOWN', 'early_access', 'pro'])('rejects key %s', key => { const e = event(); e.data.key = key; expect(WyntraxEvent.safeParse(e).success).toBe(false); });
   it('rejects missing/null grant expiry, obsolete wallet lists, wrong chain, invalid base58 and seq', () => {
     for (const change of [(e: any) => { delete e.data.validUntil; }, (e: any) => { e.data.validUntil = null; }, (e: any) => { e.data.wallets = []; }, (e: any) => { e.data.chain = 'evm'; }, (e: any) => { e.data.wallet = '0'.repeat(32); }, (e: any) => { e.data.wallet = '1'.repeat(33); }, (e: any) => { e.data.seq = 1.5; }, (e: any) => { e.data.seq = 0; }, (e: any) => { e.data.seq = Number.MAX_SAFE_INTEGER + 1; }]) { const e = event(); change(e); expect(WyntraxEvent.safeParse(e).success).toBe(false); }
   });

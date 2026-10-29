@@ -9,6 +9,7 @@ import { createWalletChallenge, unlinkWallet, verifyWalletChallenge } from './li
 import { grantEarlyAccess, revokeLocalGrant } from './grants';
 import { updateLocalSettings } from './settings';
 import { applyWyntraxEvent } from './membershipStore';
+import { entitlementTrace } from './access';
 import { VECTOR_BODY } from './fixtures.test-support';
 
 // Unlike legacy tests, missing/wrong scratch services are failures, never skips or production fallbacks.
@@ -181,6 +182,36 @@ describe('atomic seats and restricted manual grants (services; HTTP administrati
 });
 
 describe('transactional membership ordering/idempotency', () => {
+  it('migrates new early access to Wyntrax while preserving local grants and requiring the same verified wallet',async()=>{
+    await configure();
+    const legacy=await linkedUser(),id=await linkedUser();
+    const local=await grant(legacy,admin);
+    const link=await db.linkedWallet.findFirstOrThrow({where:{userId:id}});
+    await updateLocalSettings(db,admin,{'early_access.enabled':false},'Wyntrax signup');
+    await expect(grant(id)).rejects.toMatchObject({code:'EARLY_ACCESS_DISABLED'});
+    const e=event(1);e.data.key='EARLY_ACCESS';e.data.wallet=link.address;e.data.validUntil=later.toISOString();
+    await applyWyntraxEvent(db,e,proof.hash(JSON.stringify(e)),now);
+    const trace=await entitlementTrace(db,id,now);
+    expect(trace).toMatchObject({effectiveTier:'EARLY_ACCESS',researchPageLimit:20,grants:[],memberships:[{key:'EARLY_ACCESS',eligible:true}]});
+    expect(trace.sources).toEqual([expect.objectContaining({source:'WYNTRAX',tier:'EARLY_ACCESS'})]);
+    expect(trace.features['research.overview'].allowed).toBe(true);
+    expect(trace.features['research.personal_radar'].allowed).toBe(false);
+    expect((await entitlementTrace(db,id,later)).effectiveTier).toBe('NONE');
+    expect((await entitlementTrace(db,legacy,now)).effectiveTier).toBe('EARLY_ACCESS');
+    expect((await entitlementTrace(db,legacy,later)).effectiveTier).toBe('NONE');
+    expect(await db.accessGrant.findUniqueOrThrow({where:{id:local.id}})).toEqual(local);
+    await unlinkWallet(db,id,link.id,now);
+    expect((await entitlementTrace(db,id,now)).effectiveTier).toBe('NONE');
+    await db.linkedWallet.create({data:{userId:id,chain:'solana',address:address(),verifiedAt:now}});
+    expect((await entitlementTrace(db,id,now)).effectiveTier).toBe('NONE');
+    await db.linkedWallet.create({data:{userId:id,chain:'solana',address:link.address,verifiedAt:now}});
+    expect((await entitlementTrace(db,id,now)).effectiveTier).toBe('EARLY_ACCESS');
+    const revoke=event(2,e.data.membershipId);revoke.data={...e.data,seq:2,validUntil:null};revoke.type='membership.revoked';
+    await applyWyntraxEvent(db,revoke,proof.hash(JSON.stringify(revoke)),now);
+    expect((await entitlementTrace(db,id,now)).effectiveTier).toBe('NONE');
+    expect((await entitlementTrace(db,legacy,now)).effectiveTier).toBe('EARLY_ACCESS');
+    await configure();
+  });
   it('duplicate, stale and equal-seq-different-ID never refresh state; newer revocation persists a tombstone', async () => {
     const e = event(3), digest = proof.hash(JSON.stringify(e));
     expect(await applyWyntraxEvent(db, e, digest, now)).toBe('applied');
@@ -259,7 +290,7 @@ describe('non-escalation: guarded capabilities plus real database snapshots', ()
       const local = await grantEarlyAccess(guarded, id, { tier: 'EARLY_ACCESS', validUntil: null, reason: 'join' }, null, now);
       const manual = await grantEarlyAccess(guarded, id, { tier: 'EARLY_ACCESS', validUntil: later, reason: 'manual' }, admin, now);
       const member = `${tag}-isolation`;
-      for (const [i, tier] of ['MEMBER', 'PRO', 'ELITE', 'NONE'].entries()) {
+      for (const [i, tier] of ['EARLY_ACCESS', 'MEMBER', 'PRO', 'ELITE', 'NONE'].entries()) {
         const e = event(i + 1, member); e.data.key = tier === 'NONE' ? 'ELITE' : tier; e.data.wallet = link.address;
         if (tier === 'NONE') { e.type = 'membership.revoked'; e.data.validUntil = null; }
         await applyWyntraxEvent(guarded, e, proof.hash(JSON.stringify(e)), now);

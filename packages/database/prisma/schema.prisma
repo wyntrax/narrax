@@ -1209,6 +1209,7 @@ enum EntitlementChain {
 
 enum WyntraxTier {
   NONE
+  EARLY_ACCESS
   MEMBER
   PRO
   ELITE

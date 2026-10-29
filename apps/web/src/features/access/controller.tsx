@@ -65,11 +65,11 @@ function AccessController({auth}:{auth:AuthAdapter}){
   return()=>clearTimeout(timer);
  },[state.name,scope]);
  useEffect(()=>{
-  if(state.name!=='linked'||!state.data?.links.length)return;
+  if(!['linked','disabled','full','inviteOnly'].includes(state.name)||!state.data?.links.length)return;
   const own=scope.epoch,current=()=>scope.active&&own===scope.epoch;
   // Best effort: ask the server to check this wallet's token holding. Early access never waits for it.
   void api.refreshMembership().catch(()=>{});
-  // Silent polling opens paid access if the server finds a holding or receives a Wyntrax update.
+  // Membership updates also unlock access when local signup is closed or full.
   return watchMembership(api.entitlements,data=>{if(current()&&data.effectiveTier!=='NONE')dispatch({type:'SYNC',data});},()=>{},error=>{if(current())fail(error);});
  },[state.name,state.data?.links.length,api,scope]);
  useEffect(()=>{if(state.name!=='active'||!state.data?.nextExpiry)return;return scheduleRefresh(state.data.nextExpiry,()=>retry());

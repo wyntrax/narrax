@@ -6,7 +6,7 @@ const grant: LocalGrant = { id: 'g', userId: 'u', tier: 'EARLY_ACCESS', source: 
 const snapshot = (): EntitlementSnapshot => ({ userId: 'u', linkedWallets: [{ chain: 'solana', address: 'CaseSensitive', userId: 'u', verifiedAt: now }], grants: [grant], memberships: [], earlyAccessEnabled: true });
 const membership = (key = 'PRO', address = 'CaseSensitive') => ({ membershipId: 'm', chain: 'solana', address, key, status: 'ACTIVE', validUntil: later });
 describe('pure entitlement resolution', () => {
-  it.each(['MEMBER','PRO','ELITE'])('requires an active Wyntrax membership for %s while early access needs no holding', tier => {
+  it.each(['EARLY_ACCESS','MEMBER','PRO','ELITE'])('requires an active Wyntrax membership for %s while local early access needs no holding', tier => {
     const s = snapshot();
     expect(resolveEntitlements(s, now).effectiveTier).toBe('EARLY_ACCESS');
     expect(resolveEntitlements({ ...s, grants: [] }, now).effectiveTier).toBe('NONE');
@@ -35,7 +35,7 @@ describe('pure entitlement resolution', () => {
     s.memberships = ['MEMBER', 'ELITE', 'PRO'].map((key, i) => ({ ...membership(key, i ? 'other' : 'CaseSensitive'), membershipId: String(i) }));
     expect(resolveEntitlements(s, now)).toMatchObject({ effectiveTier: 'PRO', researchPageLimit: 70 });
   });
-  it.each(['NONE', 'UNKNOWN', 'EARLY_ACCESS'])('wire tier %s grants nothing', tier => {
+  it.each(['NONE', 'UNKNOWN'])('wire tier %s grants nothing', tier => {
     expect(resolveEntitlements({ ...snapshot(), grants: [], memberships: [membership(tier)] }, now).effectiveTier).toBe('NONE');
   });
   it('unlinked wallets, wrong chain, case changes and foreign-user links grant nothing', () => {
@@ -52,6 +52,15 @@ describe('pure entitlement resolution', () => {
   });
   it('local disable does not revoke a paid source', () => {
     expect(resolveEntitlements({ ...snapshot(), earlyAccessEnabled: false, memberships: [membership()] }, now).effectiveTier).toBe('PRO');
+  });
+  it('external early access is independent of local admission and falls back to surviving sources',()=>{
+    const s={...snapshot(),earlyAccessEnabled:false,memberships:[membership('EARLY_ACCESS')]};
+    expect(resolveEntitlements({...s,grants:[]},now)).toMatchObject({effectiveTier:'EARLY_ACCESS',researchPageLimit:20});
+    expect(resolveEntitlements({...s,linkedWallets:[]},now).effectiveTier).toBe('NONE');
+    expect(resolveEntitlements({...s,grants:[],memberships:[membership('EARLY_ACCESS','wrong')]},now).effectiveTier).toBe('NONE');
+    expect(resolveEntitlements({...s,memberships:[{...membership('EARLY_ACCESS'),status:'REVOKED'}]},now).sources.map(x=>x.source)).toEqual(['EARLY_ACCESS']);
+    expect(resolveEntitlements({...s,grants:[],memberships:[membership('EARLY_ACCESS'),{...membership('PRO'),membershipId:'pro'}]},now).effectiveTier).toBe('PRO');
+    for(const validUntil of [null,now,new Date('invalid')])expect(resolveEntitlements({...s,grants:[],memberships:[{...membership('EARLY_ACCESS'),validUntil}]},now).effectiveTier).toBe('NONE');
   });
   it('independent memberships fall back ELITE to PRO to MEMBER without revoking a peer', () => {
     const s = snapshot(); s.memberships = ['MEMBER', 'PRO', 'ELITE'].map(key => ({ ...membership(key), membershipId: key }));

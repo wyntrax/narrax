@@ -1,6 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import {empty,linked,active,status,challenge,link,ADDRESS,publicResearchSnapshot} from '../src/test/fixtures';
+import {empty,linked,active,status,challenge,link,ADDRESS,publicResearchSnapshot,wyntraxEarly} from '../src/test/fixtures';
 import type {Entitlements,PublicStatus} from '../src/lib/schemas';
 import bs58 from 'bs58';
 const BASE_URL=process.env.E2E_BASE_URL??'http://localhost:4010';
@@ -31,7 +31,7 @@ async function mockApi(page:Page,options:{status?:PublicStatus;failure?:boolean;
   if(path.endsWith('/linked-wallets/fixture-link')){snapshot=empty;return reply({ok:true});}
   return reply({error:'NOT_FOUND'},404);
  });
- return {writes,get checks(){return checks;},get verifyCount(){return verifyCount;}};
+  return {writes,setSnapshot:(value:Entitlements)=>{snapshot=value;},get checks(){return checks;},get verifyCount(){return verifyCount;}};
 }
 async function signIn(page:Page){await page.getByRole('button',{name:'Continue',exact:true}).click();await expect(page.getByRole('heading',{name:'Make it your wallet.'})).toBeVisible();}
 async function connect(page:Page){await page.getByRole('button',{name:'Connect external wallet'}).click();await page.getByRole('button',{name:/Phantom \(test fixture\)/}).click();}
@@ -50,6 +50,24 @@ async function completeCommunity(page:Page){
  await expect(page.getByRole('button',{name:'Join early access',exact:true})).toBeEnabled();
 }
 async function shot(page:Page,name:string){await page.screenshot({path:`test-results/screenshots/${name}.png`,fullPage:true});}
+for(const width of [1280,390])test(`Wyntrax early access with local signup closed at ${width}px`,async({page})=>{
+ await page.setViewportSize({width,height:900});const api=await mockApi(page,{status:{...status,enabled:false}});
+ await page.goto('/early-access');await page.getByRole('button',{name:'Continue',exact:true}).click();
+ await expect(page.locator('[data-access-state="disabled"]')).toBeVisible();
+ await connect(page);await page.getByRole('button',{name:'Sign this message'}).click();
+ await expect(page.locator('.linked-wallets')).toBeVisible();
+ await expect(page.getByRole('button',{name:'Join early access',exact:true})).toHaveCount(0);
+ api.setSnapshot(wyntraxEarly);
+ await expect(page.locator('[data-access-state="active"]')).toBeVisible();
+ await expect(page.getByRole('link',{name:/Open Narrax/})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Leave early access'})).toHaveCount(0);
+ expect(api.writes.some(w=>w.endsWith('/join'))).toBe(false);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ api.setSnapshot({...wyntraxEarly,effectiveTier:'NONE',sources:[],nextExpiry:null,memberships:wyntraxEarly.memberships.map(m=>({...m,status:'REVOKED',eligible:false,reasonCode:'REVOKED',validUntil:null}))});
+ await page.getByRole('button',{name:'Refresh access',exact:true}).click();
+ await expect(page.locator('[data-access-state="disabled"]')).toBeVisible();
+ await expect(page.getByRole('link',{name:/Open Narrax/})).toHaveCount(0);
+});
 test('verified-wallet state holds the three community steps without account linking or a server check',async({page})=>{
  const api=await mockApi(page);await page.goto('/early-access');await signIn(page);await connect(page);await page.getByRole('button',{name:'Sign this message'}).click();
  await expect(page.getByRole('heading',{name:'Wallet verified. You’re ready.'})).toBeVisible();

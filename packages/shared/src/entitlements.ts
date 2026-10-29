@@ -53,7 +53,7 @@ export function resolveEntitlements(s: EntitlementSnapshot, now: Date) {
     const seen = new Set<string>();
     for (const m of s.memberships) {
       const id = entitlementId(m);
-      if (seen.has(id) || m.status !== 'ACTIVE' || !['MEMBER', 'PRO', 'ELITE'].includes(m.key) || !m.validUntil || !future(m.validUntil, now) || m.chain !== 'solana' || !links.has(key(m))) continue;
+      if (seen.has(id) || m.status !== 'ACTIVE' || !['EARLY_ACCESS', 'MEMBER', 'PRO', 'ELITE'].includes(m.key) || !m.validUntil || !future(m.validUntil, now) || m.chain !== 'solana' || !links.has(key(m))) continue;
       seen.add(id);
       sources.push({ source: 'WYNTRAX', id, tier: activeTier(m.key as AccessTier), validUntil: m.validUntil });
     }
