@@ -432,6 +432,8 @@ model WalletTrade {
 
   @@index([tokenId, at])
   @@index([walletId, at])
+  // Stable bounded reads for whole-cohort intelligence; avoids repeated full sorts per page.
+  @@index([at, id])
 }
 
 model WalletCluster {

@@ -141,8 +141,10 @@ async function main(): Promise<void> {
       if (intake?.added) await queues.requestWalletSync();
       const history = historyEnabled && process.env.HELIUS_API_KEY ? await refreshResearchHistory(db, process.env.HELIUS_API_KEY) : null;
       const intelligence = await recomputeWalletIntelligence(db);
-      const pipeline = { checkedAt: new Date().toISOString(), historyEnabled, providerConfigured, intakeAdded: intake?.added ?? 0, scanned: history?.scanned ?? 0, failures: history?.failures ?? 0 };
+      const pipeline = { checkedAt: new Date().toISOString(), historyEnabled, providerConfigured, intakeAdded: intake?.added ?? 0, scanned: history?.scanned ?? 0, failures: history?.failures ?? 0,
+        intelligence: { readPages:intelligence.readPages,loadMs:intelligence.loadMs,computeMs:intelligence.computeMs,publishMs:intelligence.publishMs,publicationOperations:intelligence.publicationOperations,tradesUsed:intelligence.tradesUsed } };
       await db.systemSetting.upsert({ where: { key: 'wallet.evaluation.pipeline' }, create: { key: 'wallet.evaluation.pipeline', value: pipeline }, update: { value: pipeline } });
+      console.log(JSON.stringify({msg:'wallet_intelligence_complete',...pipeline.intelligence}));
       return JSON.stringify({ ...intelligence, history, research: research ? await publishWalletResearch(db) : 'disabled' });
     }, { connection, concurrency: 1 }),
     // Position monitor: recommends exits and raises alerts. It never closes a position or places an order. The AI review is optional.
