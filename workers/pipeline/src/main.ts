@@ -22,6 +22,8 @@ import { makeDeveloperHoldingSource } from './developerHoldings';
 import { makeRadarSafetySource } from './radarSafetyEvidence';
 import { makeTradeabilitySource } from './tradeabilityEvidence';
 import { deliverEarlyRadarTelegram, telegramConfigFromEnv, TelegramBotApiTransport } from './telegram';
+import {makeHolderRpcSource} from './holderRpc';
+import {deliverTelegramFeedHealth} from './telegramHealth';
 import { syncWyntraxHoldings } from './wyntraxHoldings';
 import { deliverWyntraxMembership } from './wyntraxMembership';
 import { acquireWorkerLock, WORKER_LOCK_KEY } from './workerLock';
@@ -69,7 +71,7 @@ async function main(): Promise<void> {
   // With it off, no prices, holders or risk rows are written, so token resolution ranks nothing (fail closed).
   const marketDeps = process.env.MARKET_DATA_ENABLED === 'false' ? null : (() => {
     const gecko = new GeckoTerminalSource({ baseUrl: process.env.GECKOTERMINAL_BASE_URL });
-     return { metadata:process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: process.env.HELIUS_RPC_URL ? makeDeveloperHoldingSource(db, new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 })) : null };
+      return { holderFallback:process.env.HOLDER_RPC_FALLBACK_ENABLED!=='false'&&process.env.HELIUS_RPC_URL?makeHolderRpcSource(process.env.HELIUS_RPC_URL):null,metadata:process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: process.env.HELIUS_RPC_URL ? makeDeveloperHoldingSource(db, new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 })) : null };
   })();
   if (!marketDeps) console.log('market data disabled');
   // Bounded public RugCheck lookups for early-radar candidates only. Missing/failed data stays UNKNOWN.
@@ -194,6 +196,10 @@ async function main(): Promise<void> {
           sent: summary.sent, stale: summary.skippedStale, failed: summary.failed,
           stopped: summary.stopped, error: summary.lastError,
         }));
+      }
+      if(process.env.TELEGRAM_HEALTH_NOTICES!=='false'&&!summary.sent&&!summary.failed&&!summary.stopped){
+        const health=await deliverTelegramFeedHealth(db,{chatId:telegramConfig.chatId,transport:telegramTransport,dryRun:false});
+        if(health.sent||health.reason==='SEND_FAILED')console.log(JSON.stringify({msg:'telegram_feed_health',...health}));
       }
       return JSON.stringify(summary);
     }, { connection, concurrency: 1 }),
