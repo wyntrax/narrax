@@ -12,5 +12,5 @@ export function socialPreview(locale: SeoLocale, key: string) {
 }
 export function socialImageUrl(origin: string, locale: SeoLocale, path = '') {
   const key = path === '' || path === '/' ? 'home' : path.replace(/^\/research\//, '').replace(/^\//, '');
-  return `${origin}/share/${locale}/${socialPreview(locale, key) ? key : 'home'}.png?v=2`;
+  return `${origin}/share/${locale}/${socialPreview(locale, key) ? key : 'home'}.png?v=3`;
 }

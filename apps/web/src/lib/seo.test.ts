@@ -31,7 +31,7 @@ describe('localized canonical metadata',()=>{
  it('gives each public page its own canonical and localized share metadata',()=>{
   production();const m=pageMetadata('id','/research/test','Judul','Deskripsi');
   expect(m.alternates?.canonical).toBe('https://narrax.example/id/research/test');
-   expect(m.openGraph).toMatchObject({url:'https://narrax.example/id/research/test',locale:'id_ID',title:'Judul | Narrax',images:[{url:'https://narrax.example/share/id/home.png?v=2',width:1200,height:630}]});
+    expect(m.openGraph).toMatchObject({url:'https://narrax.example/id/research/test',locale:'id_ID',title:'Judul | Narrax',images:[{url:'https://narrax.example/share/id/home.png?v=3',width:1200,height:630}]});
   expect(m.twitter).toMatchObject({card:'summary_large_image',description:'Deskripsi'});
   expect(m.robots).toMatchObject({index:true,follow:true});
  });
@@ -58,7 +58,7 @@ describe('truthful structured data and editorial coverage',()=>{
   it('gives each authored page a bounded localized image and rejects unknown copy',()=>{
    production();const urls=new Set<string>();
    for(const locale of ['en','id'] as const)for(const path of ['', '/research','/methodology',...researchGuides[locale].map(guide=>`/research/${guide.slug}`)]){
-    const image=socialImageUrl('https://narrax.example',locale,path);expect(image).toMatch(/\/share\/(en|id)\/[a-z-]+\.png\?v=2$/);urls.add(image);
+     const image=socialImageUrl('https://narrax.example',locale,path);expect(image).toMatch(/\/share\/(en|id)\/[a-z-]+\.png\?v=3$/);urls.add(image);
    }
    expect(urls.size).toBe(12);expect(socialPreview('en','<script>')).toBeNull();
   });
