@@ -81,14 +81,26 @@ fail() {
 }
 
 log "deploying $NARRA_IMAGE (previous: ${PREVIOUS:-none})"
-"${compose[@]}" pull --quiet migrate "${SERVICES[@]}" || die "could not pull the image"
+# Registry connections can reset mid-layer. Bound each attempt and finish pulling
+# before migrations or service replacement; completed layers are reused by Docker.
+pulled=0
+for attempt in 1 2 3; do
+  log "pulling image (attempt $attempt/3; 180s timeout)"
+  if timeout --kill-after=15s 180s "${compose[@]}" pull --quiet migrate "${SERVICES[@]}"; then pulled=1; break; fi
+  if [ "$attempt" -lt 3 ]; then
+    delay=$((attempt * 10))
+    log "image pull failed; retrying in ${delay}s"
+    sleep "$delay"
+  fi
+done
+[ "$pulled" = 1 ] || die "could not pull the image after 3 attempts; nothing was replaced"
 
 log "starting postgres and redis"
 "${compose[@]}" up -d --wait postgres redis || die "postgres or redis is not healthy"
 
 # A failed migration stops here, before any container is replaced, so the old release keeps running untouched.
 log "running migrations"
-"${compose[@]}" run --rm --no-deps migrate || die "migrations failed; nothing was replaced"
+"${compose[@]}" run --rm --no-deps --pull never migrate || die "migrations failed; nothing was replaced"
 
 log "starting ${SERVICES[*]}"
 stop_worker || fail "could not stop the previous worker"

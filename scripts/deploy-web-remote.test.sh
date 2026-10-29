@@ -24,7 +24,10 @@ echo "docker image=${NARRA_WEB_IMAGE:-} $*" >> "$CALLS"
 case "$*" in
   login*) cat >/dev/null ;;
   "image inspect"*) exit "${FAKE_INSPECT_RC:-0}" ;;
-  *" pull "*) exit "${FAKE_PULL_RC:-0}" ;;
+  *" pull "*)
+    count="$(cat "$CALLS.pulls" 2>/dev/null || echo 0)"; count=$((count + 1)); echo "$count" > "$CALLS.pulls"
+    if [ "$count" -le "${FAKE_PULL_FAILURES:-0}" ]; then exit 1; fi
+    exit "${FAKE_PULL_RC:-0}" ;;
   *" run "*) exit "${FAKE_CONFIG_RC:-0}" ;;
   *" up "*)
     if [ "${FAKE_UP_FAIL:-0}" = 1 ] && [ "$NARRA_WEB_IMAGE" = "$BAD" ]; then exit 1; fi
@@ -46,6 +49,15 @@ else
 fi
 FAKE
   printf '#!/usr/bin/env bash\nexit "${FAKE_LOCK_RC:-0}"\n' > "$BIN/flock"
+  printf '#!/usr/bin/env bash\necho "sleep $*" >> "$CALLS"\n' > "$BIN/sleep"
+  cat > "$BIN/timeout" <<'FAKE'
+#!/usr/bin/env bash
+echo "timeout $*" >> "$CALLS"
+[ "$1" = --kill-after=15s ] && [ "$2" = 180s ] || exit 2
+shift 2
+if [ "${FAKE_PULL_TIMEOUT:-0}" = 1 ]; then exit 124; fi
+exec "$@"
+FAKE
   chmod +x "$BIN/"*
 }
 previous() {
@@ -100,4 +112,12 @@ new_host; FAKE_LOCK_RC=1 run
 ok 'prevents concurrent frontend deployments on the host' '[ "$RC" != 0 ] && [ ! -s "$CALLS" ]'
 new_host; rm "$DEP/.env.web"; run
 ok 'requires separate frontend environment file' '[ "$RC" != 0 ] && [ ! -s "$CALLS" ]'
+new_host; FAKE_PULL_FAILURES=2 run
+ok 'transient pull failure succeeds on third attempt with backoff' '[ "$RC" = 0 ] && [ "$(cat "$CALLS.pulls")" = 3 ] && grep -qx "sleep 10" "$CALLS" && grep -qx "sleep 20" "$CALLS"'
+ok 'image config check runs exactly once after the successful pull' '[ "$(grep -c "^docker .* run " "$CALLS")" = 1 ] && [ "$(grep -n "^docker .* pull " "$CALLS" | tail -1 | cut -d: -f1)" -lt "$(grep -n "^docker .* run " "$CALLS" | cut -d: -f1)" ]'
+new_host; previous; WITH_REGISTRY=1 FAKE_PULL_RC=1 run
+ok 'persistent pull failure stops at three and preserves previous release and config' '[ "$RC" != 0 ] && [ "$(cat "$CALLS.pulls")" = 3 ] && ! grep -Eq " (run|stop|up) " "$CALLS" && grep -q "$OLD_SHA" "$DEP/.deploy/web/current_release" && grep -q old.example "$DEP/.deploy/web/current.env" && [ "$(cat "$ACTIVE")" = "$OLD" ]'
+ok 'persistent pull failure still logs out' 'grep -q "logout ghcr.io" "$CALLS"'
+new_host; FAKE_PULL_TIMEOUT=1 run
+ok 'timeout ends after three bounded attempts without replacement' '[ "$RC" != 0 ] && [ "$(grep -c "^timeout --kill-after=15s 180s" "$CALLS")" = 3 ] && ! grep -Eq " (run|stop|up) " "$CALLS" && [ ! -f "$DEP/.deploy/web/current_release" ]'
 printf '%s frontend deployment checks passed.\n' "$CHECKS"

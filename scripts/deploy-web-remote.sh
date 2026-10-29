@@ -34,7 +34,18 @@ if [ -n "${REGISTRY_USER:-}" ]; then
 fi
 # Validate Compose and image configuration BEFORE replacing the currently running frontend.
 "${compose[@]}" config --quiet || die 'invalid frontend compose configuration'
-"${compose[@]}" pull --quiet web || die 'could not pull frontend image'
+# Keep registry retries before config checks/replacement, within the release job budget.
+pulled=0
+for attempt in 1 2 3; do
+  log "pulling frontend image (attempt $attempt/3; 180s timeout)"
+  if timeout --kill-after=15s 180s "${compose[@]}" pull --quiet web; then pulled=1; break; fi
+  if [ "$attempt" -lt 3 ]; then
+    delay=$((attempt * 10))
+    log "frontend image pull failed; retrying in ${delay}s"
+    sleep "$delay"
+  fi
+done
+[ "$pulled" = 1 ] || die 'could not pull frontend image after 3 attempts; nothing was replaced'
 "${compose[@]}" run --rm --no-deps --pull never web node scripts/check-deploy-config.cjs || die 'host public configuration differs from this image; nothing replaced'
 health() {
   local revision="$1" body
