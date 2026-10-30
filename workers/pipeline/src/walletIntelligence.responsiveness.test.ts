@@ -13,7 +13,9 @@ it('services event-loop callbacks during preparation and publishes all operation
   const record=(args:unknown)=>{const op={args};operations.push(op);return op;};
   const db={
     trackedWallet:{findMany:async()=>wallets,updateMany:record},
-    walletTrade:{findMany:async(args:{take:number;cursor?:{id:string}})=>{ticksAtPage.push(ticks);const start=args.cursor?rows.findIndex(r=>r.id===args.cursor!.id)+1:0;return rows.slice(start,start+args.take);}},
+    $queryRaw:async(_sql:TemplateStringsArray,_from:Date,_to:Date,after:{values:unknown[]},take:number)=>{
+      ticksAtPage.push(ticks);const start=after.values.length?rows.findIndex(r=>r.id===after.values[1])+1:0;return rows.slice(start,start+take);
+    },
     $executeRaw:(sql:TemplateStringsArray,payload:string)=>record({sql:sql.join('?'),rows:JSON.parse(payload)}),
     systemSetting:{deleteMany:record,createMany:record},
     walletProfile:{deleteMany:record},

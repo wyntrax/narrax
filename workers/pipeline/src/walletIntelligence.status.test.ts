@@ -8,7 +8,7 @@ it('records insufficient sample progress without inventing a wallet score', asyn
   const create = vi.fn(() => Promise.resolve({}));
   const db = {
     trackedWallet: { findMany: async () => [{ id: 'wallet', clusterId: null, cluster: null }], updateMany: create },
-    walletTrade: { findMany: async () => [] },
+    $queryRaw:async()=>[],
     systemSetting:{createMany:createSettings,deleteMany:create},
     walletProfile: { deleteMany: create, upsert: create },
     walletRelationship: { deleteMany: create }, walletCluster: { deleteMany: create },
