@@ -82,3 +82,41 @@ The migration was applied only to guarded local scratch databases. Targeted test
 3. Verify advancing performance snapshots and discovery checkpoints, and check the retained failed queues for new P2028/transaction-start failures in wallet intelligence, market data and narrative ingestion. Checkpoint errors now distinguish Prisma codes from UNKNOWN.
 4. Confirm unrelated market jobs and lease renewals remain responsive during the large read. A faster local publication does not establish production stability.
 5. Start a new durable 24-hour observation after recovery is verified. Preserve samples outside the interactive session and across container replacement. Admission-cap changes and Backtest enhancement remain pending quality/stability review.
+
+## Follow-up: seek directly to each page boundary (October 30)
+
+### Deployed PR #40 result
+
+Revision `40e1b7228ed66f4c4c6350d86df801e6cf98ce22` and the valid/ready index were verified in production. Sixteen read-only samples from October 29 23:43 through October 30 00:14 UTC showed a healthy worker lease and zero restarts/OOM or observed lock-renewal failures.
+
+The first evaluation completed at 23:48:08 UTC: **413,060 trades / 207 pages**, load **51,941 ms**, compute **21,592 ms**, publication **2,900 ms**. All 200 performance snapshots refreshed. Its 381 publication operations reflect a different workload, including additional consensus writes, from the earlier captured replay.
+
+The second evaluation failed before publication: the read transaction attempted to commit after **60,440 ms**, exceeding its **60,000-ms** deadline. Market, discovery and narrative jobs continued successfully during observation. This failed the stability check; the prior snapshot remained intact.
+
+### Production query-plan evidence
+
+At October 30 03:29:31 UTC, a bounded read-only `EXPLAIN (ANALYZE, BUFFERS)` compared the generated cursor predicate with an explicit tuple seek at the same late-page boundary, within one Repeatable Read snapshot. Each query returned 2,000 rows; statement timeout was 10 seconds.
+
+| Observation | Prisma cursor + skip | Explicit `(at,id) > (lastAt,lastId)` |
+| --- | ---: | ---: |
+| Server execution | 1,187.050 ms | 21.457 ms |
+| Root shared-buffer hits / reads | 245,286 / 35,686 | 236 / 301 |
+| Earlier rows removed by trade-index filter | 419,423 | No such rescan |
+
+The generated cursor expression used OR branches and three scalar subqueries. PostgreSQL scanned the chronological index from the beginning of the time window and filtered earlier pages. The explicit tuple predicate became an index condition. For this late boundary, PostgreSQL chose a bounded bitmap scan of the remaining 5,000 rows followed by a join/sort. The sequential probe order can affect caching, so the timing ratio is not a controlled speedup claim; the plan establishes the repeated-prefix scan directly.
+
+### Follow-up change and validation
+
+`readIntelligenceInputs` now uses parameterized SQL with an exclusive tuple boundary and the existing `(at,id)` index. Page size remains 2,000 and all pages/active-wallet selection still share a Repeatable Read snapshot. The 60-second read bound, five-second publication deadline, selected fields, inclusive time range, active-wallet filter, ordering and event-loop yields retain their existing semantics. No additional migration is needed.
+
+The expanded database regression compares **all selected fields** with Prisma `findMany`, including BUY/SELL values, exact decimals, nullable numerics/JSON, Date values, tied timestamps and an inclusive upper-bound page. A concurrent backfill remains invisible to later pages; inactive wallets and out-of-window rows are excluded. An empty-range regression verifies termination.
+
+A local same-process comparison on 255,253 captured qualifying trades returned 128 pages with identical serialized results:
+
+- Existing cursor reader: **11,686 ms**, maximum timer gap **92 ms**.
+- Tuple-seek reader: **3,916 ms**, maximum timer gap **82 ms**.
+- Both row hashes: `d06c5f0812261f0ca472871feb5c9f9310d808f1f924808e4a60eca8d60a5fa5`.
+
+A single **read-only production probe** of the revised loader at **03:36:44 UTC** read **425,094 trades / 200 wallets / 213 pages** in **10,506 ms**, with a maximum timer gap of **341 ms**. It ran in a separate API-container Node process, with PostgreSQL default read-only mode and a 10-second statement timeout, rather than replacing the scheduled worker. No production settings, records, queues, deployments or Telegram messages were changed by the probes.
+
+This provides production-scale read evidence, not scheduled-worker recovery. After deploying the follow-up, repeat the two-cycle checks above and then begin a new durable 24-hour observation if they pass. Preserve the failed PR #40 follow-up as part of the evidence history.
