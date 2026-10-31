@@ -4,15 +4,17 @@ import {beforeAll,beforeEach,afterAll,expect,it,vi} from 'vitest';
 import {createPrisma,type Prisma} from '@narra/database';
 import {FixtureMarketData,snapshot,info} from '@narra/market-data';
 import {assertTestDatabase} from '../../../scripts/test-database';
-import {refreshHolderFallback,HOLDER_FALLBACK_KEY} from './holderFallback';
+import {refreshHolderFallback,refreshRadarHolders,HOLDER_FALLBACK_KEY} from './holderFallback';
 import {refreshMarketData} from './marketData';
 import type {HolderRpcResult} from './holderRpc';
 import {createEarlyRadarAlert} from './earlyRadarTracking';
 import {deliverEarlyRadarTelegram,telegramCursorKey} from './telegram';
 import {storeMarketSnapshot} from './marketSnapshot';
 import {holderGrowthBaseline} from './holderHistory';
+import {saveSocialPriority,SOCIAL_INFO_PRIORITY_KEY,COVERAGE_LIMITS} from './researchDiagnostics';
 assertTestDatabase(new URL(process.env.DATABASE_URL!));
 const db=createPrisma(),now=new Date('2051-03-01T12:00:00Z'),tag=`holder-${randomUUID()}`;
+const budget={perRun:2,deadlineMs:30_000};
 const tokens:{id:string;mint:string}[]=[];let previous:Prisma.JsonValue|undefined;
 beforeAll(async()=>{
  previous=(await db.systemSetting.findUnique({where:{key:HOLDER_FALLBACK_KEY}}))?.value;
@@ -31,21 +33,39 @@ afterAll(async()=>{
 });
 function source(){return {get:vi.fn(async(mint:string):Promise<HolderRpcResult>=>({ok:true,mint,holders:200,top10Pct:30,sourceAt:new Date(+now-10000),slot:123,accounts:205,program:'test-program'}))};}
 it('writes at most two real observations with immutable provenance; rotates and skips fresh holders',async()=>{
- const rpc=source(),first=await refreshHolderFallback(db,rpc,tokens,()=>now);expect(first).toMatchObject({holderFallbackAttempts:2,holderFallbackWritten:2});
+ const rpc=source(),first=await refreshHolderFallback(db,rpc,tokens,()=>now,budget);expect(first).toMatchObject({holderFallbackAttempts:2,holderFallbackWritten:2});
  expect(await db.tokenHolderMetric.count({where:{tokenId:{in:tokens.map(t=>t.id)}}})).toBe(2);
  const row=await db.tokenHolderMetric.findFirstOrThrow({where:{tokenId:tokens[0]!.id}});
  expect(row.at).toEqual(new Date(+now-10000));expect(row.devHoldingPct).toBeNull();
  expect((await db.systemSetting.findUniqueOrThrow({where:{key:`research.holderMetric.${row.id}`}})).value).toMatchObject({source:'solana-rpc',slot:123,complete:true,basis:'positive-balance-owners-including-pools',sourceAt:row.at.toISOString()});
- expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+5*60000))).toMatchObject({holderFallbackAttempts:2,holderFallbackWritten:2});
- expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+10*60000))).toMatchObject({holderFallbackAttempts:0});
+ expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+5*60000),budget)).toMatchObject({holderFallbackAttempts:2,holderFallbackWritten:2});
+ expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+10*60000),budget)).toMatchObject({holderFallbackAttempts:0,holderFallbackDeferred:0});
  expect(await db.alert.count({where:{refId:{in:tokens.map(t=>t.id)}}})).toBe(0);
+});
+it('serves the oldest holder observations first and reports the demand it could not serve',async()=>{
+ const ages=[120,110,100,90];
+ for(let i=0;i<tokens.length;i++)await db.tokenHolderMetric.create({data:{tokenId:tokens[i]!.id,holders:100+i,top10Pct:20,at:new Date(+now-ages[i]!*60000)}});
+ const rpc=source();
+ expect(await refreshHolderFallback(db,rpc,tokens,()=>now,budget)).toMatchObject({holderFallbackCandidates:4,holderFallbackFresh:0,holderFallbackAttempts:2,holderFallbackDeferred:2});
+ expect(rpc.get.mock.calls.map(c=>c[0])).toEqual([tokens[0]!.mint,tokens[1]!.mint]);
+});
+it('spends no RPC work on candidates already inside the holder gate',async()=>{
+ for(const t of tokens)await db.tokenHolderMetric.create({data:{tokenId:t.id,holders:200,top10Pct:30,at:new Date(+now-5*60000)}});
+ const rpc=source();
+ expect(await refreshHolderFallback(db,rpc,tokens,()=>now,budget)).toMatchObject({holderFallbackCandidates:4,holderFallbackFresh:4,holderFallbackAttempts:0,holderFallbackDeferred:0});
+ expect(rpc.get).not.toHaveBeenCalled();
+});
+it('stops before starting work once the wall-clock deadline is spent',async()=>{
+ const rpc=source();
+ expect(await refreshHolderFallback(db,rpc,tokens,()=>now,{perRun:12,deadlineMs:0})).toMatchObject({holderFallbackAttempts:0,holderFallbackDeferred:4,holderFallbackDeadlineHit:1});
+ expect(rpc.get).not.toHaveBeenCalled();
 });
 it('keeps failed and future observations unknown and persists provider cooldown',async()=>{
  const rpc=source();rpc.get.mockResolvedValueOnce({ok:false,reason:'RATE_LIMITED'});
- expect(await refreshHolderFallback(db,rpc,tokens,()=>now)).toMatchObject({holderFallbackAttempts:1,holderFallbackWritten:0,holderFallbackThrottled:1});
- expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+5*60000))).toMatchObject({holderFallbackAttempts:0});
+ expect(await refreshHolderFallback(db,rpc,tokens,()=>now,budget)).toMatchObject({holderFallbackAttempts:1,holderFallbackWritten:0,holderFallbackThrottled:1});
+ expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+5*60000),budget)).toMatchObject({holderFallbackAttempts:0});
  rpc.get.mockImplementation(async mint=>({ok:true,mint,holders:200,top10Pct:30,sourceAt:new Date(+now+3600000),slot:123,accounts:205,program:'test'}));
- expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+16*60000))).toMatchObject({holderFallbackWritten:0,holderFallbackUnknown:2});
+ expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+16*60000),budget)).toMatchObject({holderFallbackWritten:0,holderFallbackUnknown:2});
  expect(await db.tokenHolderMetric.count({where:{tokenId:{in:tokens.map(t=>t.id)}}})).toBe(0);
 });
 it('cached Gecko refresh cannot relabel newer RPC holder evidence',async()=>{
@@ -85,6 +105,8 @@ it('fresh RPC holders can cross publication and delivery gates; failed fallback 
 });
 it('market collection invokes fallback for eligible stale-holder tokens even without primary info',async()=>{
  const t=tokens[1]!,at=new Date();
+ // The radar cohort is read from scheduling state; clear it so only this run's token is offered.
+ await db.systemSetting.deleteMany({where:{key:SOCIAL_INFO_PRIORITY_KEY}});
  await db.token.update({where:{id:t.id},data:{createdOnChainAt:new Date(+at-3600000)}});
  const fixture=new FixtureMarketData({snapshots:[snapshot(t.mint,{marketCapUsd:40000})]});
  const rpc={get:vi.fn(async(mint:string):Promise<HolderRpcResult>=>({ok:true,mint,holders:200,top10Pct:30,sourceAt:new Date(+at-10000),slot:123,accounts:205,program:'test'}))};
@@ -92,6 +114,24 @@ it('market collection invokes fallback for eligible stale-holder tokens even wit
  expect(result).toMatchObject({holderFallbackAttempts:1,holderFallbackWritten:1});
  expect(rpc.get).toHaveBeenCalledWith(t.mint);
  expect((await db.tokenHolderMetric.findFirstOrThrow({where:{tokenId:t.id},orderBy:{at:'desc'}})).at).toEqual(new Date(+at-10000));
+});
+it('refreshes the radar cohort independently of which tokens the market run priced',async()=>{
+ const t=tokens[3]!;
+ await saveSocialPriority(db,[t.id],now);
+ const rpc=source();
+ try{
+  expect(await refreshRadarHolders(db,rpc,now)).toMatchObject({holderFallbackCandidates:1,holderFallbackAttempts:1,holderFallbackWritten:1});
+  expect(rpc.get).toHaveBeenCalledWith(t.mint);
+  expect(await db.tokenHolderMetric.count({where:{tokenId:t.id}})).toBe(1);
+ }finally{await db.systemSetting.deleteMany({where:{key:SOCIAL_INFO_PRIORITY_KEY}});}
+});
+it('does nothing for the radar cohort when the priority list has expired',async()=>{
+ await saveSocialPriority(db,[tokens[3]!.id],now);
+ const rpc=source();
+ try{
+  expect(await refreshRadarHolders(db,rpc,new Date(+now+COVERAGE_LIMITS.priorityMaxAgeMs+1))).toMatchObject({holderFallbackCandidates:0,holderFallbackAttempts:0});
+  expect(rpc.get).not.toHaveBeenCalled();
+ }finally{await db.systemSetting.deleteMany({where:{key:SOCIAL_INFO_PRIORITY_KEY}});}
 });
 it('does not turn a switch from Gecko to RPC (or back) into holder growth',async()=>{
  const t=tokens[2]!,past=new Date(+now-4*3600000);
