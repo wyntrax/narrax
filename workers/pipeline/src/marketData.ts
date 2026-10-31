@@ -82,6 +82,14 @@ export interface MarketDataSummary {
   holderFallbackWritten: number;
   holderFallbackUnknown: number;
   holderFallbackThrottled: number;
+  /** Price-lane candidates offered to the market-run fallback (the radar cohort is excluded). */
+  holderFallbackCandidates: number;
+  /** Candidates already inside the 60-minute gate, so no RPC work was needed. */
+  holderFallbackFresh: number;
+  /** Eligible candidates left unrefreshed because the per-run budget or deadline ran out. */
+  holderFallbackDeferred: number;
+  /** 1 when the wall-clock deadline, not the per-run count, stopped the work. */
+  holderFallbackDeadlineHit: number;
   riskRowsWritten: number;
   solUsd: number | null;
   errors: string[];
@@ -102,7 +110,7 @@ export async function refreshMarketData(
 ): Promise<MarketDataSummary> {
   const L = MARKET_DATA_LIMITS;
   const emptyCoverage = (): PriceCoverageCounts => ({ selected: 0, written: 0, unavailable: 0, failed: 0, notRequested: 0 });
-  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, priceCoverage: { outcomes: emptyCoverage(), discovery: emptyCoverage(), wallets: emptyCoverage(), social: emptyCoverage(), launches: emptyCoverage(), unpriced: emptyCoverage(), general: emptyCoverage() }, priceOmissions: {}, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, holderFallbackAttempts:0,holderFallbackWritten:0,holderFallbackUnknown:0,holderFallbackThrottled:0,riskRowsWritten: 0, solUsd: null, errors: [] };
+  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, priceCoverage: { outcomes: emptyCoverage(), discovery: emptyCoverage(), wallets: emptyCoverage(), social: emptyCoverage(), launches: emptyCoverage(), unpriced: emptyCoverage(), general: emptyCoverage() }, priceOmissions: {}, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, holderFallbackAttempts:0,holderFallbackWritten:0,holderFallbackUnknown:0,holderFallbackThrottled:0,holderFallbackCandidates:0,holderFallbackFresh:0,holderFallbackDeferred:0,holderFallbackDeadlineHit:0,riskRowsWritten: 0, solUsd: null, errors: [] };
   if(deps.metadata){try{await refreshTokenMetadata(db,deps.metadata,now);}catch(e){out.errors.push(errText('token metadata',e));}}
 
   // 1. SOL/USD, kept in one settings row so every later consumer reads the same number.
@@ -364,12 +372,16 @@ export async function refreshMarketData(
   // Complete on-chain holder observations for a bounded subset that can still reach an early profile.
   // Failed/missing RPC evidence never changes the stored observation time.
   if(deps.holderFallback){
-    const candidates=tokens.filter(t=>{
+    // The radar cohort (social priority) is refreshed by the holder-refresh job. This run only
+    // tops up price-lane tokens outside it, so the two jobs never compete for the same RPC budget.
+    const cohort=new Set(socialIds);
+    const reachable=(t:typeof tokens[number])=>{
       const s=snaps.get(t.mint),created=t.createdOnChainAt??s?.pairCreatedAt;
       const age=created?(+now-+created)/60000:null;
-      return s&&s.marketCapUsd>=EARLY_RULES.minMarketCapUsd&&s.marketCapUsd<EARLY_RULES.maxMarketCapUsd&&age!=null&&
+      return !!s&&s.marketCapUsd>=EARLY_RULES.minMarketCapUsd&&s.marketCapUsd<EARLY_RULES.maxMarketCapUsd&&age!=null&&
         [EARLY_RULES.trencher,EARLY_RULES.holder].some(p=>s.liquidityUsd>=p.minLiquidityUsd&&s.liquidityUsd/s.marketCapUsd>=p.minLiquidityToCap&&age>=p.minAgeMinutes&&age<=p.maxAgeMinutes);
-    });
+    };
+    const candidates=tokens.filter(t=>!cohort.has(t.id)&&reachable(t));
     Object.assign(out,await refreshHolderFallback(db,deps.holderFallback,candidates));
   }
   // Advance only through attempted members of each rotating group.

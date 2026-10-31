@@ -71,7 +71,7 @@ describe.skipIf(!up)('admin status and costs (needs Postgres)', () => {
     it('serves bounded read-only ingestion diagnostics for admins',async()=>{
       const r=await http('GET','/v1/admin/data-health',boss);
       expect(r.status).toBe(200);expect(r.body.checkedAt).toBe(NOW.toISOString());
-      expect(r.body.queues).toHaveLength(8);expect(r.body.queues.map((q:{name:string})=>q.name)).toEqual(expect.arrayContaining(['wallet-discovery','token-resolution']));expect(r.body.market.scanned).toBeLessThanOrEqual(2000);
+      expect(r.body.queues).toHaveLength(9);expect(r.body.queues.map((q:{name:string})=>q.name)).toEqual(expect.arrayContaining(['wallet-discovery','token-resolution','holder-refresh']));expect(r.body.market.scanned).toBeLessThanOrEqual(2000);
       expect(r.body.coverage.scanned).toBeLessThanOrEqual(2000);
       expect(r.body.coverage.stages.map((s:{stage:string})=>s.stage)).toEqual(['market','social','narrative']);
       expect(r.body.webhook.configured).toBeNull();

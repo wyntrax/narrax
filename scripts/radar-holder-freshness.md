@@ -47,3 +47,25 @@ Both reconciled to supply and passed stable-mint checks; lookup duration was ~1.
 Deploy the worker through the normal release after merging. No schema migration is needed. The two features default on with the existing RPC/Telegram configuration; opt-out environment values are documented in `.env.example`. Deployment/configuration remain operator actions.
 
 After deployment, verify the worker revision, restarts/lease, market-job duration and fallback counters. Inspect new immutable holder provenance and compare `freshPriceAndHolders` in the collection-quality report. Confirm Telegram status delivery independently of research-alert publication. Review failures/cooldowns and primary RPC throttling before raising capacity; the small initial budget cannot refresh every token in the cohort. Do not claim the live feed recovered until production produces fresh evidence and, when candidates pass all rules, successful natural alert delivery.
+
+## Cohort refresh (October 31, 2026 follow-up)
+
+The two-token market-cycle budget was the binding limit, not the RPC method. Read-only production diagnostics on October 31 showed:
+
+- Primary source (GeckoTerminal token info): median holder-observation lag 938 min (~15.6 h), p90 ~1,490 min; only 333 of 7,927 observations (4.2%) were inside the 60-minute gate when read.
+- RPC fallback: 38 tokens retained fresh observations, median lag ~0.04 min, but the budget served at most 24 tokens an hour.
+- The radar cohort (unexpired social priority list) held 141 tokens, so keeping it fresh needs about 141 observations an hour.
+- The market job already spends its `infoCalls` budget of 18 slow-source calls per run (~4.5 min at the source's 15 s pace) and runs every 5 minutes. Widening the fallback inside that run would push it past its schedule.
+
+The cohort is now refreshed by a separate `holder-refresh` job that runs every 60 s in the pipeline worker, independently of the market schedule:
+
+- **Three tokens per run** by default (`HOLDER_RPC_COHORT_PER_RUN`, 1..12), about 180/hour, with a **20 s wall-clock stop** (`HOLDER_RPC_COHORT_DEADLINE_MS`, 5..60 s). The 500 ms pacing and 15 s per-token timeout still apply.
+- **Staleness-first order**: candidates are sorted by newest holder observation, oldest first; the persisted cursor only breaks ties between equal ages. Tokens closest to failing the gate are served first.
+- **One query** reads the newest observation per candidate (`DISTINCT ON`), instead of one query per candidate.
+- **Demand is reported**: `holderFallbackCandidates`, `holderFallbackFresh`, `holderFallbackDeferred` (stale but unserved) and `holderFallbackDeadlineHit`. The job logs one `holder_refresh_complete` line per run with these counters.
+
+The market run still tops up at most two price-lane tokens outside the cohort (`HOLDER_RPC_FALLBACK_PER_RUN`, `HOLDER_RPC_FALLBACK_DEADLINE_MS`), so the two jobs do not compete for the same budget. The 60-minute holder and 15-minute price gates, provenance rules, per-token 30-minute cooldown and 15-minute provider cooldown are unchanged.
+
+Rollout checks: the queue has one consumer; `holder_refresh_complete` appears about once a minute with three attempts; `holderFallbackDeferred` trends to zero (a persistent positive value means demand exceeds the budget — raise the budget or shrink the cohort); `recentSocial` holder freshness rises in `research:coverage`; throttling stays low. Holder freshness alone is not a publication signal.
+
+Known limits: the cohort is capped at 200 tokens, so sustained demand above ~180/hour leaves some tokens past the gate; a cohort token that pumps above the early cap keeps its slot until the next social scan; the two jobs share one progress row and can rarely attempt the same token at once; holder counts include pool accounts.

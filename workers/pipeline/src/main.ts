@@ -23,6 +23,7 @@ import { makeRadarSafetySource } from './radarSafetyEvidence';
 import { makeTradeabilitySource } from './tradeabilityEvidence';
 import { deliverEarlyRadarTelegram, telegramConfigFromEnv, TelegramBotApiTransport } from './telegram';
 import {makeHolderRpcSource} from './holderRpc';
+import {refreshRadarHolders} from './holderFallback';
 import {deliverTelegramFeedHealth} from './telegramHealth';
 import { syncWyntraxHoldings } from './wyntraxHoldings';
 import { deliverWyntraxMembership } from './wyntraxMembership';
@@ -116,6 +117,7 @@ async function main(): Promise<void> {
     await queues.scheduleNarrativeIngestion(tregConfig?.intervalMs);
     await queues.scheduleTokenResolution();
     await queues.scheduleMarketData();
+    await queues.scheduleHolderRefresh();
     await queues.scheduleWalletSync();
     await queues.schedulePositionMonitor();
     await queues.scheduleWalletFunding();
@@ -154,6 +156,15 @@ async function main(): Promise<void> {
     new Worker(QUEUE_NAMES.tokenResolution, async () => JSON.stringify({ mentionLinks: await attributeNarrativeMentions(db), ...(await resolveTokens(db, undefined, { safety: radarSafety, tradeability })), social: await scanSocialTokens(db, { quotes: marketDeps?.quotes ?? null, safety: radarSafety, tradeability }).catch(() => 'social scan failed') }), { connection, concurrency: 1 }),
     // One refresh at a time: the sources are rate limited per process.
     new Worker(QUEUE_NAMES.marketData, async () => (marketDeps ? JSON.stringify(await refreshMarketData(db, marketDeps)) : 'disabled'), { connection, concurrency: 1 }),
+    // Radar-cohort holders need a 60-minute gate, but the market run is already close to its
+    // 5-minute schedule. Refresh a few cohort tokens a minute instead of lengthening that run.
+    new Worker(QUEUE_NAMES.holderRefresh, async () => {
+      const source = marketDeps?.holderFallback ?? null;
+      if (!source) return 'disabled';
+      const summary = await refreshRadarHolders(db, source);
+      console.log(JSON.stringify({ msg: 'holder_refresh_complete', ...summary }));
+      return JSON.stringify(summary);
+    }, { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletSync, async () => (syncDeps ? JSON.stringify(await syncWalletWebhook(db, syncDeps.client, syncDeps.cfg)) : 'not configured'), { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletFunding, async () => {
       const ingest = historyRpc ? await ingestWalletFunding(db, historyRpc) : null;

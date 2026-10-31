@@ -19,6 +19,7 @@ export const QUEUE_NAMES = {
   tokenResolution: 'token-resolution',
   aiAnalysis: 'ai-analysis',
   marketData: 'market-data',
+  holderRefresh: 'holder-refresh',
   walletSync: 'wallet-sync',
   walletFunding: 'wallet-funding',
   walletDiscovery: 'wallet-discovery',
@@ -118,6 +119,7 @@ export function createQueues(connection: Redis) {
   const tokenResolution = new Queue(QUEUE_NAMES.tokenResolution, { connection });
   const aiAnalysis = new Queue(QUEUE_NAMES.aiAnalysis, { connection });
   const marketData = new Queue(QUEUE_NAMES.marketData, { connection });
+  const holderRefresh = new Queue(QUEUE_NAMES.holderRefresh, { connection });
   const walletSync = new Queue(QUEUE_NAMES.walletSync, { connection });
   const walletFunding = new Queue(QUEUE_NAMES.walletFunding, { connection });
   const walletDiscovery = new Queue(QUEUE_NAMES.walletDiscovery, { connection });
@@ -142,6 +144,7 @@ export function createQueues(connection: Redis) {
     tokenResolution,
     aiAnalysis,
     marketData,
+    holderRefresh,
     walletSync,
     walletFunding,
     walletDiscovery,
@@ -198,6 +201,9 @@ export function createQueues(connection: Redis) {
       walletDiscovery.upsertJobScheduler('discover', { every: everyMs }, { name: 'discover', data: {}, opts: { attempts: 1, ...RETAIN } }),
     scheduleMarketData: (everyMs = 5 * 60_000) =>
       marketData.upsertJobScheduler('refresh', { every: everyMs }, { name: 'refresh', data: {}, opts: { attempts: 1, ...RETAIN } }),
+    /** Keeps radar-cohort holder observations inside the 60-minute gate independently of the market run. */
+    scheduleHolderRefresh: (everyMs = 60_000) =>
+      holderRefresh.upsertJobScheduler('refresh', { every: everyMs }, { name: 'refresh', data: {}, opts: { attempts: 1, ...RETAIN_SHORT } }),
     scheduleAiAnalysis: (everyMs = 5 * 60_000) =>
       aiAnalysis.upsertJobScheduler('analyze', { every: everyMs }, { name: 'analyze', data: {}, opts: { attempts: 1, ...RETAIN } }),
     scheduleTokenResolution: (everyMs = 10 * 60_000) =>
