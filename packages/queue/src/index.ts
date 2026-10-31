@@ -228,7 +228,7 @@ export function createQueues(connection: Redis) {
     /** Waiting, active, failed and delayed job counts for every queue, for the admin status view. */
     counts: async (): Promise<Record<string, QueueCounts>> => {
       const out: Record<string, QueueCounts> = {};
-      for (const q of [walletEvents, aiScreening, execution, walletIntelligence, narrativeIngestion, tokenResolution, aiAnalysis, marketData, walletSync, walletFunding, walletDiscovery, positionMonitor, entryFanOut, exitFanOut, portfolioSnapshots, outcomeTracking, notificationDispatch, realtimePublish, telegramDelivery, tokenDiscovery.queue, wyntraxHoldings, wyntraxMembership]) {
+      for (const q of [walletEvents, aiScreening, execution, walletIntelligence, narrativeIngestion, tokenResolution, aiAnalysis, marketData, holderRefresh, walletSync, walletFunding, walletDiscovery, positionMonitor, entryFanOut, exitFanOut, portfolioSnapshots, outcomeTracking, notificationDispatch, realtimePublish, telegramDelivery, tokenDiscovery.queue, wyntraxHoldings, wyntraxMembership]) {
         const c = await q.getJobCounts('waiting', 'active', 'failed', 'delayed');
         let consumers: number | undefined;
         try { consumers = (await q.getWorkers()).length; } catch { consumers = undefined; } // unknown, not zero, when Redis will not say
@@ -239,7 +239,7 @@ export function createQueues(connection: Redis) {
     /** Small retained-job sample. Never return job payloads, raw error messages or credentials. */
     health:async():Promise<Record<string,QueueHealth>>=>{
       const out:Record<string,QueueHealth>={};
-      await Promise.all([walletEvents,walletIntelligence,walletSync,marketData,aiAnalysis,narrativeIngestion].map(async q=>{
+      await Promise.all([walletEvents,walletIntelligence,walletSync,marketData,holderRefresh,aiAnalysis,narrativeIngestion].map(async q=>{
         const [completed,failed]=await Promise.all([q.getJobs(['completed'],0,0),q.getJobs(['failed'],0,0)]);
         const job=completed[0];let value:unknown=job?.returnvalue;
         if(typeof value==='string'){try{value=JSON.parse(value);}catch{value=null;}}
@@ -252,7 +252,7 @@ export function createQueues(connection: Redis) {
         out[q.name]={lastCompletedAt:job?.finishedOn?new Date(job.finishedOn).toISOString():null,lastFailedAt:failed[0]?.finishedOn?new Date(failed[0].finishedOn).toISOString():null,lastRun:Object.keys(run).length?run:null};
       }));return out;
     },
-    close: async () => { await Promise.all([walletEvents.close(), aiScreening.close(), execution.close(), walletIntelligence.close(), narrativeIngestion.close(), tokenResolution.close(), aiAnalysis.close(), marketData.close(), walletSync.close(), walletFunding.close(), walletDiscovery.close(), positionMonitor.close(), entryFanOut.close(), exitFanOut.close(), portfolioSnapshots.close(), outcomeTracking.close(), notificationDispatch.close(), realtimePublish.close(), telegramDelivery.close(), tokenDiscovery.queue.close(), wyntraxHoldings.close(), wyntraxMembership.close()]); },
+    close: async () => { await Promise.all([walletEvents.close(), aiScreening.close(), execution.close(), walletIntelligence.close(), narrativeIngestion.close(), tokenResolution.close(), aiAnalysis.close(), marketData.close(), holderRefresh.close(), walletSync.close(), walletFunding.close(), walletDiscovery.close(), positionMonitor.close(), entryFanOut.close(), exitFanOut.close(), portfolioSnapshots.close(), outcomeTracking.close(), notificationDispatch.close(), realtimePublish.close(), telegramDelivery.close(), tokenDiscovery.queue.close(), wyntraxHoldings.close(), wyntraxMembership.close()]); },
   };
 }
 export type Queues = ReturnType<typeof createQueues>;
