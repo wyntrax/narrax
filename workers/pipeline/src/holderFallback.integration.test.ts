@@ -7,6 +7,7 @@ import {assertTestDatabase} from '../../../scripts/test-database';
 import {refreshHolderFallback,refreshRadarHolders,HOLDER_FALLBACK_KEY} from './holderFallback';
 import {refreshMarketData} from './marketData';
 import type {HolderRpcResult} from './holderRpc';
+import {makeFailoverHolderSource} from './holderRpcFailover';
 import {createEarlyRadarAlert} from './earlyRadarTracking';
 import {deliverEarlyRadarTelegram,telegramCursorKey} from './telegram';
 import {storeMarketSnapshot} from './marketSnapshot';
@@ -124,6 +125,15 @@ it('refreshes the radar cohort independently of which tokens the market run pric
   expect(rpc.get).toHaveBeenCalledWith(t.mint);
   expect(await db.tokenHolderMetric.count({where:{tokenId:t.id}})).toBe(1);
  }finally{await db.systemSetting.deleteMany({where:{key:SOCIAL_INFO_PRIORITY_KEY}});}
+});
+it('retries a throttled primary on the fallback and reports the failover',async()=>{
+ const t=tokens[0]!;
+ const primary={get:vi.fn(async():Promise<HolderRpcResult>=>({ok:false,reason:'RATE_LIMITED'}))};
+ const rpc=makeFailoverHolderSource(primary,source(),{cooldownMs:60_000});
+ const result=await refreshHolderFallback(db,rpc,[t],()=>now,budget);
+ expect(result).toMatchObject({holderFallbackAttempts:1,holderFallbackWritten:1,holderFallbackFailovers:1,holderFallbackThrottled:0});
+ expect(result.holderFallbackPrimaryCooldownUntil).not.toBeNull();
+ expect(primary.get).toHaveBeenCalledWith(t.mint);
 });
 it('does nothing for the radar cohort when the priority list has expired',async()=>{
  await saveSocialPriority(db,[tokens[3]!.id],now);

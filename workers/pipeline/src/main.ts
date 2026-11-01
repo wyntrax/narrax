@@ -23,6 +23,7 @@ import { makeRadarSafetySource } from './radarSafetyEvidence';
 import { makeTradeabilitySource } from './tradeabilityEvidence';
 import { deliverEarlyRadarTelegram, telegramConfigFromEnv, TelegramBotApiTransport } from './telegram';
 import {makeHolderRpcSource} from './holderRpc';
+import {makeFailoverHolderSource} from './holderRpcFailover';
 import {refreshRadarHolders} from './holderFallback';
 import {deliverTelegramFeedHealth} from './telegramHealth';
 import { syncWyntraxHoldings } from './wyntraxHoldings';
@@ -68,11 +69,24 @@ async function main(): Promise<void> {
   const realChain: ChainPorts | null = process.env.HELIUS_RPC_URL ? chain : null;
   if (!tregConfig) console.log('no narrative providers configured: set TREG_NARRATIVE_ENABLED and Treg configuration to enable social ingestion');
 
+  // Holder enumeration has its own endpoint chain: the main RPC, then a dedicated holder
+  // key (or the discovery reserve when no dedicated key is set). A 429 or unreachable
+  // primary is retried on the fallback for the same token, so a holder burst cannot
+  // exhaust the discovery reserve by accident.
+  const holderRpc = (() => {
+    const primary = process.env.HELIUS_RPC_URL?.trim();
+    if (!primary || process.env.HOLDER_RPC_FALLBACK_ENABLED === 'false') return null;
+    const secondary = process.env.HOLDER_RPC_FALLBACK_URL?.trim() || process.env.HELIUS_RPC_FALLBACK_URL?.trim();
+    if (!secondary || secondary === primary) return makeHolderRpcSource(primary);
+    console.log('holder rpc failover: enabled');
+    return makeFailoverHolderSource(makeHolderRpcSource(primary), makeHolderRpcSource(secondary));
+  })();
+
   // Market data comes from free public APIs that need no key. Set MARKET_DATA_ENABLED=false to turn the job off.
   // With it off, no prices, holders or risk rows are written, so token resolution ranks nothing (fail closed).
   const marketDeps = process.env.MARKET_DATA_ENABLED === 'false' ? null : (() => {
     const gecko = new GeckoTerminalSource({ baseUrl: process.env.GECKOTERMINAL_BASE_URL });
-      return { holderFallback:process.env.HOLDER_RPC_FALLBACK_ENABLED!=='false'&&process.env.HELIUS_RPC_URL?makeHolderRpcSource(process.env.HELIUS_RPC_URL):null,metadata:process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: process.env.HELIUS_RPC_URL ? makeDeveloperHoldingSource(db, new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 })) : null };
+      return { holderFallback:holderRpc,metadata:process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: process.env.HELIUS_RPC_URL ? makeDeveloperHoldingSource(db, new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 })) : null };
   })();
   if (!marketDeps) console.log('market data disabled');
   // Bounded public RugCheck lookups for early-radar candidates only. Missing/failed data stays UNKNOWN.

@@ -69,3 +69,19 @@ The market run still tops up at most two price-lane tokens outside the cohort (`
 Rollout checks: the queue has one consumer; `holder_refresh_complete` appears about once a minute with three attempts; `holderFallbackDeferred` trends to zero (a persistent positive value means demand exceeds the budget — raise the budget or shrink the cohort); `recentSocial` holder freshness rises in `research:coverage`; throttling stays low. Holder freshness alone is not a publication signal.
 
 Known limits: the cohort is capped at 200 tokens, so sustained demand above ~180/hour leaves some tokens past the gate; a cohort token that pumps above the early cap keeps its slot until the next social scan; the two jobs share one progress row and can rarely attempt the same token at once; holder counts include pool accounts.
+
+## Endpoint failover (November 1, 2026)
+
+The primary Helius project hit its usage ceiling (`HTTP 429`, body `max usage reached`) at the October 30 -> 31 UTC boundary. The holder path had no secondary endpoint, so every fallback attempt was throttled while the discovery reserve answered normally.
+
+Holder enumeration now uses an endpoint chain:
+
+- `HELIUS_RPC_URL` (primary), then `HOLDER_RPC_FALLBACK_URL` when set, otherwise `HELIUS_RPC_FALLBACK_URL`. A dedicated holder key keeps holder bursts out of the discovery reserve.
+- On `RATE_LIMITED` (HTTP 429 / JSON-RPC -32429) or `UNAVAILABLE`, the **whole token** is retried on the fallback; a partial enumeration is discarded, never completed by the other endpoint.
+- The primary is skipped for **15 minutes** after a provider-level rejection. The cooldown is in-process and shared by the market top-up and the `holder-refresh` job; a restart costs one rejected probe.
+- `STALE`, `INVALID_OR_INCOMPLETE` and `TOO_LARGE` do not swing: those are data properties, not endpoint failures.
+- Counters `holderFallbackFailovers` and `holderFallbackPrimaryCooldownUntil` appear in the market summary and the `holder_refresh_complete` log.
+
+The chain does **not** cover token metadata, developer holdings or wallet history; those still use `HELIUS_RPC_URL` only. Restoring the primary project (or swapping keys) remains necessary for those paths.
+
+Rollout: add the dedicated key to the host `.env` as `HOLDER_RPC_FALLBACK_URL`, deploy, then confirm `holder rpc failover: enabled` at worker start and `holderFallbackFailovers > 0` (or `holderFallbackPrimaryCooldownUntil` set) in `holder_refresh_complete`. Holder freshness must then rise; the 60-minute gate itself is unchanged.
