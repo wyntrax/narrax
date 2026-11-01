@@ -1,7 +1,7 @@
 import {Prisma,type PrismaClient} from '@narra/database';
 import {WSOL_MINT} from '@narra/market-data';
 import {z} from 'zod';
-import type {HolderRpcSource} from './holderRpc';
+import type {HolderRpcResult,HolderRpcSource} from './holderRpc';
 import {RADAR_EVIDENCE_LIMITS} from '@narra/token-intel';
 import {readSocialPriority} from './researchDiagnostics';
 
@@ -84,6 +84,7 @@ export async function refreshHolderFallback(
  const out={
   holderFallbackAttempts:0,holderFallbackWritten:0,holderFallbackUnknown:0,holderFallbackThrottled:0,
   holderFallbackCandidates:0,holderFallbackFresh:0,holderFallbackDeferred:0,holderFallbackDeadlineHit:0,
+  holderFallbackFailovers:0,holderFallbackPrimaryCooldownUntil:source.primaryCooldownUntil?.()??null,
  };
  const now=clock(),started=Date.now(),row=await db.systemSetting.findUnique({where:{key:HOLDER_FALLBACK_KEY}});
  const parsed=Progress.safeParse(row?.value),state=parsed.success?parsed.data:null;
@@ -121,7 +122,8 @@ export async function refreshHolderFallback(
   out.holderFallbackAttempts++;persisted[token.id]=checked.toISOString();cursorValue=token.id;
   const claim={cursor:cursorValue,attempts:persisted,cooldownUntil};
   await db.systemSetting.upsert({where:{key:HOLDER_FALLBACK_KEY},create:{key:HOLDER_FALLBACK_KEY,value:claim},update:{value:claim}});
-  const evidence=await source.get(token.mint).catch(()=>({ok:false as const,reason:'UNAVAILABLE' as const}));
+  const evidence=await source.get(token.mint).catch(():HolderRpcResult=>({ok:false,reason:'UNAVAILABLE'}));
+  if(evidence.failedOver)out.holderFallbackFailovers++;
   const retrievedAt=clock();
   if(evidence.ok&&evidence.mint===token.mint&&+evidence.sourceAt<=+retrievedAt&&+retrievedAt-+evidence.sourceAt<=RADAR_EVIDENCE_LIMITS.holdersMaxAgeMs){
    // Do not borrow developer ownership or smart-wallet counts from an older observation.
@@ -137,5 +139,6 @@ export async function refreshHolderFallback(
  }
  // Demand this run could not serve: still stale, not cooling down, not attempted now.
  out.holderFallbackDeferred=ordered.filter(t=>!isFresh(t.id)&&!attempts[t.id]&&!persisted[t.id]).length;
+ out.holderFallbackPrimaryCooldownUntil=source.primaryCooldownUntil?.()??null;
  return out;
 }

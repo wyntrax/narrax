@@ -8,8 +8,13 @@ const Slot=z.number().int().nonnegative().safe();
 const Account=z.object({owner:z.string(),executable:z.literal(false),data:z.tuple([z.string(),z.literal('base64')])});
 const Mint=z.object({context:z.object({slot:Slot}),value:Account.nullable()});
 const Accounts=z.object({context:z.object({slot:Slot}),value:z.array(z.object({pubkey:z.string(),account:Account})).max(HOLDER_RPC_LIMITS.maxAccounts)});
-export type HolderRpcResult={ok:true;mint:string;holders:number;top10Pct:number;sourceAt:Date;slot:number;accounts:number;program:string}|{ok:false;reason:'RATE_LIMITED'|'UNAVAILABLE'|'INVALID_OR_INCOMPLETE'|'STALE'|'TOO_LARGE'};
-export interface HolderRpcSource{get(mint:string):Promise<HolderRpcResult>}
+export type HolderRpcEndpoint='primary'|'fallback';
+export type HolderRpcResult=({ok:true;mint:string;holders:number;top10Pct:number;sourceAt:Date;slot:number;accounts:number;program:string}|{ok:false;reason:'RATE_LIMITED'|'UNAVAILABLE'|'INVALID_OR_INCOMPLETE'|'STALE'|'TOO_LARGE'})&{endpoint?:HolderRpcEndpoint;failedOver?:boolean};
+export interface HolderRpcSource{
+ get(mint:string):Promise<HolderRpcResult>;
+ /** Present only on a failover source: the primary endpoint is skipped until this ISO time. */
+ primaryCooldownUntil?():string|null;
+}
 
 /** Complete, bounded finalized account enumeration. No indexed-provider retrieval timestamp is used as evidence. */
 export function makeHolderRpcSource(url:string,opts:{fetch?:typeof fetch;now?:()=>Date;timeoutMs?:number;minIntervalMs?:number}={}):HolderRpcSource{
