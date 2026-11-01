@@ -5,9 +5,10 @@
 #   DEPLOY_PATH   directory on this host holding .env, docker/docker-compose.prod.yml and docker/docker-compose.deploy.yml
 #   REGISTRY_USER optional; when set, a registry token is read from stdin and used to pull
 #
-# Order: pull -> start Postgres and Redis -> run migrations -> start api, worker, executor -> health check.
-# If the health check fails the app containers go back to the previously recorded image. Database migrations are NOT
-# reverted: they only move forward, so a migration must stay compatible with the previous release (add first, remove later).
+# Order: pull -> start Postgres and Redis -> run migrations -> start api, worker, executor -> health check -> prune
+# superseded images. If the health check fails the app containers go back to the previously recorded image. Database
+# migrations are NOT reverted: they only move forward, so a migration must stay compatible with the previous release
+# (add first, remove later).
 set -euo pipefail
 
 log() { printf '[deploy] %s\n' "$*"; }
@@ -81,6 +82,14 @@ fail() {
 }
 
 log "deploying $NARRA_IMAGE (previous: ${PREVIOUS:-none})"
+# Every release adds about 4.7 GB of layers and nothing else removes superseded images, so the disk fills after a few
+# dozen releases and layer extraction fails mid-deploy (2026-10-31). Prune before pulling only when space is short. The
+# image in use is always protected: Docker never removes an image referenced by a container.
+free_gb="$(df -Pk "$DEPLOY_PATH" | awk 'NR==2 {print int($4/1048576)}')"
+if [ "${free_gb:-0}" -lt 15 ]; then
+  log "only ${free_gb:-0} GB free; pruning unused images older than 24h before pulling"
+  docker image prune -af --filter "until=24h" >/dev/null 2>&1 || log "pre-pull image prune skipped"
+fi
 # Registry connections can reset mid-layer. Bound each attempt and finish pulling
 # before migrations or service replacement; completed layers are reused by Docker.
 pulled=0
@@ -126,3 +135,6 @@ done
 printf '%s\n' "$NARRA_IMAGE" > "$STATE_DIR/current_image"
 printf '%s\n' "$NARRA_IMAGE" > "$STATE_DIR/personal_research_image"
 log "deployed $NARRA_IMAGE"
+# Keep a week of rollback candidates and drop the rest. A prune failure must never turn a healthy deploy into a failed one.
+log "pruning unused images older than 7 days"
+docker image prune -af --filter "until=168h" >/dev/null 2>&1 || log "image prune skipped"
