@@ -193,6 +193,14 @@ describe.skipIf(!up)('market data refresh on a real Postgres', () => {
     await refreshMarketData(db, { quotes: quotes as never, info: null, launches: null }, new Date(NOW.getTime() + 3 * H), { maxTokens: cap });
     expect((await tok(candidate.mint)).metrics).toHaveLength(1);
   });
+  it('caps placeholder retries so ancient UNKNOWN tokens cannot crowd the general lane', async () => {
+    const mints = Array.from({ length: 7 }, (_, i) => mint(`UNK${i}`));
+    for (const m of mints) await db.token.create({ data: { mint: m, symbol: 'UNKNOWN', name: 'Unknown' } });
+    const quotes = { name: 'probe', getSnapshots: async (ms: string[]) => new Map(ms.map((m) => [m, snapshot(m, { liquidityUsd: 300_000, priceUsd: 0.01 })])) };
+    await refreshMarketData(db, { quotes: quotes as never, info: null, launches: null }, new Date(NOW.getTime() + 4 * H), ROOMY);
+    const priced = await db.tokenMetric.findMany({ where: { token: { mint: { in: mints } } }, select: { tokenId: true } });
+    expect(new Set(priced.map((p) => p.tokenId)).size).toBe(5);
+  });
   it('keeps cached holder source time and excludes stale counts from freshly computed risk',async()=>{
     const token=await db.token.create({data:{mint:mint('CACHED'),symbol:'CACHE',name:'Cached holders',createdOnChainAt:NOW}}),sourceAt=ago(24);
     const cached=new FixtureMarketData({snapshots:[snapshot(token.mint)],info:[info(token.mint,{holders:5919,top10Pct:88.83,holdersUpdatedAt:sourceAt})]});
