@@ -22,6 +22,10 @@ export const MARKET_DATA_LIMITS = {
   maxEarlyRadarTokensPerRun: 100,
   /** Rotating coverage for completed wallet-discovery scans, within the same total cap. */
   maxDiscoveryTokensPerRun: 25,
+  /** Never-priced narrative candidates: newest first, small enough not to starve priced tokens. */
+  maxUnpricedTokensPerRun: 10,
+  /** Placeholder tokens with no resolved symbol: bounded retries for metadata backfill. */
+  maxUnknownTokensPerRun: 5,
   /** Recent tracked-wallet tokens rotate independently of the general backlog. */
   maxWalletTokensPerRun: 10,
   /** Slow-source calls per run. At the 15 s GeckoTerminal pace this covers about 4.5 min, inside the 5-minute schedule. */
@@ -214,16 +218,21 @@ export async function refreshMarketData(
   const reservedIds = [...priorIds, ...launches.map(t => t.id)];
   // A token with no price row at all is invisible to every screen, and the id-ordered cap below would take older ids
   // first, so a freshly linked candidate could age out of the set before its first reading. Give unpriced narrative
-  // candidates a first price ahead of the general set, newest token id first. Reserve room for established tokens too.
-  const unpriced = reservedIds.length >= cap ? [] : await db.token.findMany({
+  // candidates a first price ahead of the general set, newest token id first. The budget is deliberately small: most
+  // never-priced narrative tokens have no DEX pair and would otherwise consume half of every run without a write.
+  const unpricedBudget = reservedIds.length >= cap ? 0 : Math.min(L.maxUnpricedTokensPerRun, Math.ceil((cap - reservedIds.length) / 2));
+  const unpriced = unpricedBudget ? await db.token.findMany({
     where: { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: reservedIds }, metrics: { none: {} }, narratives: { some: {} } },
-    orderBy: { id: 'desc' }, take: Math.ceil((cap - reservedIds.length) / 2), select: tokenSelect,
-  });
+    orderBy: { id: 'desc' }, take: unpricedBudget, select: tokenSelect,
+  }) : [];
   const takenIds = [...reservedIds, ...unpriced.map(t => t.id)];
+  // Priced/active tokens rotate by id. Placeholder tokens with no resolved symbol are a separate, tiny lane:
+  // production holds tens of thousands of them and almost none has a DEX pair, so an unbounded UNKNOWN branch
+  // spends the general budget on NO_MATCHING_PAIR. Keep a few retries for metadata backfill.
   const generalWhere: Prisma.TokenWhereInput = {
-      blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenIds },
+      blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenIds }, symbol: { not: 'UNKNOWN' },
       OR: [
-         { symbol: 'UNKNOWN' }, { mint: { in: launchMints } },
+         { mint: { in: launchMints } },
          // Retry young pools even when the first quote was unavailable and the
          // next launch page no longer contains them. Age here is a pool proxy.
          { createdOnChainAt: { gte: new Date(now.getTime() - L.activeWindowMs), lte: now } },
@@ -233,18 +242,27 @@ export async function refreshMarketData(
         { narratives: { some: {} } }, { positions: { some: {} } },
       ],
     };
+  const unknownWhere: Prisma.TokenWhereInput = { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenIds }, symbol: 'UNKNOWN' };
   const generalCursor = await readCursor(db, GENERAL_PRICE_CURSOR_KEY);
   const remaining = cap - takenIds.length;
-  const rest = remaining <= 0 ? [] : await db.token.findMany({
+  const unknownBudget = Math.min(L.maxUnknownTokensPerRun, remaining);
+  // Newest placeholders first: the recent ones are the plausible metadata backfills. Ancient UNKNOWN tokens
+  // never rotate into this lane, so they cannot crowd out priced tokens again.
+  const unknown = unknownBudget > 0 ? await db.token.findMany({
+    where: unknownWhere, orderBy: { id: 'desc' }, take: unknownBudget, select: tokenSelect,
+  }) : [];
+  const knownRemaining = remaining - unknown.length;
+  const rest = knownRemaining <= 0 ? [] : await db.token.findMany({
     where: { AND: [generalWhere, ...(generalCursor ? [{ id: { gt: generalCursor } }] : [])] },
-    orderBy: { id: 'asc' }, take: remaining, select: tokenSelect,
+    orderBy: { id: 'asc' }, take: knownRemaining, select: tokenSelect,
   });
-  if (generalCursor && rest.length < remaining) rest.push(...await db.token.findMany({
+  if (generalCursor && rest.length < knownRemaining) rest.push(...await db.token.findMany({
     where: { AND: [generalWhere, { id: { lte: generalCursor } }] },
-    orderBy: { id: 'asc' }, take: remaining - rest.length, select: tokenSelect,
+    orderBy: { id: 'asc' }, take: knownRemaining - rest.length, select: tokenSelect,
   }));
-  out.generalTokensSelected = rest.length;
-  const tokens = [...priority, ...discovery, ...wallets, ...social, ...launches, ...unpriced, ...rest];
+  const generalTokens = [...unknown, ...rest];
+  out.generalTokensSelected = generalTokens.length;
+  const tokens = [...priority, ...discovery, ...wallets, ...social, ...launches, ...unpriced, ...generalTokens];
   out.tokensConsidered = tokens.length;
 
   // 4. Prices. One batch failing does not lose the others, and a 429 stops the step.
@@ -272,7 +290,7 @@ export async function refreshMarketData(
     // provider throttling leaves this batch and all unattempted batches in place.
     for (const mint of mints.slice(i, i + L.quoteBatch)) attempted.add(mint);
   }
-  const lanes = { outcomes: priority, discovery, wallets, social, launches, unpriced, general: rest };
+  const lanes = { outcomes: priority, discovery, wallets, social, launches, unpriced, general: generalTokens };
   for (const lane of Object.keys(lanes) as PriceCoverageLane[]) {
     const counts = out.priceCoverage[lane];
     counts.selected = lanes[lane].length;
