@@ -7,7 +7,7 @@ import {discoveryPriceCandidates} from './walletDiscovery';
 import { storeMarketSnapshot } from './marketSnapshot';
 import { SOL_HISTORY_PREFIX } from './walletResearchEvidence';
 import { COVERAGE_LIMITS, readSocialPriority, saveResearchDiagnostics, SOCIAL_INFO_CURSOR_KEY } from './researchDiagnostics';
-import {refreshHolderFallback} from './holderFallback';
+import {refreshHolderFallback,type HolderFailureReasons} from './holderFallback';
 import type {HolderRpcSource} from './holderRpc';
 import {EARLY_RULES} from '@narra/token-intel';
 
@@ -94,6 +94,8 @@ export interface MarketDataSummary {
   holderFallbackFailovers: number;
   /** ISO time the primary endpoint is skipped until, or null when it is in use. */
   holderFallbackPrimaryCooldownUntil: string | null;
+  /** Per-reason failure counts for attempts that produced no fresh observation. */
+  holderFallbackReasons: HolderFailureReasons;
   riskRowsWritten: number;
   solUsd: number | null;
   errors: string[];
@@ -114,7 +116,7 @@ export async function refreshMarketData(
 ): Promise<MarketDataSummary> {
   const L = MARKET_DATA_LIMITS;
   const emptyCoverage = (): PriceCoverageCounts => ({ selected: 0, written: 0, unavailable: 0, failed: 0, notRequested: 0 });
-  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, priceCoverage: { outcomes: emptyCoverage(), discovery: emptyCoverage(), wallets: emptyCoverage(), social: emptyCoverage(), launches: emptyCoverage(), unpriced: emptyCoverage(), general: emptyCoverage() }, priceOmissions: {}, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, holderFallbackAttempts:0,holderFallbackWritten:0,holderFallbackUnknown:0,holderFallbackThrottled:0,holderFallbackCandidates:0,holderFallbackFresh:0,holderFallbackDeferred:0,holderFallbackDeadlineHit:0,holderFallbackFailovers:0,holderFallbackPrimaryCooldownUntil:null,riskRowsWritten: 0, solUsd: null, errors: [] };
+  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, priceCoverage: { outcomes: emptyCoverage(), discovery: emptyCoverage(), wallets: emptyCoverage(), social: emptyCoverage(), launches: emptyCoverage(), unpriced: emptyCoverage(), general: emptyCoverage() }, priceOmissions: {}, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, holderFallbackAttempts:0,holderFallbackWritten:0,holderFallbackUnknown:0,holderFallbackThrottled:0,holderFallbackCandidates:0,holderFallbackFresh:0,holderFallbackDeferred:0,holderFallbackDeadlineHit:0,holderFallbackFailovers:0,holderFallbackPrimaryCooldownUntil:null,holderFallbackReasons:{RATE_LIMITED:0,UNAVAILABLE:0,INVALID_OR_INCOMPLETE:0,STALE:0,TOO_LARGE:0},riskRowsWritten: 0, solUsd: null, errors: [] };
   if(deps.metadata){try{await refreshTokenMetadata(db,deps.metadata,now);}catch(e){out.errors.push(errText('token metadata',e));}}
 
   // 1. SOL/USD, kept in one settings row so every later consumer reads the same number.

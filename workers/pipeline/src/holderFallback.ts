@@ -41,6 +41,10 @@ export function holderFallbackBudget(env:NodeJS.ProcessEnv=process.env):HolderFa
  };
 }
 
+export type HolderFailureReason=Extract<HolderRpcResult,{ok:false}>['reason'];
+export type HolderFailureReasons=Record<HolderFailureReason,number>;
+const noHolderFailures=():HolderFailureReasons=>({RATE_LIMITED:0,UNAVAILABLE:0,INVALID_OR_INCOMPLETE:0,STALE:0,TOO_LARGE:0});
+
 export interface HolderCandidate{id:string;mint:string}
 const Progress=z.object({cursor:z.string(),cooldownUntil:z.string().datetime().nullable(),attempts:z.record(z.string().datetime())});
 
@@ -85,6 +89,7 @@ export async function refreshHolderFallback(
   holderFallbackAttempts:0,holderFallbackWritten:0,holderFallbackUnknown:0,holderFallbackThrottled:0,
   holderFallbackCandidates:0,holderFallbackFresh:0,holderFallbackDeferred:0,holderFallbackDeadlineHit:0,
   holderFallbackFailovers:0,holderFallbackPrimaryCooldownUntil:source.primaryCooldownUntil?.()??null,
+  holderFallbackReasons:noHolderFailures(),
  };
  const now=clock(),started=Date.now(),row=await db.systemSetting.findUnique({where:{key:HOLDER_FALLBACK_KEY}});
  const parsed=Progress.safeParse(row?.value),state=parsed.success?parsed.data:null;
@@ -133,7 +138,12 @@ export async function refreshHolderFallback(
     await tx.systemSetting.create({data:{key:`research.holderMetric.${metric.id}`,value}});
     const key=`research.holders.${token.id}`;await tx.systemSetting.upsert({where:{key},create:{key,value},update:{value}});
    });out.holderFallbackWritten++;
-  }else{out.holderFallbackUnknown++;if(!evidence.ok&&['RATE_LIMITED','UNAVAILABLE'].includes(evidence.reason)){cooldownUntil=new Date(+retrievedAt+HOLDER_FALLBACK_LIMITS.providerCooldownMs).toISOString();out.holderFallbackThrottled++;}}
+  }else{
+   out.holderFallbackUnknown++;
+   const reason:HolderFailureReason=evidence.ok?'INVALID_OR_INCOMPLETE':evidence.reason;
+   out.holderFallbackReasons[reason]++;
+   if(reason==='RATE_LIMITED'||reason==='UNAVAILABLE'){cooldownUntil=new Date(+retrievedAt+HOLDER_FALLBACK_LIMITS.providerCooldownMs).toISOString();out.holderFallbackThrottled++;}
+  }
   const value={cursor:cursorValue,attempts:persisted,cooldownUntil};await db.systemSetting.upsert({where:{key:HOLDER_FALLBACK_KEY},create:{key:HOLDER_FALLBACK_KEY,value},update:{value}});
   if(cooldownUntil)break;
  }
