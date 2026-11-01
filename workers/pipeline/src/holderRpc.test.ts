@@ -11,6 +11,18 @@ function fixture(){
  const fetcher=vi.fn(async(_url:unknown,init?:RequestInit)=>{const req=JSON.parse(init!.body as string);return new Response(JSON.stringify({jsonrpc:'2.0',id:req.id,result:responses[req.id-1]}));});
  return {raw,account,rows,responses,fetcher,source:()=>makeHolderRpcSource('https://rpc.example/secret',{fetch:fetcher as typeof fetch,now:()=>now,minIntervalMs:0})};
 }
+/** Token-2022 mint: 82-byte base, zero padding, account-type byte, then TransferFeeConfig TLV. */
+function feeMint(supply:bigint,withheld:bigint){
+ const raw=Buffer.alloc(166+4+108);raw.writeBigUInt64LE(supply,36);raw[45]=1;raw[165]=1;
+ raw.writeUInt16LE(1,166);raw.writeUInt16LE(108,168);raw.writeBigUInt64LE(withheld,166+4+64);
+ return raw;
+}
+function token2022(f:{responses:any[];rows:any[];account:(data:Buffer)=>any},raw:Buffer){
+ const p='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+ f.responses[0].value=f.account(raw);f.responses[2].value=f.account(raw);
+ f.responses[0].value.owner=p;f.responses[2].value.owner=p;for(const r of f.rows)r.account.owner=p;
+ return p;
+}
 it('uses a complete finalized enumeration, validates stable supply, and timestamps from its block',async()=>{
  const f=fixture(),r=await f.source().get(mint);expect(r).toMatchObject({ok:true,holders:12,top10Pct:83.3334,sourceAt:new Date(+now-10000),slot:101,accounts:13});
  expect(f.fetcher).toHaveBeenCalledTimes(4);
@@ -25,6 +37,14 @@ it('counts owners rather than accounts and includes pool-like concentration with
 it('supports Token-2022 base accounts while still requiring supply reconciliation',async()=>{
  const f=fixture(),p='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';f.responses[0].value.owner=p;f.responses[2].value.owner=p;for(const r of f.rows)r.account.owner=p;
  expect(await f.source().get(mint)).toMatchObject({ok:true,program:p});
+});
+it('counts Token-2022 transfer fees withheld by the mint as supply',async()=>{
+ const f=fixture(),p=token2022(f,feeMint(1300n,100n));
+ expect(await f.source().get(mint)).toMatchObject({ok:true,program:p,holders:12,accounts:13});
+});
+it('still refuses withheld fees that supply does not cover',async()=>{
+ const f=fixture();token2022(f,feeMint(1200n,100n));
+ expect(await f.source().get(mint)).toEqual({ok:false,reason:'INVALID_OR_INCOMPLETE'});
 });
 it.each(['missing-account','duplicate','wrong-mint','wrong-program','supply-changed','uninitialized','old-slot','bad-block','future-block','unknown-block'])('refuses %s evidence',async mode=>{
  const f=fixture();
@@ -63,7 +83,7 @@ it('refuses zero supply, unsupported mints, empty or oversized enumerations and 
   if(mode==='program')f.responses[0].value.owner='unknown';
   if(mode==='missing')f.responses[0].value=null;
   if(mode==='empty')f.responses[1].value=[];
-  if(mode==='oversize')f.responses[1].value=Array.from({length:5001},()=>f.rows[0]);
+  if(mode==='oversize')f.responses[1].value=Array.from({length:HOLDER_RPC_LIMITS.maxAccounts+1},()=>f.rows[0]);
   if(mode==='slot')f.responses[2].context.slot=100;
   expect(await f.source().get(mint)).toEqual({ok:false,reason:'INVALID_OR_INCOMPLETE'});
  }

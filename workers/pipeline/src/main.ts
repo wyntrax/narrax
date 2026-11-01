@@ -77,6 +77,9 @@ async function main(): Promise<void> {
     if (process.env.HOLDER_RPC_FALLBACK_ENABLED === 'false') return null;
     const endpoints = holderRpcEndpoints();
     if (!endpoints) return null;
+    const dedicatedPrimary = !!process.env.HOLDER_RPC_URL?.trim();
+    const dedicatedFallback = !!process.env.HOLDER_RPC_FALLBACK_URL?.trim();
+    console.log(`holder rpc endpoints: ${dedicatedPrimary ? 'dedicated' : 'shared'} primary${endpoints.fallback ? ` + ${dedicatedFallback ? 'dedicated' : 'shared'} fallback` : ' only'}`);
     if (!endpoints.fallback) return makeHolderRpcSource(endpoints.primary);
     console.log('holder rpc failover: enabled');
     return makeFailoverHolderSource(makeHolderRpcSource(endpoints.primary), makeHolderRpcSource(endpoints.fallback));

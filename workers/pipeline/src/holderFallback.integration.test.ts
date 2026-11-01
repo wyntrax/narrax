@@ -63,10 +63,10 @@ it('stops before starting work once the wall-clock deadline is spent',async()=>{
 });
 it('keeps failed and future observations unknown and persists provider cooldown',async()=>{
  const rpc=source();rpc.get.mockResolvedValueOnce({ok:false,reason:'RATE_LIMITED'});
- expect(await refreshHolderFallback(db,rpc,tokens,()=>now,budget)).toMatchObject({holderFallbackAttempts:1,holderFallbackWritten:0,holderFallbackThrottled:1});
+ expect(await refreshHolderFallback(db,rpc,tokens,()=>now,budget)).toMatchObject({holderFallbackAttempts:1,holderFallbackWritten:0,holderFallbackThrottled:1,holderFallbackReasons:{RATE_LIMITED:1}});
  expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+5*60000),budget)).toMatchObject({holderFallbackAttempts:0});
  rpc.get.mockImplementation(async mint=>({ok:true,mint,holders:200,top10Pct:30,sourceAt:new Date(+now+3600000),slot:123,accounts:205,program:'test'}));
- expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+16*60000),budget)).toMatchObject({holderFallbackWritten:0,holderFallbackUnknown:2});
+ expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+16*60000),budget)).toMatchObject({holderFallbackWritten:0,holderFallbackUnknown:2,holderFallbackReasons:{INVALID_OR_INCOMPLETE:2}});
  expect(await db.tokenHolderMetric.count({where:{tokenId:{in:tokens.map(t=>t.id)}}})).toBe(0);
 });
 it('cached Gecko refresh cannot relabel newer RPC holder evidence',async()=>{

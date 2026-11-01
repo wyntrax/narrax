@@ -3,7 +3,7 @@ import bs58 from 'bs58';
 import {isSolanaAddress} from '@narra/shared';
 
 const PROGRAMS=['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA','TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'];
-export const HOLDER_RPC_LIMITS={maxBytes:2*1024*1024,maxAccounts:5000,timeoutMs:15000,maxAgeMs:5*60_000,minIntervalMs:500} as const;
+export const HOLDER_RPC_LIMITS={maxBytes:8*1024*1024,maxAccounts:20_000,timeoutMs:15000,maxAgeMs:5*60_000,minIntervalMs:500} as const;
 const Slot=z.number().int().nonnegative().safe();
 const Account=z.object({owner:z.string(),executable:z.literal(false),data:z.tuple([z.string(),z.literal('base64')])});
 const Mint=z.object({context:z.object({slot:Slot}),value:Account.nullable()});
@@ -14,6 +14,20 @@ export interface HolderRpcSource{
  get(mint:string):Promise<HolderRpcResult>;
  /** Present only on a failover source: the primary endpoint is skipped until this ISO time. */
  primaryCooldownUntil?():string|null;
+}
+
+/** Token-2022 keeps withheld transfer fees in the mint, outside every token account, yet inside supply. */
+function mintWithheld(raw:Buffer):bigint{
+ if(raw.length<=166)return 0n;
+ let off=166;
+ while(off+4<=raw.length){
+  const type=raw.readUInt16LE(off),len=raw.readUInt16LE(off+2);
+  if(off+4+len>raw.length)break;
+  // TransferFeeConfig: config authority (32), withdraw authority (32), withheld amount (8).
+  if(type===1&&len>=72)return raw.readBigUInt64LE(off+4+64);
+  off+=4+len;
+ }
+ return 0n;
 }
 
 /** Complete, bounded finalized account enumeration. No indexed-provider retrieval timestamp is used as evidence. */
@@ -49,7 +63,7 @@ export function makeHolderRpcSource(url:string,opts:{fetch?:typeof fetch;now?:()
    if(!before.value||!PROGRAMS.includes(before.value.owner))invalid();
    const program=before.value!.owner,raw=Buffer.from(before.value!.data[0],'base64');
    if(raw.length<82||raw[45]!==1)invalid();
-   const supply=raw.readBigUInt64LE(36);if(supply<=0n)invalid();
+   const supply=raw.readBigUInt64LE(36),withheld=mintWithheld(raw);if(supply<=0n)invalid();
    const scan=Accounts.parse(await call('getProgramAccounts',[program,{encoding:'base64',commitment:'finalized',withContext:true,minContextSlot:before.context.slot,filters:[{memcmp:{offset:0,bytes:mint}}],dataSlice:{offset:0,length:109}}]));
    if(scan.context.slot<before.context.slot||!scan.value.length)invalid();
    const owners=new Map<string,bigint>(),seen=new Set<string>();let total=0n;
@@ -60,8 +74,8 @@ export function makeHolderRpcSource(url:string,opts:{fetch?:typeof fetch;now?:()
     const balance=data.readBigUInt64LE(64),owner=bs58.encode(data.subarray(32,64));total+=balance;
     if(balance>0n){if(owner==='11111111111111111111111111111111')invalid();owners.set(owner,(owners.get(owner)??0n)+balance);}
    }
-   // A truncated enumeration or Token-2022 withheld supply cannot be called complete.
-   if(total!==supply||!owners.size)invalid();
+   // A truncated enumeration cannot be called complete; withheld fees are supply but are held by the mint.
+   if(total+withheld!==supply||!owners.size)invalid();
    const after=Mint.parse(await call('getAccountInfo',[mint,{encoding:'base64',commitment:'finalized',minContextSlot:scan.context.slot}]));
    if(after.context.slot<scan.context.slot||after.value?.owner!==program||!Buffer.from(after.value.data[0],'base64').equals(raw))invalid();
    const seconds=z.number().int().nonnegative().safe().parse(await call('getBlockTime',[scan.context.slot]));
