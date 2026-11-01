@@ -1,5 +1,5 @@
 import {describe,expect,it,vi} from 'vitest';
-import {HOLDER_RPC_FAILOVER_LIMITS,makeFailoverHolderSource} from './holderRpcFailover';
+import {HOLDER_RPC_FAILOVER_LIMITS,holderRpcEndpoints,makeFailoverHolderSource} from './holderRpcFailover';
 import type {HolderRpcResult} from './holderRpc';
 
 const NOW=Date.parse('2051-03-01T12:00:00Z');
@@ -48,5 +48,35 @@ describe('holder rpc failover',()=>{
   const primary=endpoint(fail('RATE_LIMITED')),fallback=endpoint(fail('UNAVAILABLE'));
   const source=makeFailoverHolderSource(primary,fallback,{now:()=>NOW});
   expect(await source.get('m1')).toMatchObject({ok:false,reason:'UNAVAILABLE',endpoint:'fallback',failedOver:true});
+ });
+});
+
+describe('holder rpc endpoints',()=>{
+ const shared='https://shared.example/?k=1',sharedFallback='https://shared2.example/?k=2',holder='https://holder.example/?k=3',holderFallback='https://holder2.example/?k=4';
+
+ it('is disabled without any endpoint',()=>{
+  expect(holderRpcEndpoints({})).toBeNull();
+ });
+
+ it('keeps the shared pair when no holder-specific key is set',()=>{
+  expect(holderRpcEndpoints({HELIUS_RPC_URL:shared,HELIUS_RPC_FALLBACK_URL:sharedFallback})).toEqual({primary:shared,fallback:sharedFallback});
+  expect(holderRpcEndpoints({HELIUS_RPC_URL:shared})).toEqual({primary:shared,fallback:null});
+ });
+
+ it('uses a dedicated pair without touching the shared keys',()=>{
+  expect(holderRpcEndpoints({HELIUS_RPC_URL:shared,HELIUS_RPC_FALLBACK_URL:sharedFallback,HOLDER_RPC_URL:holder,HOLDER_RPC_FALLBACK_URL:holderFallback})).toEqual({primary:holder,fallback:holderFallback});
+ });
+
+ it('never silently backs a dedicated primary with a shared key',()=>{
+  expect(holderRpcEndpoints({HELIUS_RPC_URL:shared,HELIUS_RPC_FALLBACK_URL:sharedFallback,HOLDER_RPC_URL:holder})).toEqual({primary:holder,fallback:null});
+ });
+
+ it('accepts a dedicated fallback over the shared primary',()=>{
+  expect(holderRpcEndpoints({HELIUS_RPC_URL:shared,HOLDER_RPC_FALLBACK_URL:holderFallback})).toEqual({primary:shared,fallback:holderFallback});
+ });
+
+ it('ignores blank and duplicate URLs',()=>{
+  expect(holderRpcEndpoints({HELIUS_RPC_URL:shared,HOLDER_RPC_URL:'   ',HOLDER_RPC_FALLBACK_URL:shared})).toEqual({primary:shared,fallback:null});
+  expect(holderRpcEndpoints({HOLDER_RPC_URL:holder,HOLDER_RPC_FALLBACK_URL:holder})).toEqual({primary:holder,fallback:null});
  });
 });

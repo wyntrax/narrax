@@ -3,6 +3,28 @@ import type {HolderRpcResult,HolderRpcSource} from './holderRpc';
 /** How long the primary endpoint is skipped after a provider-level rejection. */
 export const HOLDER_RPC_FAILOVER_LIMITS={cooldownMs:15*60_000} as const;
 
+export interface HolderRpcEndpoints{primary:string;fallback:string|null}
+
+/**
+ * Holder enumeration endpoints, independent of the shared Helius keys when configured:
+ *
+ *   HOLDER_RPC_URL + HOLDER_RPC_FALLBACK_URL  -> dedicated pair, no shared quota used
+ *   HOLDER_RPC_FALLBACK_URL only              -> shared primary, dedicated fallback
+ *   HOLDER_RPC_URL only                       -> dedicated primary, no fallback
+ *   neither                                   -> shared primary, shared discovery reserve
+ *
+ * A dedicated holder primary is never silently backed by a shared key: that is the
+ * coupling this configuration exists to avoid. An empty or duplicate URL is ignored.
+ */
+export function holderRpcEndpoints(env:NodeJS.ProcessEnv=process.env):HolderRpcEndpoints|null{
+ const sharedPrimary=env.HELIUS_RPC_URL?.trim(),dedicatedPrimary=env.HOLDER_RPC_URL?.trim();
+ const primary=dedicatedPrimary||sharedPrimary;
+ if(!primary)return null;
+ const dedicatedFallback=env.HOLDER_RPC_FALLBACK_URL?.trim();
+ const fallback=dedicatedFallback||(dedicatedPrimary?undefined:env.HELIUS_RPC_FALLBACK_URL?.trim());
+ return {primary,fallback:fallback&&fallback!==primary?fallback:null};
+}
+
 /** A 429 or an unreachable endpoint is an endpoint problem; a stale or malformed
  *  observation is a data problem that the other endpoint would report the same way. */
 const providerFailure=(reason:string)=>reason==='RATE_LIMITED'||reason==='UNAVAILABLE';

@@ -23,7 +23,7 @@ import { makeRadarSafetySource } from './radarSafetyEvidence';
 import { makeTradeabilitySource } from './tradeabilityEvidence';
 import { deliverEarlyRadarTelegram, telegramConfigFromEnv, TelegramBotApiTransport } from './telegram';
 import {makeHolderRpcSource} from './holderRpc';
-import {makeFailoverHolderSource} from './holderRpcFailover';
+import {makeFailoverHolderSource,holderRpcEndpoints} from './holderRpcFailover';
 import {refreshRadarHolders} from './holderFallback';
 import {deliverTelegramFeedHealth} from './telegramHealth';
 import { syncWyntraxHoldings } from './wyntraxHoldings';
@@ -69,17 +69,17 @@ async function main(): Promise<void> {
   const realChain: ChainPorts | null = process.env.HELIUS_RPC_URL ? chain : null;
   if (!tregConfig) console.log('no narrative providers configured: set TREG_NARRATIVE_ENABLED and Treg configuration to enable social ingestion');
 
-  // Holder enumeration has its own endpoint chain: the main RPC, then a dedicated holder
-  // key (or the discovery reserve when no dedicated key is set). A 429 or unreachable
+  // Holder enumeration has its own endpoint chain, independent of the shared keys when
+  // HOLDER_RPC_URL is set: the holder primary, then its fallback. A 429 or unreachable
   // primary is retried on the fallback for the same token, so a holder burst cannot
   // exhaust the discovery reserve by accident.
   const holderRpc = (() => {
-    const primary = process.env.HELIUS_RPC_URL?.trim();
-    if (!primary || process.env.HOLDER_RPC_FALLBACK_ENABLED === 'false') return null;
-    const secondary = process.env.HOLDER_RPC_FALLBACK_URL?.trim() || process.env.HELIUS_RPC_FALLBACK_URL?.trim();
-    if (!secondary || secondary === primary) return makeHolderRpcSource(primary);
+    if (process.env.HOLDER_RPC_FALLBACK_ENABLED === 'false') return null;
+    const endpoints = holderRpcEndpoints();
+    if (!endpoints) return null;
+    if (!endpoints.fallback) return makeHolderRpcSource(endpoints.primary);
     console.log('holder rpc failover: enabled');
-    return makeFailoverHolderSource(makeHolderRpcSource(primary), makeHolderRpcSource(secondary));
+    return makeFailoverHolderSource(makeHolderRpcSource(endpoints.primary), makeHolderRpcSource(endpoints.fallback));
   })();
 
   // Market data comes from free public APIs that need no key. Set MARKET_DATA_ENABLED=false to turn the job off.
