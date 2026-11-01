@@ -74,9 +74,10 @@ Known limits: the cohort is capped at 200 tokens, so sustained demand above ~180
 
 The primary Helius project hit its usage ceiling (`HTTP 429`, body `max usage reached`) at the October 30 -> 31 UTC boundary. The holder path had no secondary endpoint, so every fallback attempt was throttled while the discovery reserve answered normally.
 
-Holder enumeration now uses an endpoint chain:
+Holder enumeration now uses an endpoint chain, independent of the shared keys when a dedicated holder key is configured:
 
-- `HELIUS_RPC_URL` (primary), then `HOLDER_RPC_FALLBACK_URL` when set, otherwise `HELIUS_RPC_FALLBACK_URL`. A dedicated holder key keeps holder bursts out of the discovery reserve.
+- `HOLDER_RPC_URL` then `HOLDER_RPC_FALLBACK_URL` when both are set. With only `HOLDER_RPC_URL`, the holder path uses that single endpoint and never borrows shared quota. With no `HOLDER_RPC_URL`, it uses `HELIUS_RPC_URL` and, when set, `HOLDER_RPC_FALLBACK_URL` (otherwise the discovery reserve `HELIUS_RPC_FALLBACK_URL`).
+- A dedicated holder primary is never silently backed by a shared key: that coupling is what the separate configuration exists to avoid.
 - On `RATE_LIMITED` (HTTP 429 / JSON-RPC -32429) or `UNAVAILABLE`, the **whole token** is retried on the fallback; a partial enumeration is discarded, never completed by the other endpoint.
 - The primary is skipped for **15 minutes** after a provider-level rejection. The cooldown is in-process and shared by the market top-up and the `holder-refresh` job; a restart costs one rejected probe.
 - `STALE`, `INVALID_OR_INCOMPLETE` and `TOO_LARGE` do not swing: those are data properties, not endpoint failures.
@@ -84,4 +85,4 @@ Holder enumeration now uses an endpoint chain:
 
 The chain does **not** cover token metadata, developer holdings or wallet history; those still use `HELIUS_RPC_URL` only. Restoring the primary project (or swapping keys) remains necessary for those paths.
 
-Rollout: add the dedicated key to the host `.env` as `HOLDER_RPC_FALLBACK_URL`, deploy, then confirm `holder rpc failover: enabled` at worker start and `holderFallbackFailovers > 0` (or `holderFallbackPrimaryCooldownUntil` set) in `holder_refresh_complete`. Holder freshness must then rise; the 60-minute gate itself is unchanged.
+Rollout: add the dedicated keys to the host `.env` as `HOLDER_RPC_URL` and `HOLDER_RPC_FALLBACK_URL`, deploy, then confirm `holder rpc failover: enabled` at worker start and `holderFallbackFailovers > 0` (or `holderFallbackPrimaryCooldownUntil` set) in `holder_refresh_complete`. Holder freshness must then rise; the 60-minute gate itself is unchanged.
