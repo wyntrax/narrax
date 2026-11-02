@@ -13,7 +13,7 @@ The market job still collects GeckoTerminal data. The fallback defaults on when 
 - At most **two tokens per market cycle**, rotating past attempted tokens; no retries within a lookup.
 - Up to **four JSON-RPC requests per successful token**, paced at least 500 ms apart across token boundaries. This uses the existing primary RPC quota, not independent quota capacity.
 - **15 seconds for the whole token lookup**, including pacing, headers and response body; **8 MiB per response**, **20,000 accounts maximum**. Larger/partial results remain unknown; no unbounded pagination.
-- Attempt cursor and 30-minute per-token cooldown are stored before the network call. Rate limiting or an unavailable provider ends the cycle and sets a persisted 15-minute provider cooldown.
+- Attempt cursor and per-token retry state are stored before the network call. Rate limiting ends the cycle and sets a persisted 15-minute provider cooldown; an unavailable provider or a malformed enumeration is recorded against that token and does not pause the queue.
 
 The lookup reads a finalized SPL Token or Token-2022 mint, enumerates its accounts with a mint filter and contextual slot, and verifies distinct account addresses, account owner/program, mint, initialized/frozen state and positive balances. The summed raw account balances plus any Token-2022 `TransferFeeConfig` withheld amount held by the mint must equal the mint supply; withheld fees are supply but are not held in a token account. A second mint read at or after the account slot must match the first mint data. A missing account, changed supply, unsupported layout, unreconciled withheld/confidential Token-2022 supply, invalid mint or oversized response is not accepted. Rejected attempts are counted by reason (`STALE`, `INVALID_OR_INCOMPLETE`, `TOO_LARGE`, `RATE_LIMITED`, `UNAVAILABLE`) in the job summary.
 
@@ -21,7 +21,7 @@ Holder count is the number of **distinct positive-balance owner addresses**, not
 
 `getBlockTime` for the enumeration slot supplies the observation timestamp; it must be no more than five minutes old and not in the future. Retrieval time is stored separately. Accepted rows retain immutable `research.holderMetric.<id>` provenance with slot, program, account count, measurement basis and source time. Cached Gecko observations cannot overwrite newer latest-holder provenance. Developer share remains null and smart-wallet count is not inferred from this enumeration.
 
-Market-run diagnostics expose `holderFallbackAttempts`, `holderFallbackWritten`, `holderFallbackUnknown`, and `holderFallbackThrottled` (provider-backoff events, including unavailable service). Existing admin collection-quality diagnostics include these counters. Data recovery alone is not alert qualification: the 15-minute price/60-minute holder gates, profile floors/scores, six-hour duplicate window and configured safety gate still apply.
+Market-run diagnostics expose `holderFallbackAttempts`, `holderFallbackWritten`, `holderFallbackUnknown`, and `holderFallbackThrottled` (rate-limited provider-backoff events). Existing admin collection-quality diagnostics include these counters. Data recovery alone is not alert qualification: the 15-minute price/60-minute holder gates, profile floors/scores, six-hour duplicate window and configured safety gate still apply.
 
 ## Telegram service notices
 
@@ -64,11 +64,11 @@ The cohort is now refreshed by a separate `holder-refresh` job that runs every 6
 - **One query** reads the newest observation per candidate (`DISTINCT ON`), instead of one query per candidate.
 - **Demand is reported**: `holderFallbackCandidates`, `holderFallbackFresh`, `holderFallbackDeferred` (stale but unserved) and `holderFallbackDeadlineHit`. The job logs one `holder_refresh_complete` line per run with these counters.
 
-The market run still tops up at most two price-lane tokens outside the cohort (`HOLDER_RPC_FALLBACK_PER_RUN`, `HOLDER_RPC_FALLBACK_DEADLINE_MS`), so the two jobs do not compete for the same budget. The 60-minute holder and 15-minute price gates, provenance rules, per-token 30-minute cooldown and 15-minute provider cooldown are unchanged.
+The market run still tops up at most two price-lane tokens outside the cohort (`HOLDER_RPC_FALLBACK_PER_RUN`, `HOLDER_RPC_FALLBACK_DEADLINE_MS`), so the two jobs do not compete for the same budget. They also keep separate progress rows (see below), so a failure in one cannot pause the other. The 60-minute holder and 15-minute price gates and provenance rules are unchanged.
 
 Rollout checks: the queue has one consumer; `holder_refresh_complete` appears about once a minute with three attempts; `holderFallbackDeferred` trends to zero (a persistent positive value means demand exceeds the budget — raise the budget or shrink the cohort); `recentSocial` holder freshness rises in `research:coverage`; throttling stays low. Holder freshness alone is not a publication signal.
 
-Known limits: the cohort is capped at 200 tokens, so sustained demand above ~180/hour leaves some tokens past the gate; a cohort token that pumps above the early cap keeps its slot until the next social scan; the two jobs share one progress row and can rarely attempt the same token at once; holder counts include pool accounts.
+Known limits: the cohort is capped at 200 tokens, so sustained demand above ~180/hour leaves some tokens past the gate; a cohort token that pumps above the early cap keeps its slot until the next social scan; the two jobs can still attempt the same token at once (the claim reduces, but does not eliminate, that race); holder counts include pool accounts.
 
 ## Endpoint failover (November 1, 2026)
 
@@ -86,3 +86,14 @@ Holder enumeration now uses an endpoint chain, independent of the shared keys wh
 The chain does **not** cover token metadata, developer holdings or wallet history; those still use `HELIUS_RPC_URL` only. Restoring the primary project (or swapping keys) remains necessary for those paths.
 
 Rollout: add the dedicated keys to the host `.env` as `HOLDER_RPC_URL` and `HOLDER_RPC_FALLBACK_URL`, deploy, then confirm `holder rpc failover: enabled` at worker start and `holderFallbackFailovers > 0` (or `holderFallbackPrimaryCooldownUntil` set) in `holder_refresh_complete`. Holder freshness must then rise; the 60-minute gate itself is unchanged.
+
+## Cooldown isolation and transient retry (November 2, 2026)
+
+Production still showed 6–13 fresh of 133 cohort tokens while a read-only probe of the primary endpoint answered in ~65 ms (691 accounts, 260 KB, reconciliation delta 0). The queue was pausing itself, not running out of RPC rate:
+
+- The market top-up and the radar cohort shared `research.holderFallback.progress`. One `UNAVAILABLE` from a price-lane top-up wrote a 15-minute cooldown, and the cohort then made zero attempts for the whole window; the failover endpoint was never used.
+- `INVALID_OR_INCOMPLETE` was two of every three attempts. A complete enumeration can lose a race with a mint/burn (or a Token-2022 withheld update) between the mint read and the account scan, and the failed token was then skipped for 30 minutes.
+
+The cohort now uses `research.holderFallback.radar.progress`; the market top-up keeps `research.holderFallback.progress`. Only `RATE_LIMITED` sets a persisted provider cooldown; `UNAVAILABLE` is recorded against the token. `INVALID_OR_INCOMPLETE` is retried once in-process before it is recorded, and failed tokens become eligible again after a short reason-specific backoff (2 minutes for an incomplete enumeration, 5 minutes for unavailable, 15 minutes for rate limiting, 30 minutes for stale/oversized). A successful observation keeps the longer window; the 60-minute gate itself is unchanged.
+
+Rollout: deploy, then confirm `holder_refresh_complete` runs with `holderFallbackAttempts: 3` through a provider error (not `0`), the radar progress row has no `cooldownUntil` after an `UNAVAILABLE`, and fresh cohort holders rise. Do not claim recovery from a single run.

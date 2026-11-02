@@ -6,6 +6,9 @@ import {RADAR_EVIDENCE_LIMITS} from '@narra/token-intel';
 import {readSocialPriority} from './researchDiagnostics';
 
 export const HOLDER_FALLBACK_KEY='research.holderFallback.progress';
+/** The radar cohort keeps its own cursor, attempts and cooldown. A failing price-lane
+ *  top-up must never pause the cohort that feeds the 60-minute alert gate. */
+export const RADAR_HOLDER_FALLBACK_KEY='research.holderFallback.radar.progress';
 /**
  * The primary token-info source reports holder observations hours old, so it cannot
  * satisfy the 60-minute radar gate. Complete RPC enumeration is the only fresh source.
@@ -22,12 +25,15 @@ export const HOLDER_FALLBACK_LIMITS={
  deadlineMs:15_000,
  cooldownMs:30*60_000,
  providerCooldownMs:15*60_000,
+ /** A transient or malformed enumeration is retried in-process before it is recorded. */
+ transientRetries:1,
+ retryDelayMs:250,
  maxPerRun:40,
  maxDeadlineMs:120_000,
  minDeadlineMs:5_000,
 } as const;
 
-export interface HolderFallbackBudget{perRun:number;deadlineMs:number}
+export interface HolderFallbackBudget{perRun:number;deadlineMs:number;stateKey?:string}
 
 /** Bounded operator tuning. Invalid or out-of-range values fall back to the defaults. */
 export function holderFallbackBudget(env:NodeJS.ProcessEnv=process.env):HolderFallbackBudget{
@@ -38,15 +44,27 @@ export function holderFallbackBudget(env:NodeJS.ProcessEnv=process.env):HolderFa
  return {
   perRun:read('HOLDER_RPC_FALLBACK_PER_RUN',HOLDER_FALLBACK_LIMITS.perRun,1,HOLDER_FALLBACK_LIMITS.maxPerRun),
   deadlineMs:read('HOLDER_RPC_FALLBACK_DEADLINE_MS',HOLDER_FALLBACK_LIMITS.deadlineMs,HOLDER_FALLBACK_LIMITS.minDeadlineMs,HOLDER_FALLBACK_LIMITS.maxDeadlineMs),
+  stateKey:HOLDER_FALLBACK_KEY,
  };
 }
 
 export type HolderFailureReason=Extract<HolderRpcResult,{ok:false}>['reason'];
 export type HolderFailureReasons=Record<HolderFailureReason,number>;
+// Failed tokens become eligible again quickly; only a successful attempt holds the token
+// for the longer success window. A repeated timeout/large scan backs off further.
+const FAILURE_RETRY_MS:Record<HolderFailureReason,number>={
+ INVALID_OR_INCOMPLETE:2*60_000,
+ UNAVAILABLE:5*60_000,
+ RATE_LIMITED:15*60_000,
+ STALE:30*60_000,
+ TOO_LARGE:30*60_000,
+};
 const noHolderFailures=():HolderFailureReasons=>({RATE_LIMITED:0,UNAVAILABLE:0,INVALID_OR_INCOMPLETE:0,STALE:0,TOO_LARGE:0});
 
 export interface HolderCandidate{id:string;mint:string}
-const Progress=z.object({cursor:z.string(),cooldownUntil:z.string().datetime().nullable(),attempts:z.record(z.string().datetime())});
+const Attempt=z.union([z.string().datetime(),z.object({at:z.string().datetime(),ok:z.boolean(),reason:z.enum(['RATE_LIMITED','UNAVAILABLE','INVALID_OR_INCOMPLETE','STALE','TOO_LARGE']).optional()})]);
+const Progress=z.object({cursor:z.string(),cooldownUntil:z.string().datetime().nullable(),attempts:z.record(Attempt)});
+type StoredAttempt={at:string;ok:boolean;reason?:HolderFailureReason};
 
 /**
  * The radar cohort is the social priority list: tokens with qualified chatter and a
@@ -64,6 +82,7 @@ export function radarHolderBudget(env:NodeJS.ProcessEnv=process.env):HolderFallb
  return {
   perRun:read('HOLDER_RPC_COHORT_PER_RUN',RADAR_HOLDER_LIMITS.perRun,1,RADAR_HOLDER_LIMITS.maxPerRun),
   deadlineMs:read('HOLDER_RPC_COHORT_DEADLINE_MS',RADAR_HOLDER_LIMITS.deadlineMs,RADAR_HOLDER_LIMITS.minDeadlineMs,RADAR_HOLDER_LIMITS.maxDeadlineMs),
+  stateKey:RADAR_HOLDER_FALLBACK_KEY,
  };
 }
 
@@ -73,7 +92,7 @@ export async function refreshRadarHolders(
 ){
  const ids=await readSocialPriority(db,now);
  const tokens=ids.length?await db.token.findMany({where:{id:{in:ids},blacklisted:false,mint:{not:WSOL_MINT}},select:{id:true,mint:true}}):[];
- return refreshHolderFallback(db,source,tokens,()=>now,opts);
+ return refreshHolderFallback(db,source,tokens,()=>now,{...opts,stateKey:RADAR_HOLDER_FALLBACK_KEY});
 }
 
 /**
@@ -91,13 +110,17 @@ export async function refreshHolderFallback(
   holderFallbackFailovers:0,holderFallbackPrimaryCooldownUntil:source.primaryCooldownUntil?.()??null,
   holderFallbackReasons:noHolderFailures(),
  };
- const now=clock(),started=Date.now(),row=await db.systemSetting.findUnique({where:{key:HOLDER_FALLBACK_KEY}});
+ const now=clock(),started=Date.now(),progressKey=opts.stateKey??HOLDER_FALLBACK_KEY;
+ const row=await db.systemSetting.findUnique({where:{key:progressKey}});
  const parsed=Progress.safeParse(row?.value),state=parsed.success?parsed.data:null;
  const unique=[...new Map(candidates.map(t=>[t.id,t])).values()];
  out.holderFallbackCandidates=unique.length;
  if(state?.cooldownUntil&&Date.parse(state.cooldownUntil)>+now)return out;
- // Attempts inside the cooldown window are kept; older ones are forgotten.
- const attempts=Object.fromEntries(Object.entries(state?.attempts??{}).filter(([,at])=>Number.isFinite(Date.parse(at))&&+now-Date.parse(at)<HOLDER_FALLBACK_LIMITS.cooldownMs));
+ // Legacy entries were plain timestamps; keep them as successful claims so they retain
+ // the longer window. Failed attempts now expire quickly and are retried.
+ const normalized:Record<string,StoredAttempt>=Object.fromEntries(Object.entries(state?.attempts??{}).map(([id,v])=>[id,typeof v==='string'?{at:v,ok:true}:v]));
+ const retention=(a:StoredAttempt)=>a.ok?HOLDER_FALLBACK_LIMITS.cooldownMs:FAILURE_RETRY_MS[a.reason??'UNAVAILABLE'];
+ const attempts=Object.fromEntries(Object.entries(normalized).filter(([,a])=>Number.isFinite(Date.parse(a.at))&&+now-Date.parse(a.at)<retention(a)));
  if(!unique.length)return out;
  // One query for the newest observation per candidate; a per-token lookup would add
  // hundreds of round trips once the radar cohort is passed in whole.
@@ -115,8 +138,19 @@ export async function refreshHolderFallback(
   return rotation||(a.id<b.id?-1:a.id>b.id?1:0);
  });
  out.holderFallbackFresh=ordered.filter(t=>isFresh(t.id)).length;
- const persisted={...attempts};
+ const persisted:Record<string,StoredAttempt>={...attempts};
  let cursorValue=cursor,cooldownUntil:string|null=null;
+ // A complete enumeration can lose a race with a mint/burn on a busy token. Retry once
+ // before recording it, so a transient inconsistency does not become a missed gate.
+ const read=async(mint:string)=>{
+  let evidence=await source.get(mint).catch(():HolderRpcResult=>({ok:false,reason:'UNAVAILABLE'}));
+  for(let i=0;i<HOLDER_FALLBACK_LIMITS.transientRetries;i++){
+   if(evidence.ok||evidence.reason!=='INVALID_OR_INCOMPLETE'||Date.now()-started>=opts.deadlineMs)break;
+   await new Promise(r=>setTimeout(r,HOLDER_FALLBACK_LIMITS.retryDelayMs));
+   evidence=await source.get(mint).catch(():HolderRpcResult=>({ok:false,reason:'UNAVAILABLE'}));
+  }
+  return evidence;
+ };
  for(const token of ordered){
   if(isFresh(token.id)||attempts[token.id])continue;
   if(out.holderFallbackAttempts>=opts.perRun||Date.now()-started>=opts.deadlineMs){
@@ -124,10 +158,10 @@ export async function refreshHolderFallback(
    break;
   }
   const checked=clock();
-  out.holderFallbackAttempts++;persisted[token.id]=checked.toISOString();cursorValue=token.id;
+  out.holderFallbackAttempts++;persisted[token.id]={at:checked.toISOString(),ok:false};cursorValue=token.id;
   const claim={cursor:cursorValue,attempts:persisted,cooldownUntil};
-  await db.systemSetting.upsert({where:{key:HOLDER_FALLBACK_KEY},create:{key:HOLDER_FALLBACK_KEY,value:claim},update:{value:claim}});
-  const evidence=await source.get(token.mint).catch(():HolderRpcResult=>({ok:false,reason:'UNAVAILABLE'}));
+  await db.systemSetting.upsert({where:{key:progressKey},create:{key:progressKey,value:claim},update:{value:claim}});
+  const evidence=await read(token.mint);
   if(evidence.failedOver)out.holderFallbackFailovers++;
   const retrievedAt=clock();
   if(evidence.ok&&evidence.mint===token.mint&&+evidence.sourceAt<=+retrievedAt&&+retrievedAt-+evidence.sourceAt<=RADAR_EVIDENCE_LIMITS.holdersMaxAgeMs){
@@ -137,14 +171,17 @@ export async function refreshHolderFallback(
     const value={mint:token.mint,metricId:metric.id,source:'solana-rpc',sourceAt:evidence.sourceAt.toISOString(),retrievedAt:retrievedAt.toISOString(),slot:evidence.slot,program:evidence.program,accounts:evidence.accounts,holders:evidence.holders,top10Pct:evidence.top10Pct,devHoldingPct:null,basis:'positive-balance-owners-including-pools',complete:true};
     await tx.systemSetting.create({data:{key:`research.holderMetric.${metric.id}`,value}});
     const key=`research.holders.${token.id}`;await tx.systemSetting.upsert({where:{key},create:{key,value},update:{value}});
-   });out.holderFallbackWritten++;
+   });out.holderFallbackWritten++;persisted[token.id]={at:retrievedAt.toISOString(),ok:true};
   }else{
    out.holderFallbackUnknown++;
    const reason:HolderFailureReason=evidence.ok?'INVALID_OR_INCOMPLETE':evidence.reason;
    out.holderFallbackReasons[reason]++;
-   if(reason==='RATE_LIMITED'||reason==='UNAVAILABLE'){cooldownUntil=new Date(+retrievedAt+HOLDER_FALLBACK_LIMITS.providerCooldownMs).toISOString();out.holderFallbackThrottled++;}
+   persisted[token.id]={at:retrievedAt.toISOString(),ok:false,reason};
+   // Only a provider-wide throttle pauses the queue. A per-token timeout or malformed
+   // enumeration is recorded against that token and must not idle the whole cohort.
+   if(reason==='RATE_LIMITED'){cooldownUntil=new Date(+retrievedAt+HOLDER_FALLBACK_LIMITS.providerCooldownMs).toISOString();out.holderFallbackThrottled++;}
   }
-  const value={cursor:cursorValue,attempts:persisted,cooldownUntil};await db.systemSetting.upsert({where:{key:HOLDER_FALLBACK_KEY},create:{key:HOLDER_FALLBACK_KEY,value},update:{value}});
+  const value={cursor:cursorValue,attempts:persisted,cooldownUntil};await db.systemSetting.upsert({where:{key:progressKey},create:{key:progressKey,value},update:{value}});
   if(cooldownUntil)break;
  }
  // Demand this run could not serve: still stale, not cooling down, not attempted now.

@@ -4,7 +4,7 @@ import {beforeAll,beforeEach,afterAll,expect,it,vi} from 'vitest';
 import {createPrisma,type Prisma} from '@narra/database';
 import {FixtureMarketData,snapshot,info} from '@narra/market-data';
 import {assertTestDatabase} from '../../../scripts/test-database';
-import {refreshHolderFallback,refreshRadarHolders,HOLDER_FALLBACK_KEY} from './holderFallback';
+import {refreshHolderFallback,refreshRadarHolders,HOLDER_FALLBACK_KEY,RADAR_HOLDER_FALLBACK_KEY} from './holderFallback';
 import {refreshMarketData} from './marketData';
 import type {HolderRpcResult} from './holderRpc';
 import {makeFailoverHolderSource} from './holderRpcFailover';
@@ -16,20 +16,20 @@ import {saveSocialPriority,SOCIAL_INFO_PRIORITY_KEY,COVERAGE_LIMITS} from './res
 assertTestDatabase(new URL(process.env.DATABASE_URL!));
 const db=createPrisma(),now=new Date('2051-03-01T12:00:00Z'),tag=`holder-${randomUUID()}`;
 const budget={perRun:2,deadlineMs:30_000};
-const tokens:{id:string;mint:string}[]=[];let previous:Prisma.JsonValue|undefined;
+const tokens:{id:string;mint:string}[]=[];const progressKeys=[HOLDER_FALLBACK_KEY,RADAR_HOLDER_FALLBACK_KEY];const previous:Record<string,Prisma.JsonValue|undefined>={};
 beforeAll(async()=>{
- previous=(await db.systemSetting.findUnique({where:{key:HOLDER_FALLBACK_KEY}}))?.value;
+ for(const key of progressKeys)previous[key]=(await db.systemSetting.findUnique({where:{key}}))?.value;
  for(let i=0;i<4;i++)tokens.push(await db.token.create({data:{id:`${tag}-${i}`,mint:bs58.encode(randomBytes(32)),name:tag,symbol:tag,createdOnChainAt:new Date(+now-3600000)},select:{id:true,mint:true}}));
 });
-beforeEach(async()=>{await db.systemSetting.deleteMany({where:{key:HOLDER_FALLBACK_KEY}});await db.tokenHolderMetric.deleteMany({where:{tokenId:{in:tokens.map(t=>t.id)}}});});
+beforeEach(async()=>{await db.systemSetting.deleteMany({where:{key:{in:progressKeys}}});await db.tokenHolderMetric.deleteMany({where:{tokenId:{in:tokens.map(t=>t.id)}}});});
 afterAll(async()=>{
  const alerts=await db.alert.findMany({where:{refId:{in:tokens.map(t=>t.id)}},select:{id:true}});
  await db.systemSetting.deleteMany({where:{key:{in:[telegramCursorKey(tag),...alerts.map(a=>`research.radarSafety.${a.id}`)]}}});
  await db.alert.deleteMany({where:{refId:{in:tokens.map(t=>t.id)}}});
- await db.systemSetting.deleteMany({where:{OR:[{key:HOLDER_FALLBACK_KEY},...tokens.flatMap(t=>[{key:`research.holders.${t.id}`},{key:`research.market.${t.id}`},{key:{startsWith:'research.holderMetric.'},value:{path:['mint'],equals:t.mint}}])]}});
+ await db.systemSetting.deleteMany({where:{OR:[{key:{in:progressKeys}},...tokens.flatMap(t=>[{key:`research.holders.${t.id}`},{key:`research.market.${t.id}`},{key:{startsWith:'research.holderMetric.'},value:{path:['mint'],equals:t.mint}}])]}});
  const metrics=await db.tokenMetric.findMany({where:{tokenId:{in:tokens.map(t=>t.id)}},select:{id:true}});await db.systemSetting.deleteMany({where:{key:{in:metrics.map(m=>`research.marketMetric.${m.id}`)}}});
  await db.token.deleteMany({where:{id:{in:tokens.map(t=>t.id)}}});
- if(previous!==undefined)await db.systemSetting.create({data:{key:HOLDER_FALLBACK_KEY,value:previous as Prisma.InputJsonValue}});
+ for(const key of progressKeys)if(previous[key]!==undefined)await db.systemSetting.create({data:{key,value:previous[key] as Prisma.InputJsonValue}});
  await db.$disconnect();
 });
 function source(){return {get:vi.fn(async(mint:string):Promise<HolderRpcResult>=>({ok:true,mint,holders:200,top10Pct:30,sourceAt:new Date(+now-10000),slot:123,accounts:205,program:'test-program'}))};}
@@ -68,6 +68,33 @@ it('keeps failed and future observations unknown and persists provider cooldown'
  rpc.get.mockImplementation(async mint=>({ok:true,mint,holders:200,top10Pct:30,sourceAt:new Date(+now+3600000),slot:123,accounts:205,program:'test'}));
  expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+16*60000),budget)).toMatchObject({holderFallbackWritten:0,holderFallbackUnknown:2,holderFallbackReasons:{INVALID_OR_INCOMPLETE:2}});
  expect(await db.tokenHolderMetric.count({where:{tokenId:{in:tokens.map(t=>t.id)}}})).toBe(0);
+});
+it('continues after an unavailable provider instead of pausing the queue',async()=>{
+ const rpc=source();rpc.get.mockResolvedValueOnce({ok:false,reason:'UNAVAILABLE'});
+ const result=await refreshHolderFallback(db,rpc,tokens.slice(0,2),()=>now,{perRun:2,deadlineMs:30_000});
+ expect(result).toMatchObject({holderFallbackAttempts:2,holderFallbackWritten:1,holderFallbackUnknown:1,holderFallbackThrottled:0,holderFallbackReasons:{UNAVAILABLE:1}});
+ expect((await db.systemSetting.findUniqueOrThrow({where:{key:HOLDER_FALLBACK_KEY}})).value).toMatchObject({cooldownUntil:null});
+});
+it('retries a transient incomplete enumeration before recording it',async()=>{
+ const t=tokens[0]!,rpc=source();rpc.get.mockResolvedValueOnce({ok:false,reason:'INVALID_OR_INCOMPLETE'});
+ expect(await refreshHolderFallback(db,rpc,[t],()=>now)).toMatchObject({holderFallbackAttempts:1,holderFallbackWritten:1,holderFallbackUnknown:0});
+ expect(rpc.get).toHaveBeenCalledTimes(2);
+});
+it('retries a failed token after a short backoff, not the long success window',async()=>{
+ const t=tokens[0]!,rpc=source();rpc.get.mockResolvedValue({ok:false,reason:'INVALID_OR_INCOMPLETE'});
+ expect(await refreshHolderFallback(db,rpc,[t],()=>now)).toMatchObject({holderFallbackAttempts:1,holderFallbackWritten:0});
+ expect(await refreshHolderFallback(db,rpc,[t],()=>new Date(+now+60000))).toMatchObject({holderFallbackAttempts:0});
+ rpc.get.mockImplementation(async mint=>({ok:true,mint,holders:200,top10Pct:30,sourceAt:new Date(+now+170000),slot:123,accounts:205,program:'test'}));
+ expect(await refreshHolderFallback(db,rpc,[t],()=>new Date(+now+180000))).toMatchObject({holderFallbackAttempts:1,holderFallbackWritten:1});
+});
+it('keeps the radar cohort running when the market top-up is cooling down',async()=>{
+ const t=tokens[3]!;
+ await saveSocialPriority(db,[t.id],now);
+ await db.systemSetting.create({data:{key:HOLDER_FALLBACK_KEY,value:{cursor:'',attempts:{},cooldownUntil:new Date(+now+15*60000).toISOString()}}});
+ const rpc=source();
+ try{
+  expect(await refreshRadarHolders(db,rpc,now)).toMatchObject({holderFallbackCandidates:1,holderFallbackAttempts:1,holderFallbackWritten:1});
+ }finally{await db.systemSetting.deleteMany({where:{key:SOCIAL_INFO_PRIORITY_KEY}});}
 });
 it('cached Gecko refresh cannot relabel newer RPC holder evidence',async()=>{
  const t=tokens[0]!,rpc=source();await refreshHolderFallback(db,rpc,[t],()=>now);
