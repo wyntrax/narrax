@@ -83,7 +83,10 @@ export function makeHolderRpcSource(url:string,opts:{fetch?:typeof fetch;now?:()
    // slot by one and answer -32016 even though the data is current. The response reports
    // its own slot, which is checked against the mint read below.
    const scan=Accounts.parse(await call('getProgramAccounts',[program,{encoding:'base64',commitment:'finalized',withContext:true,filters,dataSlice:{offset:0,length:109}}]));
-   if(scan.context.slot<before.context.slot||!scan.value.length)invalid();
+   // The provider's scan index can lag the mint read by a slot or two. Exact supply
+   // reconciliation plus the block-time age gate below already bound correctness and
+   // freshness, so an older scan slot is not by itself invalid.
+   if(!scan.value.length)invalid();
    const owners=new Map<string,bigint>(),seen=new Set<string>();let total=0n;
    for(const row of scan.value){
     if(!isSolanaAddress(row.pubkey)||seen.has(row.pubkey)||row.account.owner!==program)invalid();seen.add(row.pubkey);

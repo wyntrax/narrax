@@ -50,18 +50,26 @@ it('still refuses withheld fees that supply does not cover',async()=>{
  const f=fixture();token2022(f,feeMint(1200n,100n));
  expect(await f.source().get(mint)).toEqual({ok:false,reason:'INVALID_OR_INCOMPLETE'});
 });
-it.each(['missing-account','duplicate','wrong-mint','wrong-program','supply-changed','uninitialized','old-slot','bad-block','future-block','unknown-block'])('refuses %s evidence',async mode=>{
+it.each(['missing-account','duplicate','wrong-mint','wrong-program','supply-changed','uninitialized','bad-block','future-block','unknown-block'])('refuses %s evidence',async mode=>{
  const f=fixture();
  if(mode==='missing-account')f.rows.pop(),f.rows.pop();
  if(mode==='duplicate')f.rows[1]=f.rows[0]!;
  if(mode==='wrong-program')f.rows[0]!.account.owner='unknown';
  if(mode==='wrong-mint'||mode==='uninitialized'){const b=Buffer.from(f.rows[0]!.account.data[0]!,'base64');b[mode==='wrong-mint'?0:108]=0;f.rows[0]!.account=f.account(b);}
  if(mode==='supply-changed'){const b=Buffer.from(f.raw);b.writeBigUInt64LE(1300n,36);f.responses[2].value=f.account(b);}
- if(mode==='old-slot')f.responses[1].context.slot=99;
  if(mode==='bad-block')f.responses[3]=Math.floor(+now/1000)-3600;
  if(mode==='future-block')f.responses[3]=Math.floor(+now/1000)+60;
  if(mode==='unknown-block')f.responses[3]=null;
  expect(await f.source().get(mint)).toMatchObject({ok:false});
+});
+it('accepts an enumeration one slot behind the mint read when supply reconciles',async()=>{
+ const f=fixture();f.responses[1].context.slot=99;
+ expect(await f.source().get(mint)).toMatchObject({ok:true,slot:99,holders:12});
+});
+it('still rejects a lagged enumeration whose balances do not reconcile',async()=>{
+ const f=fixture();f.responses[1].context.slot=99;
+ const b=Buffer.from(f.rows[0]!.account.data[0]!,'base64');b.writeBigUInt64LE(99n,64);f.rows[0]!.account=f.account(b);
+ expect(await f.source().get(mint)).toEqual({ok:false,reason:'INVALID_OR_INCOMPLETE'});
 });
 it('bounds streamed bytes and never exposes the RPC URL or provider error body',async()=>{
  const fetcher=vi.fn(async()=>new Response('x'.repeat(HOLDER_RPC_LIMITS.maxBytes+1)));
