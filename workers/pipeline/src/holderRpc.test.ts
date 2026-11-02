@@ -27,7 +27,7 @@ it('uses a complete finalized enumeration, validates stable supply, and timestam
  const f=fixture(),r=await f.source().get(mint);expect(r).toMatchObject({ok:true,holders:12,top10Pct:83.3334,sourceAt:new Date(+now-10000),slot:101,accounts:13});
  expect(f.fetcher).toHaveBeenCalledTimes(4);
  const requests=f.fetcher.mock.calls.map(([,init])=>JSON.parse(init!.body as string));
- expect(requests[1]).toMatchObject({method:'getProgramAccounts',params:[program,{commitment:'finalized',withContext:true,minContextSlot:100,dataSlice:{offset:0,length:109},filters:[{memcmp:{offset:0,bytes:mint}}]}]});
+ expect(requests[1]).toMatchObject({method:'getProgramAccounts',params:[program,{commitment:'finalized',withContext:true,minContextSlot:100,dataSlice:{offset:0,length:109},filters:[{dataSize:165},{memcmp:{offset:0,bytes:mint}}]}]});
  expect(requests[2].params[1].minContextSlot).toBe(101);expect(requests[3].params).toEqual([101]);
 });
 it('counts owners rather than accounts and includes pool-like concentration without exclusions',async()=>{
@@ -37,6 +37,9 @@ it('counts owners rather than accounts and includes pool-like concentration with
 it('supports Token-2022 base accounts while still requiring supply reconciliation',async()=>{
  const f=fixture(),p='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';f.responses[0].value.owner=p;f.responses[2].value.owner=p;for(const r of f.rows)r.account.owner=p;
  expect(await f.source().get(mint)).toMatchObject({ok:true,program:p});
+ const requests=f.fetcher.mock.calls.map(([,init])=>JSON.parse(init!.body as string));
+ // Token-2022 account data can carry extensions, so its size is not fixed.
+ expect(requests[1]!.params[1].filters).toEqual([{memcmp:{offset:0,bytes:mint}}]);
 });
 it('counts Token-2022 transfer fees withheld by the mint as supply',async()=>{
  const f=fixture(),p=token2022(f,feeMint(1300n,100n));
@@ -91,4 +94,14 @@ it('refuses zero supply, unsupported mints, empty or oversized enumerations and 
 it('recognizes JSON-RPC throttle errors without retrying or exposing provider text',async()=>{
  const fetcher=vi.fn(async()=>new Response(JSON.stringify({jsonrpc:'2.0',id:1,error:{code:-32429,message:'secret private URL'}})));
  expect(await makeHolderRpcSource('https://rpc.example/secret',{fetch:fetcher as typeof fetch}).get(mint)).toEqual({ok:false,reason:'RATE_LIMITED'});expect(fetcher).toHaveBeenCalledOnce();
+});
+it('reports a provider account-set cap as oversized instead of an endpoint throttle',async()=>{
+ const f=fixture();
+ const fetcher=vi.fn(async(_u:unknown,init?:RequestInit)=>{
+  const req=JSON.parse(init!.body as string);
+  if(req.method==='getAccountInfo')return new Response(JSON.stringify({jsonrpc:'2.0',id:req.id,result:f.responses[0]}));
+  return new Response(JSON.stringify({jsonrpc:'2.0',id:req.id,error:{code:-32600,message:'secret private URL'}}));
+ });
+ expect(await makeHolderRpcSource('https://rpc.example/secret',{fetch:fetcher as typeof fetch}).get(mint)).toEqual({ok:false,reason:'TOO_LARGE'});
+ expect(fetcher).toHaveBeenCalledTimes(2);
 });

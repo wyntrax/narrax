@@ -2,7 +2,8 @@ import {z} from 'zod';
 import bs58 from 'bs58';
 import {isSolanaAddress} from '@narra/shared';
 
-const PROGRAMS=['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA','TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'];
+const SPL_TOKEN_PROGRAM='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const PROGRAMS=[SPL_TOKEN_PROGRAM,'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'];
 export const HOLDER_RPC_LIMITS={maxBytes:8*1024*1024,maxAccounts:20_000,timeoutMs:15000,maxAgeMs:5*60_000,minIntervalMs:500} as const;
 const Slot=z.number().int().nonnegative().safe();
 const Account=z.object({owner:z.string(),executable:z.literal(false),data:z.tuple([z.string(),z.literal('base64')])});
@@ -54,7 +55,14 @@ export function makeHolderRpcSource(url:string,opts:{fetch?:typeof fetch;now?:()
    const reader=res.body.getReader();let size=0;const chunks:Uint8Array[]=[];
    try{while(true){const {value,done}=await reader.read();if(done)break;size+=value.length;if(size>HOLDER_RPC_LIMITS.maxBytes){reason='TOO_LARGE';await reader.cancel();throw Error('oversize');}chunks.push(value);}}finally{reader.releaseLock();}
    const envelope=JSON.parse(Buffer.concat(chunks).toString('utf8'));
-   if(envelope.error){if([429,-32429].includes(envelope.error.code))reason='RATE_LIMITED';throw Error('RPC unavailable');}
+   if(envelope.error){
+    const code=envelope.error.code;
+    if([429,-32429].includes(code))reason='RATE_LIMITED';
+    // The provider's account-set cap is a query property, not an endpoint throttle.
+    // Do not fail over or pause for it; back the token off as oversized.
+    else if(code===-32600)reason='TOO_LARGE';
+    throw Error('RPC unavailable');
+   }
    if(envelope.id!==requestId||envelope.jsonrpc!=='2.0')invalid();
    return envelope.result;
   };
@@ -64,7 +72,14 @@ export function makeHolderRpcSource(url:string,opts:{fetch?:typeof fetch;now?:()
    const program=before.value!.owner,raw=Buffer.from(before.value!.data[0],'base64');
    if(raw.length<82||raw[45]!==1)invalid();
    const supply=raw.readBigUInt64LE(36),withheld=mintWithheld(raw);if(supply<=0n)invalid();
-   const scan=Accounts.parse(await call('getProgramAccounts',[program,{encoding:'base64',commitment:'finalized',withContext:true,minContextSlot:before.context.slot,filters:[{memcmp:{offset:0,bytes:mint}}],dataSlice:{offset:0,length:109}}]));
+   // The SPL Token program has a very large account set. Providers reject a memcmp-only
+   // scan with -32600 ("too many accounts requested"); a dataSize discriminator narrows
+   // the index before the mint filter. Token-2022 accounts can carry extensions, so their
+   // size is not fixed and the memcmp filter alone is used there.
+   const filters=program===SPL_TOKEN_PROGRAM
+    ? [{dataSize:165},{memcmp:{offset:0,bytes:mint}}]
+    : [{memcmp:{offset:0,bytes:mint}}];
+   const scan=Accounts.parse(await call('getProgramAccounts',[program,{encoding:'base64',commitment:'finalized',withContext:true,minContextSlot:before.context.slot,filters,dataSlice:{offset:0,length:109}}]));
    if(scan.context.slot<before.context.slot||!scan.value.length)invalid();
    const owners=new Map<string,bigint>(),seen=new Set<string>();let total=0n;
    for(const row of scan.value){
