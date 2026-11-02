@@ -27,7 +27,8 @@ it('uses a complete finalized enumeration, validates stable supply, and timestam
  const f=fixture(),r=await f.source().get(mint);expect(r).toMatchObject({ok:true,holders:12,top10Pct:83.3334,sourceAt:new Date(+now-10000),slot:101,accounts:13});
  expect(f.fetcher).toHaveBeenCalledTimes(4);
  const requests=f.fetcher.mock.calls.map(([,init])=>JSON.parse(init!.body as string));
- expect(requests[1]).toMatchObject({method:'getProgramAccounts',params:[program,{commitment:'finalized',withContext:true,minContextSlot:100,dataSlice:{offset:0,length:109},filters:[{dataSize:165},{memcmp:{offset:0,bytes:mint}}]}]});
+ expect(requests[1]).toMatchObject({method:'getProgramAccounts',params:[program,{commitment:'finalized',withContext:true,dataSlice:{offset:0,length:109},filters:[{dataSize:165},{memcmp:{offset:0,bytes:mint}}]}]});
+ expect(requests[1].params[1]).not.toHaveProperty('minContextSlot');
  expect(requests[2].params[1].minContextSlot).toBe(101);expect(requests[3].params).toEqual([101]);
 });
 it('counts owners rather than accounts and includes pool-like concentration without exclusions',async()=>{
