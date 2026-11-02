@@ -4,7 +4,7 @@ import {beforeAll,beforeEach,afterAll,expect,it,vi} from 'vitest';
 import {createPrisma,type Prisma} from '@narra/database';
 import {FixtureMarketData,snapshot,info} from '@narra/market-data';
 import {assertTestDatabase} from '../../../scripts/test-database';
-import {refreshHolderFallback,refreshRadarHolders,HOLDER_FALLBACK_KEY,RADAR_HOLDER_FALLBACK_KEY} from './holderFallback';
+import {refreshHolderFallback,refreshRadarHolders,radarHolderBudget,HOLDER_FALLBACK_KEY,RADAR_HOLDER_FALLBACK_KEY} from './holderFallback';
 import {refreshMarketData} from './marketData';
 import type {HolderRpcResult} from './holderRpc';
 import {makeFailoverHolderSource} from './holderRpcFailover';
@@ -69,6 +69,13 @@ it('keeps failed and future observations unknown and persists provider cooldown'
  expect(await refreshHolderFallback(db,rpc,tokens,()=>new Date(+now+16*60000),budget)).toMatchObject({holderFallbackWritten:0,holderFallbackUnknown:2,holderFallbackReasons:{INVALID_OR_INCOMPLETE:2}});
  expect(await db.tokenHolderMetric.count({where:{tokenId:{in:tokens.map(t=>t.id)}}})).toBe(0);
 });
+it('uses the retrieval clock for evidence that lands just after the scheduling clock',async()=>{
+ const t=tokens[0]!;
+ const rpc={get:vi.fn(async(mint:string):Promise<HolderRpcResult>=>({ok:true,mint,holders:1,top10Pct:100,sourceAt:new Date(+now+2000),slot:1,accounts:1,program:'test'}))};
+ expect(await refreshHolderFallback(db,rpc,[t],()=>now,{perRun:1,deadlineMs:1000,retrievedAt:()=>new Date(+now+3000)})).toMatchObject({holderFallbackAttempts:1,holderFallbackWritten:1});
+ const row=await db.tokenHolderMetric.findFirstOrThrow({where:{tokenId:t.id}});
+ expect(row.at).toEqual(new Date(+now+2000));
+});
 it('continues after an unavailable provider instead of pausing the queue',async()=>{
  const rpc=source();rpc.get.mockResolvedValueOnce({ok:false,reason:'UNAVAILABLE'});
  const result=await refreshHolderFallback(db,rpc,tokens.slice(0,2),()=>now,{perRun:2,deadlineMs:30_000});
@@ -93,7 +100,7 @@ it('keeps the radar cohort running when the market top-up is cooling down',async
  await db.systemSetting.create({data:{key:HOLDER_FALLBACK_KEY,value:{cursor:'',attempts:{},cooldownUntil:new Date(+now+15*60000).toISOString()}}});
  const rpc=source();
  try{
-  expect(await refreshRadarHolders(db,rpc,now)).toMatchObject({holderFallbackCandidates:1,holderFallbackAttempts:1,holderFallbackWritten:1});
+  expect(await refreshRadarHolders(db,rpc,now,{...radarHolderBudget(),retrievedAt:()=>now})).toMatchObject({holderFallbackCandidates:1,holderFallbackAttempts:1,holderFallbackWritten:1});
  }finally{await db.systemSetting.deleteMany({where:{key:SOCIAL_INFO_PRIORITY_KEY}});}
 });
 it('cached Gecko refresh cannot relabel newer RPC holder evidence',async()=>{
@@ -148,7 +155,7 @@ it('refreshes the radar cohort independently of which tokens the market run pric
  await saveSocialPriority(db,[t.id],now);
  const rpc=source();
  try{
-  expect(await refreshRadarHolders(db,rpc,now)).toMatchObject({holderFallbackCandidates:1,holderFallbackAttempts:1,holderFallbackWritten:1});
+  expect(await refreshRadarHolders(db,rpc,now,{...radarHolderBudget(),retrievedAt:()=>now})).toMatchObject({holderFallbackCandidates:1,holderFallbackAttempts:1,holderFallbackWritten:1});
   expect(rpc.get).toHaveBeenCalledWith(t.mint);
   expect(await db.tokenHolderMetric.count({where:{tokenId:t.id}})).toBe(1);
  }finally{await db.systemSetting.deleteMany({where:{key:SOCIAL_INFO_PRIORITY_KEY}});}
@@ -166,7 +173,7 @@ it('does nothing for the radar cohort when the priority list has expired',async(
  await saveSocialPriority(db,[tokens[3]!.id],now);
  const rpc=source();
  try{
-  expect(await refreshRadarHolders(db,rpc,new Date(+now+COVERAGE_LIMITS.priorityMaxAgeMs+1))).toMatchObject({holderFallbackCandidates:0,holderFallbackAttempts:0});
+  expect(await refreshRadarHolders(db,rpc,new Date(+now+COVERAGE_LIMITS.priorityMaxAgeMs+1),{...radarHolderBudget(),retrievedAt:()=>now})).toMatchObject({holderFallbackCandidates:0,holderFallbackAttempts:0});
   expect(rpc.get).not.toHaveBeenCalled();
  }finally{await db.systemSetting.deleteMany({where:{key:SOCIAL_INFO_PRIORITY_KEY}});}
 });

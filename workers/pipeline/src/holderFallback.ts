@@ -33,7 +33,7 @@ export const HOLDER_FALLBACK_LIMITS={
  minDeadlineMs:5_000,
 } as const;
 
-export interface HolderFallbackBudget{perRun:number;deadlineMs:number;stateKey?:string}
+export interface HolderFallbackBudget{perRun:number;deadlineMs:number;stateKey?:string;/** Real retrieval time; defaults to the scheduling clock for deterministic tests. */retrievedAt?:()=>Date}
 
 /** Bounded operator tuning. Invalid or out-of-range values fall back to the defaults. */
 export function holderFallbackBudget(env:NodeJS.ProcessEnv=process.env):HolderFallbackBudget{
@@ -92,7 +92,9 @@ export async function refreshRadarHolders(
 ){
  const ids=await readSocialPriority(db,now);
  const tokens=ids.length?await db.token.findMany({where:{id:{in:ids},blacklisted:false,mint:{not:WSOL_MINT}},select:{id:true,mint:true}}):[];
- return refreshHolderFallback(db,source,tokens,()=>now,{...opts,stateKey:RADAR_HOLDER_FALLBACK_KEY});
+ // `now` orders the cohort and gates stale priority rows. Retrieval provenance must use
+ // the real clock: the RPC scan block time can land a second or two after the job start.
+ return refreshHolderFallback(db,source,tokens,()=>now,{...opts,stateKey:RADAR_HOLDER_FALLBACK_KEY,retrievedAt:opts.retrievedAt??(()=>new Date())});
 }
 
 /**
@@ -110,7 +112,7 @@ export async function refreshHolderFallback(
   holderFallbackFailovers:0,holderFallbackPrimaryCooldownUntil:source.primaryCooldownUntil?.()??null,
   holderFallbackReasons:noHolderFailures(),
  };
- const now=clock(),started=Date.now(),progressKey=opts.stateKey??HOLDER_FALLBACK_KEY;
+ const now=clock(),started=Date.now(),progressKey=opts.stateKey??HOLDER_FALLBACK_KEY;const retrievedAtClock=opts.retrievedAt??clock;
  const row=await db.systemSetting.findUnique({where:{key:progressKey}});
  const parsed=Progress.safeParse(row?.value),state=parsed.success?parsed.data:null;
  const unique=[...new Map(candidates.map(t=>[t.id,t])).values()];
@@ -163,7 +165,7 @@ export async function refreshHolderFallback(
   await db.systemSetting.upsert({where:{key:progressKey},create:{key:progressKey,value:claim},update:{value:claim}});
   const evidence=await read(token.mint);
   if(evidence.failedOver)out.holderFallbackFailovers++;
-  const retrievedAt=clock();
+  const retrievedAt=retrievedAtClock();
   if(evidence.ok&&evidence.mint===token.mint&&+evidence.sourceAt<=+retrievedAt&&+retrievedAt-+evidence.sourceAt<=RADAR_EVIDENCE_LIMITS.holdersMaxAgeMs){
    // Do not borrow developer ownership or smart-wallet counts from an older observation.
    await db.$transaction(async tx=>{
