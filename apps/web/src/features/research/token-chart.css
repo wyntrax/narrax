@@ -9,5 +9,7 @@
 :root[data-theme=light] .price-history-chart .price-down{color:#b14343}
 :root[data-theme=light] .price-history-chart.chart-negative .price-line{stroke:#b14343}
 :root[data-theme=light] .price-history-chart.chart-negative .snapshot-point{fill:#b14343}
-.price-history-chart .price-gap{fill:var(--tx2);fill-opacity:.07;stroke:var(--bd);stroke-dasharray:2 4;vector-effect:non-scaling-stroke}
+.price-history-chart .price-bridge{fill:none;stroke:var(--tx2);stroke-width:1.25;stroke-dasharray:3 5;stroke-linejoin:round;stroke-linecap:round;opacity:.55;vector-effect:non-scaling-stroke}
+.price-history-chart.chart-negative .price-bridge{stroke:#cf6262;opacity:.45}
+:root[data-theme=light] .price-history-chart.chart-negative .price-bridge{stroke:#b14343}
 @media(max-width:600px){.price-chart-summary{padding:14px;gap:12px}.price-chart-summary strong{font-size:20px}.price-scale-controls{padding:10px 14px}}

@@ -17,9 +17,16 @@ it('exposes timestamp and price through a keyboard-accessible observation slider
 });
 it('explains crash scaling and gaps and lets the reader choose linear prices',()=>{
  render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}><PriceHistoryChart points={[point(0,.0002),point(5,.0001),point(40,.0000022)]}/></NextIntlClientProvider>);
- expect(screen.getByText(/Logarithmic scale/)).toBeVisible();expect(screen.getByText(/Shaded intervals/)).toBeVisible();
+ expect(screen.getByText(/Logarithmic scale/)).toBeVisible();expect(screen.getByText(/Dashed bridges/)).toBeVisible();
  fireEvent.change(screen.getByLabelText('Price scale'),{target:{value:'linear'}});
  expect(screen.getByText(/Linear scale/)).toBeVisible();
+});
+it('connects observed points with a dashed bridge across a collection gap',()=>{
+ const {container}=render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}><PriceHistoryChart points={[point(0,1),point(5,2),point(40,3)]}/></NextIntlClientProvider>);
+ const bridge=container.querySelector('polyline.price-bridge');
+ expect(bridge).not.toBeNull();
+ expect(bridge!.getAttribute('points')?.trim().split(/\s+/)).toHaveLength(3);
+ expect(container.querySelector('.price-gap')).toBeNull();
 });
 it('shows honest empty and single-observation states without invented trends',()=>{
  const {rerender}=render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}><PriceHistoryChart points={[]}/></NextIntlClientProvider>);

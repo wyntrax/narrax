@@ -92,7 +92,7 @@
   "priceSamples":"{count} observasi",
   "priceChartLabel":"Harga token tercatat: {count} observasi bersumber",
   "inspectObservation":"Periksa observasi harga",
-  "priceLineNote":"Garis menghubungkan observasi tercatat, bukan candle. Jeda pengumpulan di atas 20 menit dan pergantian pool tidak dihubungkan.",
+  "priceLineNote":"Garis menghubungkan observasi tercatat, bukan candle. Garis putus-putus menjembatani jeda pengumpulan atau pergantian pool; harga di antara titik pengamatan tidak tercatat.",
   "priceObserved":"Snapshot harga dikumpulkan",
   "riskObserved":"Penilaian risiko tercatat",
   "eventCoverage":"Observasi kolektor dan penilaian tercatat, terbaru di atas. Ini bukan peristiwa trade, penambahan likuiditas atau mint on-chain. Pembuatan pool adalah waktu yang dilaporkan penyedia.",
