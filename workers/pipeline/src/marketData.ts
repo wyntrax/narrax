@@ -32,6 +32,9 @@ export const MARKET_DATA_LIMITS = {
   maxInfoCallsPerRun: 18,
   /** How long a token-info lookup (holders, authorities, risk) is reused. */
   infoRefreshMs: 30 * 60_000,
+  /** Two completed dead-pool reads (no matching pair or unusable liquidity) trigger this backoff. */
+  quoteFailureLimit: 2,
+  quoteQuarantineMs: 6 * 3_600_000,
   /** A token with a price row this recent stays in the refresh set. */
   activeWindowMs: 24 * 3_600_000,
   quoteBatch: 30,
@@ -173,7 +176,7 @@ export async function refreshMarketData(
   // candidates bounded first-observation slots, then rotate the general backlog.
   // The internal override is used by isolated integration fixtures; production uses the fixed 150-token budget.
   const cap = opts.maxTokens ?? L.maxTokensPerRun;
-  const tokenSelect = { id: true, mint: true, symbol: true, createdOnChainAt: true, risk: { orderBy: { at: 'desc' }, take: 1, select: { at: true } } } satisfies Prisma.TokenSelect;
+  const tokenSelect = { id: true, mint: true, symbol: true, createdOnChainAt: true, marketQuoteFailures: true, marketQuarantineUntil: true, risk: { orderBy: { at: 'desc' }, take: 1, select: { at: true } } } satisfies Prisma.TokenSelect;
   const waiting = await db.earlyRadarMeasurement.findMany({ where: { status: 'PENDING' }, orderBy: [{ nextCheckAt: 'asc' }, { id: 'asc' }], take: 500, select: { outcome: { select: { tokenId: true } } } });
   const priorityIds = [...new Set(waiting.map((w) => w.outcome.tokenId))].slice(0, Math.min(L.maxEarlyRadarTokensPerRun, cap));
   if (process.env.SMART_MONEY_RESEARCH_ENABLED === 'true' && priorityIds.length < cap) {
@@ -221,8 +224,9 @@ export async function refreshMarketData(
   // candidates a first price ahead of the general set, newest token id first. The budget is deliberately small: most
   // never-priced narrative tokens have no DEX pair and would otherwise consume half of every run without a write.
   const unpricedBudget = reservedIds.length >= cap ? 0 : Math.min(L.maxUnpricedTokensPerRun, Math.ceil((cap - reservedIds.length) / 2));
+  const quoteEligible: Prisma.TokenWhereInput = { OR: [{ marketQuarantineUntil: null }, { marketQuarantineUntil: { lte: now } }] };
   const unpriced = unpricedBudget ? await db.token.findMany({
-    where: { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: reservedIds }, metrics: { none: {} }, narratives: { some: {} } },
+    where: { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: reservedIds }, metrics: { none: {} }, narratives: { some: {} }, AND: [quoteEligible] },
     orderBy: { id: 'desc' }, take: unpricedBudget, select: tokenSelect,
   }) : [];
   const takenIds = [...reservedIds, ...unpriced.map(t => t.id)];
@@ -231,7 +235,7 @@ export async function refreshMarketData(
   // spends the general budget on NO_MATCHING_PAIR. Keep a few retries for metadata backfill.
   const generalWhere: Prisma.TokenWhereInput = {
       blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenIds }, symbol: { not: 'UNKNOWN' },
-      OR: [
+      AND: [quoteEligible, { OR: [
          { mint: { in: launchMints } },
          // Retry young pools even when the first quote was unavailable and the
          // next launch page no longer contains them. Age here is a pool proxy.
@@ -240,7 +244,7 @@ export async function refreshMarketData(
          // Resolving a wallet token's name must not remove it from market-price collection.
          { walletTrades: { some: { at: { gte: new Date(now.getTime() - L.activeWindowMs) } } } },
         { narratives: { some: {} } }, { positions: { some: {} } },
-      ],
+      ] }],
     };
   const unknownWhere: Prisma.TokenWhereInput = { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenIds }, symbol: 'UNKNOWN' };
   const generalCursor = await readCursor(db, GENERAL_PRICE_CURSOR_KEY);
@@ -289,6 +293,24 @@ export async function refreshMarketData(
     // Missing quotes and token-specific failures must not pin the cursor forever;
     // provider throttling leaves this batch and all unattempted batches in place.
     for (const mint of mints.slice(i, i + L.quoteBatch)) attempted.add(mint);
+  }
+  // Dead-pool backoff is scoped to the unpriced/general lanes. Priority sets
+  // (social, launches, outcomes, wallets, discovery) still get their attempt.
+  const DEAD_QUOTE_REASONS = new Set<SnapshotOmissionReason>(['NO_MATCHING_PAIR', 'INVALID_PAIR', 'LIQUIDITY_UNAVAILABLE']);
+  for (const t of [...unpriced, ...generalTokens]) {
+    if (snaps.has(t.mint)) {
+      if (t.marketQuoteFailures !== 0 || t.marketQuarantineUntil) {
+        await db.token.update({ where: { id: t.id }, data: { marketQuoteFailures: 0, marketQuarantineUntil: null } });
+      }
+      continue;
+    }
+    if (requests.get(t.mint) !== 'completed') continue;
+    const reason = omissions.get(t.mint);
+    if (!reason || !DEAD_QUOTE_REASONS.has(reason)) continue;
+    const failures = t.marketQuoteFailures + 1;
+    const data: Prisma.TokenUpdateInput = { marketQuoteFailures: failures };
+    if (failures >= L.quoteFailureLimit) data.marketQuarantineUntil = new Date(now.getTime() + L.quoteQuarantineMs);
+    await db.token.update({ where: { id: t.id }, data });
   }
   const lanes = { outcomes: priority, discovery, wallets, social, launches, unpriced, general: generalTokens };
   for (const lane of Object.keys(lanes) as PriceCoverageLane[]) {
