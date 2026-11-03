@@ -38,13 +38,13 @@ export function PriceHistoryChart({points}:{points:PricePoint[]}){
    <div className="price-scale-controls"><label>{isId?'Skala harga':'Price scale'} <select value={scale} onChange={e=>setScale(e.target.value as typeof scale)}><option value="auto">Auto</option><option value="linear">Linear</option><option value="log">Log</option></select></label><small>{geometry.log?(isId?'Skala logaritmik · perubahan proporsional':'Logarithmic scale · proportional changes'):(isId?'Skala linear · harga USD':'Linear scale · USD price')}{geometry.segments.length>1&&` · ${geometry.segments.length-1} ${isId?'jeda / pergantian pool':'gaps / pool changes'}`}</small></div>
    <svg viewBox="0 0 720 260" role="img" aria-label={t('enhance.priceChartLabel',{count:points.length})} onPointerMove={event=>{const matrix=event.currentTarget.getScreenCTM();if(!matrix)return;const x=new DOMPoint(event.clientX,event.clientY).matrixTransform(matrix.inverse()).x;let closest=0;geometry.samples.forEach((p,index)=>{if(Math.abs(p.x-x)<Math.abs(geometry.samples[closest]!.x-x))closest=index;});setSelected(closest);}} onPointerLeave={()=>setSelected(null)}>
     {geometry.ticks.map(({y,value})=><g key={y}><path className="research-gridline" d={`M90 ${y}H680`}/><text x="78" y={y+4} textAnchor="end">{axisPrice(value)}</text></g>)}
-    {geometry.segments.slice(1).map((segment,index)=>{const before=geometry.segments[index]!.at(-1)!;return <rect key={index} className="price-gap" x={before.x} y="30" width={Math.max(1,segment[0]!.x-before.x)} height="180"/>;})}
+    {geometry.segments.length>1&&<polyline className="price-bridge" points={geometry.samples.map(p=>`${p.x},${p.y}`).join(' ')}/>}
     {geometry.segments.map((segment,index)=>segment.length>1?<polyline key={index} className="price-line" points={segment.map(p=>`${p.x},${p.y}`).join(' ')}/>:<circle key={index} cx={segment[0]!.x} cy={segment[0]!.y} r="2.5" className="snapshot-point"/>)}
    <path className="price-crosshair" d={`M${sample.x} 25V215`}/><circle className="snapshot-point" cx={sample.x} cy={sample.y} r="5"/>
     <text x="90" y="244">{time(first!.at)}</text>{points.length>1&&<text x="680" y="244" textAnchor="end">{time(last!.at)}</text>}
   </svg>
   {points.length>1&&<div className="price-scrubber"><label htmlFor={id}>{t('enhance.inspectObservation')}</label><input id={id} type="range" min={0} max={points.length-1} value={selected??points.length-1} onChange={event=>setSelected(Number(event.target.value))} aria-valuetext={`${f.date(sample.at)} · ${f.usd(sample.priceUsd)}`}/></div>}
-   <figcaption>{points.length===1?t('chartSingle'):t('enhance.priceLineNote')}{geometry.segments.length>1&&` ${isId?'Area berarsir menandai data yang tidak terhubung; harga di antaranya tidak diketahui.':'Shaded intervals mark disconnected observations; prices between them are unknown.'}`}</figcaption>
+   <figcaption>{points.length===1?t('chartSingle'):t('enhance.priceLineNote')}</figcaption>
  </figure>;
 }
 
