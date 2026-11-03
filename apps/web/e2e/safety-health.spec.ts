@@ -20,6 +20,7 @@ for(const width of [1440,390])for(const screen of ['opportunities','token','heal
   };return path in overrides?{body:overrides[path]}:undefined;
  });
  await enterWorkspace(page,screen==='health'?'/app/admin':screen==='token'?`/app/tokens/${ADDRESS}`:'/app/opportunities');
+ if(screen==='health') await page.getByRole('tab',{name:'Research'}).click();
  if(screen==='health'){
   const panel=page.getByRole('region',{name:'Collector health'});await panel.scrollIntoViewIfNeeded();
   await expect(panel.getByText('Stale run',{exact:true})).toBeVisible();await expect(panel.getByText(/not a process heartbeat/)).toBeVisible();
