@@ -77,7 +77,7 @@ export function renderResearchCoverage(report: Awaited<ReturnType<typeof researc
     lines.push(`Run: ${market?.latest?.at} (${market?.stale ? 'STALE' : 'recent'}). Excludes the separate SOL reference-price request.`, '',
       '| Selection group | Selected | Written | No usable snapshot | Request failed | Not requested |',
       '| --- | ---: | ---: | ---: | ---: | ---: |');
-    for (const lane of ['outcomes', 'discovery', 'social', 'launches', 'unpriced', 'general']) lines.push(`| ${lane} | ${['selected', 'written', 'unavailable', 'failed', 'notRequested'].map(field => counters[`price.${lane}.${field}`] ?? 'UNKNOWN').join(' | ')} |`);
+    for (const lane of ['outcomes', 'discovery', 'social', 'launches', 'focus', 'unpriced', 'general']) lines.push(`| ${lane} | ${['selected', 'written', 'unavailable', 'failed', 'notRequested'].map(field => counters[`price.${lane}.${field}`] ?? 'UNKNOWN').join(' | ')} |`);
     lines.push('', `Instrumented UTC-day runs: ${market?.today?.counters['priceCoverage.runs'] ?? 'UNKNOWN'} / ${market?.today?.runs ?? 'UNKNOWN'} recorded runs. Partial instrumentation is not full-day coverage. No usable snapshot means a completed request returned none; it does not establish why the provider omitted it.`);
     lines.push('', '### Latest omission reasons', '');
     if (!counters['priceOmissions.runs']) lines.push('UNKNOWN: this run predates omission-reason instrumentation.');

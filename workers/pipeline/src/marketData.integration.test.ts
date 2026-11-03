@@ -201,6 +201,28 @@ describe.skipIf(!up)('market data refresh on a real Postgres', () => {
     const priced = await db.tokenMetric.findMany({ where: { token: { mint: { in: mints } } }, select: { tokenId: true } });
     expect(new Set(priced.map((p) => p.tokenId)).size).toBe(5);
   });
+  it('refreshes warm, watched and top emerging-narrative tokens in the bounded focus lane', async () => {
+    const warm = await db.token.create({ data: { mint: mint('FOCUSW'), symbol: `FW${tag}`, name: 'Focus warm', marketPriorityUntil: new Date(NOW.getTime() + 100 * H), metrics: { create: { priceUsd: 1, marketCapUsd: 100_000, liquidityUsd: 50_000, volume24hUsd: 1_000, at: ago(48) } } } });
+    const watched = await db.token.create({ data: { mint: mint('FOCUSM'), symbol: `FM${tag}`, name: 'Focus monitored' } });
+    const user = await db.user.create({ data: { privyUserId: `focus-${tag}` } });
+    await db.researchMonitor.create({ data: { userId: user.id, kind: 'TOKEN', name: 'Focus monitor', thesis: 'test', mint: watched.mint, rules: { active: true }, active: true } });
+    const narrative = await db.narrative.create({ data: { name: `Focus narrative ${tag}`, slug: `focus-${tag}`, stage: 'EMERGING', score: 1_000_000_000, velocity: 1 } });
+    const narrativeToken = await db.token.create({ data: { mint: mint('FOCUSN'), symbol: `FN${tag}`, name: 'Focus narrative token', metrics: { create: { priceUsd: 1, marketCapUsd: 100_000, liquidityUsd: 50_000, volume24hUsd: 1_000, at: ago(48) } } } });
+    await db.narrativeTokenRelation.create({ data: { narrativeId: narrative.id, tokenId: narrativeToken.id, relation: 'DERIVATIVE', ogScore: 10, matchScore: 1, confidence: 1 } });
+    try {
+      const good = { name: 'focus-probe', getSnapshots: async (mints: string[]) => new Map(mints.map(m => [m, snapshot(m, { liquidityUsd: 300_000, priceUsd: 0.01 })])) };
+      const r = await refreshMarketData(db, { quotes: good as never, info: null, launches: null }, new Date(NOW.getTime() + H), ROOMY);
+      expect(r.priceCoverage.focus.selected).toBeGreaterThanOrEqual(3);
+      expect((await tok(warm.mint)).metrics).toHaveLength(2);
+      expect((await tok(watched.mint)).metrics).toHaveLength(1);
+      expect((await tok(narrativeToken.mint)).metrics).toHaveLength(2);
+    } finally {
+      await db.token.deleteMany({ where: { id: { in: [warm.id, watched.id, narrativeToken.id] } } });
+      await db.narrative.deleteMany({ where: { id: narrative.id } });
+      await db.user.deleteMany({ where: { id: user.id } });
+    }
+  });
+
   it('backs off dead general-lane pools and clears the backoff after a real quote', async () => {
     const dead = await db.token.create({ data: { mint: mint('DEAD'), symbol: `DEAD${tag}`, name: 'Dead pool' } });
     await db.narrativeTokenRelation.create({ data: { narrativeId, tokenId: dead.id, relation: 'DERIVATIVE', matchScore: 0.5, ogScore: 10, confidence: 0.5 } });

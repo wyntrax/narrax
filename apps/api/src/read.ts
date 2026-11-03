@@ -23,6 +23,8 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
   const now = deps.now ?? (() => new Date());
   const opts = { preHandler: makeAuthenticate(deps), config: { rateLimit: { max: 120, timeWindow: '1 minute' } } };
   const bad = { error: 'INVALID_INPUT' } as const;
+  /** A manual quote keeps the token in the worker's bounded focus lane for two hours. */
+  const REFRESH_PRIORITY_MS = 2 * 60 * 60_000;
 
   app.get('/v1/narratives', opts, async (req, reply) => {
     const q = z.object({ limit: Limit, cursor: IdCursor.optional(), stage: z.enum(['SEED', 'EMERGING', 'ACCELERATING', 'MAINSTREAM', 'SATURATED', 'DECAYING', 'DEAD']).optional() }).safeParse(req.query);
@@ -223,7 +225,10 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
     if (!token || token.blacklisted) return reply.code(404).send({ error: 'NOT_FOUND' });
     const at = now();
     const latest = await db.tokenMetric.findFirst({ where: { tokenId: token.id }, orderBy: { at: 'desc' }, select: { at: true } });
-    if (latest && latest.at <= at && at.getTime() - latest.at.getTime() < 30_000) return { ok: true, reused: true, at: latest.at.toISOString() };
+    if (latest && latest.at <= at && at.getTime() - latest.at.getTime() < 30_000) {
+      await db.token.update({ where: { id: token.id }, data: { marketPriorityUntil: new Date(at.getTime() + REFRESH_PRIORITY_MS), marketQuoteFailures: 0, marketQuarantineUntil: null } });
+      return { ok: true, reused: true, at: latest.at.toISOString() };
+    }
     let read;
     try {
       read = quotes.getSnapshotsWithDiagnostics
@@ -242,6 +247,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
       const key = `research.market.${token.id}`;
       await tx.systemSetting.upsert({ where: { key }, create: { key, value }, update: { value } });
       await tx.systemSetting.create({ data: { key: `research.marketMetric.${metric.id}`, value } });
+      await tx.token.update({ where: { id: token.id }, data: { marketPriorityUntil: new Date(at.getTime() + REFRESH_PRIORITY_MS), marketQuoteFailures: 0, marketQuarantineUntil: null } });
     });
     return { ok: true, reused: false, at: at.toISOString() };
   });
