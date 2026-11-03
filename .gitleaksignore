@@ -3,3 +3,5 @@
 78f9e7b950efdef641371dd952b5e9df67f4f24d:packages/tx-verify/src/captured-simulation-fixtures.ts:generic-api-key:34
 78f9e7b950efdef641371dd952b5e9df67f4f24d:packages/tx-verify/src/captured-simulation-fixtures.ts:generic-api-key:47
 78f9e7b950efdef641371dd952b5e9df67f4f24d:packages/tx-verify/src/captured-simulation-fixtures.ts:generic-api-key:771
+# Reviewed public WSOL transaction fixture; the flagged value is a pool token address, not a secret.
+bb790cf9fa82105cbcf41666e86197b331689f4b:packages/solana/src/wsol-ownership.fixture.ts:generic-api-key:19
