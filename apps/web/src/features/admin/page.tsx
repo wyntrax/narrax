@@ -1,6 +1,7 @@
 'use client';
 import {useMemo,useRef,useState} from 'react';
 import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query';
+import * as Tabs from '@radix-ui/react-tabs';
 import {useLocale,useTranslations} from 'next-intl';
 import {useAuth} from '@/components/auth/context';
 import {ApiError} from '@/lib/api';
@@ -59,16 +60,32 @@ export function AdminPage() {
   const current = toSettings(settings.data.items);
   return <div className="admin-page">{heading}
     <AdminOverview settings={current} stats={stats.data}/>
-    <DataHealthCard api={api} queryKey={key('data-health')}/>
-    <WalletResearchCard api={api} queryKey={key('wallet-research')}/>
-    <div className="admin-grid">
-      <SettingsCard api={api} initial={current} stats={stats.data}/>
-      <WhitelistCard api={api}/>
-    </div>
-    <TiersCard api={api} initial={toTierForm(settings.data.items)}/>
-    <FeaturesCard api={api} items={settings.data.items}/>
-    <GrantsCard api={api}/>
-    <RuntimeCard api={api} queryKey={key('runtime')}/>
+    <Tabs.Root defaultValue="access" className="admin-tabs">
+      <Tabs.List className="admin-tab-list" aria-label={t('adminTitle')}>
+        <Tabs.Trigger className="admin-tab" value="access">{t('adminTabAccess')}</Tabs.Trigger>
+        <Tabs.Trigger className="admin-tab" value="tiers">{t('adminTabTiers')}</Tabs.Trigger>
+        <Tabs.Trigger className="admin-tab" value="research">{t('adminTabResearch')}</Tabs.Trigger>
+        <Tabs.Trigger className="admin-tab" value="runtime">{t('adminTabRuntime')}</Tabs.Trigger>
+      </Tabs.List>
+      <Tabs.Content className="admin-tab-panel" value="access">
+        <div className="admin-grid">
+          <SettingsCard api={api} initial={current} stats={stats.data}/>
+          <WhitelistCard api={api}/>
+        </div>
+        <GrantsCard api={api}/>
+      </Tabs.Content>
+      <Tabs.Content className="admin-tab-panel" value="tiers">
+        <TiersCard api={api} initial={toTierForm(settings.data.items)}/>
+        <FeaturesCard api={api} items={settings.data.items}/>
+      </Tabs.Content>
+      <Tabs.Content className="admin-tab-panel" value="research">
+        <DataHealthCard api={api} queryKey={key('data-health')}/>
+        <WalletResearchCard api={api} queryKey={key('wallet-research')}/>
+      </Tabs.Content>
+      <Tabs.Content className="admin-tab-panel" value="runtime">
+        <RuntimeCard api={api} queryKey={key('runtime')}/>
+      </Tabs.Content>
+    </Tabs.Root>
   </div>;
 }
 

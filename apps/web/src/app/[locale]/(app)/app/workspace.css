@@ -98,6 +98,12 @@
 .admin-page{display:flex;flex-direction:column;gap:22px;min-width:0}
 .admin-page>.research-heading,.admin-page>.admin-overview,.admin-page>.admin-card,.admin-page>.admin-grid{margin:0}
 .admin-page>.admin-card+.admin-card,.admin-page>.admin-grid+.admin-card{margin-top:0}
+.admin-tabs{min-width:0}
+.admin-tab-list{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--bd);padding:4px 0;margin-bottom:22px}
+.admin-tab{flex:none;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--tx2);padding:12px 16px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.admin-tab[data-state=active]{color:var(--tx);border-bottom-color:currentColor;background:var(--s2)}
+.admin-tab:focus-visible,.admin-tab-panel:focus-visible{outline:2px solid currentColor;outline-offset:-2px}
+.admin-tab-panel{min-width:0}
 .admin-feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:18px 24px}
 .admin-scroll{overflow-x:auto}
 .admin-table{width:100%;border-collapse:collapse;font-size:14px}.admin-table th{text-align:left;font-weight:500;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--tx3);padding:8px 12px 8px 0;border-bottom:1px solid var(--bd)}.admin-table td{padding:10px 12px 10px 0;border-bottom:1px solid var(--bd);vertical-align:middle}

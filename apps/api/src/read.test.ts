@@ -192,7 +192,7 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     const key = `research.holders.${token.id}`;
     try {
       for (const age of [0, 2 * 60 * 60 * 1000]) {
-        const retrievedAt = new Date().toISOString(), sourceAt = new Date(Date.now() - age).toISOString();
+        const observedAt = Date.now(), retrievedAt = new Date(observedAt).toISOString(), sourceAt = new Date(observedAt - age).toISOString();
         await db.systemSetting.upsert({ where: { key }, create: { key, value: { mint: token.mint, source: 'geckoterminal', sourceAt, retrievedAt, holders: 123, top10Pct: null, devHoldingPct: null } }, update: { value: { mint: token.mint, source: 'geckoterminal', sourceAt, retrievedAt, holders: 123, top10Pct: null, devHoldingPct: null } } });
         const response = await get(`/v1/tokens/${token.mint}`);
         expect(response.status).toBe(200);
