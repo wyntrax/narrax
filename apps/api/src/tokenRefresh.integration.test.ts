@@ -7,6 +7,7 @@ import { createPrisma } from '@narra/database';
 import { snapshot } from '@narra/market-data';
 import { buildApp } from './app';
 import { createPrivyVerifier } from './auth';
+import { seedTestPro, clearTestPro } from './test-membership';
 
 const url = process.env.DATABASE_URL ?? 'postgresql://narra:narra@localhost:5432/narra';
 async function dbUp() {
@@ -44,6 +45,7 @@ describe.skipIf(!up)('on-demand token quote refresh (needs Postgres)', () => {
     verifierKey = await generateKeyPair('ES256');
     app = await buildApp({ account: { db, verifier: createPrivyVerifier({ appId: APP_ID, verificationKey: await exportSPKI(verifierKey.publicKey) }) }, marketQuotes: quotes as never });
     userId = (await db.user.create({ data: { privyUserId: alice } })).id;
+    await seedTestPro(db, userId);
     tokenId = (await db.token.create({ data: { mint, symbol: 'REFRESH', name: 'Refresh token' } })).id;
     missingTokenId = (await db.token.create({ data: { mint: missingMint, symbol: 'MISSING', name: 'Missing pool' } })).id;
   });
@@ -51,6 +53,7 @@ describe.skipIf(!up)('on-demand token quote refresh (needs Postgres)', () => {
     const metrics = await db.tokenMetric.findMany({ where: { tokenId: { in: [tokenId, missingTokenId] } }, select: { id: true } });
     await db.systemSetting.deleteMany({ where: { OR: [{ key: { in: [tokenId, missingTokenId].map(id => `research.market.${id}`) } }, { key: { in: metrics.map(m => `research.marketMetric.${m.id}`) } }] } });
     await db.token.deleteMany({ where: { id: { in: [tokenId, missingTokenId] } } });
+    await clearTestPro(db, [userId]);
     await db.user.deleteMany({ where: { id: userId } });
     await app.close(); await db.$disconnect();
   });

@@ -216,6 +216,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
   app.post('/v1/tokens/:mint/refresh', { ...opts, config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
     const params = z.object({ mint: z.string().min(1).max(80) }).safeParse(req.params);
     if (!params.success || !isSolanaAddress(params.data.mint)) return reply.code(400).send(bad);
+    await requireFeature(db, 'research.tokens', now)(req, reply); if (reply.sent) return;
     const quotes = deps.marketQuotes;
     if (!quotes) return reply.code(503).send({ error: 'MARKET_QUOTES_UNAVAILABLE' });
     const token = await db.token.findUnique({ where: { mint: params.data.mint }, select: { id: true, mint: true, blacklisted: true } });
