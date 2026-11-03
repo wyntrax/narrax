@@ -611,6 +611,10 @@ model Token {
   blacklistReason  String?
   blacklistedAt    DateTime?
   blacklistedBy    String?
+  /// Consecutive completed quote reads with no matching pair or usable liquidity.
+  marketQuoteFailures Int @default(0)
+  /// Skip the general price lanes until this time after repeated dead-pool reads.
+  marketQuarantineUntil DateTime?
   metrics          TokenMetric[]
   holders          TokenHolderMetric[]
   risk             TokenRiskMetric[]
@@ -625,6 +629,7 @@ model Token {
   earlyBuyers      TokenEarlyBuyers?
 
   @@index([symbol])
+  @@index([marketQuarantineUntil])
 }
 
 model TokenMetric {
