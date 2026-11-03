@@ -615,6 +615,8 @@ model Token {
   marketQuoteFailures Int @default(0)
   /// Skip the general price lanes until this time after repeated dead-pool reads.
   marketQuarantineUntil DateTime?
+  /// A manual refresh keeps this token in the bounded focus lane until this time.
+  marketPriorityUntil DateTime?
   metrics          TokenMetric[]
   holders          TokenHolderMetric[]
   risk             TokenRiskMetric[]
@@ -630,6 +632,7 @@ model Token {
 
   @@index([symbol])
   @@index([marketQuarantineUntil])
+  @@index([marketPriorityUntil])
 }
 
 model TokenMetric {

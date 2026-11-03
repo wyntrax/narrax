@@ -92,7 +92,7 @@
   "priceSamples":"{count} observations",
   "priceChartLabel":"Recorded token prices: {count} source-linked observations",
   "inspectObservation":"Inspect a price observation",
-  "priceLineNote":"Lines connect recorded observations, not candles. Dashed bridges span collection gaps or pool switches; prices between observed points are not recorded.","freshQuote":"Get fresh quote","freshQuoteSaved":"Fresh provider quote recorded.","freshQuoteReused":"A recent observation already exists.","freshQuoteFailed":"No fresh quote could be recorded. Try again later.",
+  "priceLineNote":"Lines connect recorded observations, not candles. Dashed bridges span collection gaps or pool switches; prices between observed points are not recorded.","freshQuote":"Get fresh quote","freshQuoteSaved":"Fresh provider quote recorded. This token is prioritized for the next two hours.","freshQuoteReused":"A recent observation already exists.","freshQuoteFailed":"No fresh quote could be recorded. Try again later.",
   "priceObserved":"Price snapshot collected",
   "riskObserved":"Risk assessment recorded",
   "eventCoverage":"Collector observations and recorded assessments, newest first. These are not on-chain trade, liquidity-addition or mint events. Pool creation is a provider-reported timestamp.",

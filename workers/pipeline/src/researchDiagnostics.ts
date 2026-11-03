@@ -34,7 +34,7 @@ export async function saveResearchDiagnostics(db: PrismaClient, stage: ResearchS
     if (key === 'priceCoverage' && value && typeof value === 'object') {
       // Explicit allowlist: no token identifiers, errors or provider bodies in diagnostics.
       counters['priceCoverage.runs'] = 1;
-      for (const lane of ['outcomes', 'discovery', 'social', 'launches', 'unpriced', 'general']) {
+      for (const lane of ['outcomes', 'discovery', 'social', 'launches', 'focus', 'unpriced', 'general']) {
         const counts = (value as Record<string, unknown>)[lane];
         if (!counts || typeof counts !== 'object') continue;
         for (const field of ['selected', 'written', 'unavailable', 'failed', 'notRequested']) {
@@ -45,7 +45,7 @@ export async function saveResearchDiagnostics(db: PrismaClient, stage: ResearchS
     }
     if (key === 'priceOmissions' && value && typeof value === 'object') {
       counters['priceOmissions.runs'] = 1;
-      for (const lane of ['outcomes', 'discovery', 'social', 'launches', 'unpriced', 'general']) {
+      for (const lane of ['outcomes', 'discovery', 'social', 'launches', 'focus', 'unpriced', 'general']) {
         const reasons = (value as Record<string, unknown>)[lane];
         if (!reasons || typeof reasons !== 'object') continue;
         for (const reason of SNAPSHOT_OMISSION_REASONS) {

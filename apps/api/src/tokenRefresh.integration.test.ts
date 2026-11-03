@@ -68,6 +68,7 @@ describe.skipIf(!up)('on-demand token quote refresh (needs Postgres)', () => {
 
   it('writes one current quote with provenance, then reuses it for a duplicate click', async () => {
     calls = 0; mode = 'ok';
+    await db.token.update({ where: { id: tokenId }, data: { marketQuoteFailures: 2, marketQuarantineUntil: new Date(Date.now() + 6 * 60 * 60_000) } });
     const first = await request(`/v1/tokens/${mint}/refresh`);
     expect(first.status).toBe(200); expect(first.body).toMatchObject({ ok: true, reused: false });
     expect(calls).toBe(1);
@@ -75,6 +76,10 @@ describe.skipIf(!up)('on-demand token quote refresh (needs Postgres)', () => {
     expect(metrics).toHaveLength(1);
     const evidence = await db.systemSetting.findUniqueOrThrow({ where: { key: `research.market.${tokenId}` } });
     expect(evidence.value).toMatchObject({ metricId: metrics[0]!.id, mint, source: 'dexscreener', pairAddress: expect.any(String) });
+    const refreshed = await db.token.findUniqueOrThrow({ where: { id: tokenId } });
+    expect(refreshed.marketQuoteFailures).toBe(0);
+    expect(refreshed.marketQuarantineUntil).toBeNull();
+    expect(refreshed.marketPriorityUntil!.getTime()).toBeGreaterThan(Date.now());
     const second = await request(`/v1/tokens/${mint}/refresh`);
     expect(second.status).toBe(200); expect(second.body).toMatchObject({ ok: true, reused: true });
     expect(calls).toBe(1);
