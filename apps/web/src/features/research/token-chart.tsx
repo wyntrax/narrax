@@ -1,23 +1,30 @@
 'use client';
 import {useState,useId} from 'react';
+import {useMutation,useQueryClient} from '@tanstack/react-query';
 import {useTranslations,useLocale} from 'next-intl';
 import {Clock3,Activity,ShieldCheck,Wallet} from 'lucide-react';
-import {TokenHistorySchema,type Token,type PricePoint} from './contracts';
-import {useResearchQuery} from './session';
+import {TokenHistorySchema,TokenRefreshSchema,type Token,type PricePoint} from './contracts';
+import {useResearch,useResearchQuery} from './session';
 import {Loading,ResourceError,useFormat} from './ui';
 import {priceGeometry} from './price-geometry';
 import {useTokenMarketState} from './token-brief';
 import './token-chart.css';
 
 export default function TokenPricePanel({token}:{token:Token}){
- const t=useTranslations('workspace'),[window,setWindow]=useState<'1h'|'24h'|'7d'>('24h');
+ const t=useTranslations('workspace'),[window,setWindow]=useState<'1h'|'24h'|'7d'>('24h'),{send,userId}=useResearch(),client=useQueryClient(),[freshStatus,setFreshStatus]=useState<'saved'|'reused'|'failed'|null>(null);
  const query=useResearchQuery(`tokens/${encodeURIComponent(token.mint)}/history?window=${window}`,TokenHistorySchema,true,60000);
   const marketState=useTokenMarketState(token);
   const current=marketState==='fresh'&&token.observation&&token.metrics?{at:token.metrics.at,priceUsd:token.metrics.priceUsd,source:'dexscreener' as const,pairAddress:token.observation.pairAddress}:null;
  const fallback:PricePoint[]=current&&current.priceUsd!=null&&current.priceUsd>0?[{...current,priceUsd:current.priceUsd}]:[];
  const points=query.data?.points??fallback;
+ const fresh=useMutation({
+  mutationFn:()=>send(`tokens/${encodeURIComponent(token.mint)}/refresh`,TokenRefreshSchema,'POST'),
+  onSuccess:async result=>{setFreshStatus(result.reused?'reused':'saved');await client.invalidateQueries({queryKey:['research',userId]});await query.refetch();},
+  onError:()=>setFreshStatus('failed'),
+ });
  return <div className="token-market-panel">
-  <div className="price-panel-toolbar"><div role="group" aria-label={t('enhance.priceWindow')}>{(['1h','24h','7d'] as const).map(range=><button key={range} className="research-control" aria-pressed={window===range} onClick={()=>setWindow(range)}>{range.toUpperCase()}</button>)}</div><button className="research-control" disabled={query.isFetching} onClick={()=>void query.refetch()}>{t('refresh')}</button></div>
+  <div className="price-panel-toolbar"><div role="group" aria-label={t('enhance.priceWindow')}>{(['1h','24h','7d'] as const).map(range=><button key={range} className="research-control" aria-pressed={window===range} onClick={()=>setWindow(range)}>{range.toUpperCase()}</button>)}</div><div className="price-panel-actions"><button className="research-control" disabled={query.isFetching} onClick={()=>void query.refetch()}>{t('refresh')}</button><button className="research-control" disabled={query.isFetching||fresh.isPending} onClick={()=>fresh.mutate()}>{t('enhance.freshQuote')}</button></div></div>
+  {freshStatus&&<p className="research-note" role={freshStatus==='failed'?'alert':'status'}>{t(freshStatus==='saved'?'enhance.freshQuoteSaved':freshStatus==='reused'?'enhance.freshQuoteReused':'enhance.freshQuoteFailed')}</p>}
   {query.isError&&<ResourceError error={query.error} retry={()=>void query.refetch()}/>}
   {query.isPending?<Loading/>:<PriceHistoryChart key={window} points={points}/>}
   <p className="research-note">{t('enhance.priceCoverage')}{query.data?.truncated&&` ${t('enhance.priceCapped')}`}</p>

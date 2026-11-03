@@ -74,6 +74,7 @@ export const TokenSchema=TokenRef.extend({
 export type Token=z.infer<typeof TokenSchema>;
 export const TokenHistorySchema=z.object({window:z.enum(['1h','24h','7d']),asOf:date,points:z.array(z.object({at:date,priceUsd:number.positive(),source:z.literal('dexscreener'),pairAddress:text})),truncated:z.boolean(),excludedUnverified:z.number().int().nonnegative()});
 export type PricePoint=z.infer<typeof TokenHistorySchema>['points'][number];
+export const TokenRefreshSchema=z.object({ok:z.literal(true),reused:z.boolean(),at:date});
 
 // ---- Smart money, alerts, analytics, settings and chat. Mirrors apps/api/src/{read,alerts,analytics,settings,chat}.ts. ----
 export const SmartWalletSchema=z.object({address:text,label:text.nullish(),score:nullable,source:text.optional(),profileAt:date.nullish(),metricsAt:date.nullish(),trackedSince:date.optional(),lastTradeAt:date.nullish(),observedTrades:z.number().int().nonnegative().optional(),evidenceStatus:z.literal('UNVERIFIED').optional(),leaderScore:nullable.optional(),style:text.nullish(),medianHoldSeconds:nullable.optional(),bestPattern:text.nullish(),weakPattern:text.nullish(),winRate:nullable.optional(),pnl30dSol:nullable.optional(),closedTrades:nullable.optional(),avgRoi:nullable.optional(),cluster:z.object({id:text,confidence:text.or(number)}).nullable().optional()});
