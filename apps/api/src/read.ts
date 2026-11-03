@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { PrismaClient } from '@narra/database';
+import type {MarketQuoteSource} from '@narra/market-data';
+import {isSolanaAddress,tokenImageUrl} from '@narra/shared';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { IdCursor, Limit, decodeCursor, encodeCursor, likeEscape } from './paging';
 import { ScreenerQuery, isScreenerRequest, runScreener } from './screener';
@@ -16,7 +18,7 @@ const Paging = z.object({ limit: Limit, cursor: IdCursor.optional() });
 const OppCursor = z.tuple([z.number().finite(), z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)]);
 
 /** Read-only endpoints that feed the UI. Market data is shared; positions and trades are scoped to the signed-in user. */
-export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps, 'db' | 'verifier' | 'now'>): void {
+export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps, 'db' | 'verifier' | 'now'> & {marketQuotes?: MarketQuoteSource}): void {
   const db: PrismaClient = deps.db;
   const now = deps.now ?? (() => new Date());
   const opts = { preHandler: makeAuthenticate(deps), config: { rateLimit: { max: 120, timeWindow: '1 minute' } } };
@@ -209,6 +211,38 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
       consensus: c ? { score: c.score, walletCount: c.walletCount, independentEntities: c.independentEntities, leaderCount: c.leaderCount, netFlowSol: n(c.netFlowSol), timingConcentration: c.timingConcentration } : null,
       narratives: t.narratives.map((r) => ({ ...r.narrative, relation: r.relation, ogScore: r.ogScore })),
     };
+  });
+
+  app.post('/v1/tokens/:mint/refresh', { ...opts, config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const params = z.object({ mint: z.string().min(1).max(80) }).safeParse(req.params);
+    if (!params.success || !isSolanaAddress(params.data.mint)) return reply.code(400).send(bad);
+    const quotes = deps.marketQuotes;
+    if (!quotes) return reply.code(503).send({ error: 'MARKET_QUOTES_UNAVAILABLE' });
+    const token = await db.token.findUnique({ where: { mint: params.data.mint }, select: { id: true, mint: true, blacklisted: true } });
+    if (!token || token.blacklisted) return reply.code(404).send({ error: 'NOT_FOUND' });
+    const at = now();
+    const latest = await db.tokenMetric.findFirst({ where: { tokenId: token.id }, orderBy: { at: 'desc' }, select: { at: true } });
+    if (latest && latest.at <= at && at.getTime() - latest.at.getTime() < 30_000) return { ok: true, reused: true, at: latest.at.toISOString() };
+    let read;
+    try {
+      read = quotes.getSnapshotsWithDiagnostics
+        ? await quotes.getSnapshotsWithDiagnostics([token.mint])
+        : { snapshots: await quotes.getSnapshots([token.mint]), omissions: new Map<string, never>() };
+    } catch {
+      return reply.code(503).send({ error: 'MARKET_QUOTES_UNAVAILABLE' });
+    }
+    const snapshot = read.snapshots.get(token.mint);
+    if (!snapshot || snapshot.mint !== token.mint || !Number.isFinite(snapshot.priceUsd) || snapshot.priceUsd <= 0 || !snapshot.pairAddress) {
+      return reply.code(422).send({ error: 'MARKET_SNAPSHOT_UNAVAILABLE', reason: read.omissions.get(token.mint) ?? 'UNSPECIFIED' });
+    }
+    await db.$transaction(async (tx) => {
+      const metric = await tx.tokenMetric.create({ data: { tokenId: token.id, priceUsd: snapshot.priceUsd, marketCapUsd: snapshot.marketCapUsd, liquidityUsd: snapshot.liquidityUsd, volume24hUsd: snapshot.volume24hUsd, at } });
+      const value = { mint: snapshot.mint, imageUrl: tokenImageUrl(snapshot.imageUrl), metricId: metric.id, at: at.toISOString(), source: quotes.name, marketCapIsFdv: snapshot.marketCapIsFdv, priceChange1hPct: snapshot.priceChange1hPct, pairAddress: snapshot.pairAddress, dexId: snapshot.dexId, pairCreatedAt: snapshot.pairCreatedAt?.toISOString() ?? null };
+      const key = `research.market.${token.id}`;
+      await tx.systemSetting.upsert({ where: { key }, create: { key, value }, update: { value } });
+      await tx.systemSetting.create({ data: { key: `research.marketMetric.${metric.id}`, value } });
+    });
+    return { ok: true, reused: false, at: at.toISOString() };
   });
 
   app.get('/v1/smart-money/wallets', opts, async (req, reply) => {

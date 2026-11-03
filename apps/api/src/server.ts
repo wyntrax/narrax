@@ -3,6 +3,7 @@ import { createPrisma } from '@narra/database';
 import { createQueues, createRedis, createPersonalResearchQueue } from '@narra/queue';
 import { createEventStream } from '@narra/realtime';
 import { SolanaRpc,JupiterClient } from '@narra/solana';
+import { DexScreenerSource } from '@narra/market-data';
 import { makeWalletEventStore } from '@narra/worker-pipeline';
 import { aiProviderFromEnv } from '@narra/ai';
 import { createRuntimePrivyVerifier } from './auth';
@@ -42,6 +43,8 @@ async function main() {
     chatLlm,
     // Quote-only provider. Manual paper routes can never enqueue, sign or send.
     paperQuotes:{getQuote:request=>paperQuoteClient.getQuote(request)},
+    // One-token on-demand market quote. No wallet, signing or execution access.
+    marketQuotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }),
     requestWalletSync: syncConfigured ? () => queues.requestWalletSync() : undefined,
     enqueueExecution: (job) => queues.enqueueExecution(job),
     account: { db, verifier: createRuntimePrivyVerifier(runtime), requestPersonalResearch: userId => personalResearch.request(userId), requestTokenDiscovery: mint => queues.enqueueTokenDiscovery(mint), requestMembershipSync: userId => queues.requestWyntraxHoldings(userId) },
