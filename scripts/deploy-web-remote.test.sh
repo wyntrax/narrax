@@ -53,7 +53,7 @@ FAKE
   cat > "$BIN/timeout" <<'FAKE'
 #!/usr/bin/env bash
 echo "timeout $*" >> "$CALLS"
-[ "$1" = --kill-after=15s ] && [ "$2" = 180s ] || exit 2
+[ "$1" = --kill-after=15s ] && [ "$2" = 600s ] || exit 2
 shift 2
 if [ "${FAKE_PULL_TIMEOUT:-0}" = 1 ]; then exit 124; fi
 exec "$@"
@@ -119,5 +119,5 @@ new_host; previous; WITH_REGISTRY=1 FAKE_PULL_RC=1 run
 ok 'persistent pull failure stops at three and preserves previous release and config' '[ "$RC" != 0 ] && [ "$(cat "$CALLS.pulls")" = 3 ] && ! grep -Eq " (run|stop|up) " "$CALLS" && grep -q "$OLD_SHA" "$DEP/.deploy/web/current_release" && grep -q old.example "$DEP/.deploy/web/current.env" && [ "$(cat "$ACTIVE")" = "$OLD" ]'
 ok 'persistent pull failure still logs out' 'grep -q "logout ghcr.io" "$CALLS"'
 new_host; FAKE_PULL_TIMEOUT=1 run
-ok 'timeout ends after three bounded attempts without replacement' '[ "$RC" != 0 ] && [ "$(grep -c "^timeout --kill-after=15s 180s" "$CALLS")" = 3 ] && ! grep -Eq " (run|stop|up) " "$CALLS" && [ ! -f "$DEP/.deploy/web/current_release" ]'
+ok 'timeout ends after three bounded attempts without replacement' '[ "$RC" != 0 ] && [ "$(grep -c "^timeout --kill-after=15s 600s" "$CALLS")" = 3 ] && ! grep -Eq " (run|stop|up) " "$CALLS" && [ ! -f "$DEP/.deploy/web/current_release" ]'
 printf '%s frontend deployment checks passed.\n' "$CHECKS"

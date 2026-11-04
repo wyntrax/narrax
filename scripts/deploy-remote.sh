@@ -29,6 +29,10 @@ cd "$DEPLOY_PATH"
 [ -f "$OVERRIDE_FILE" ] || die "missing $OVERRIDE_FILE"
 [ -f .env ] || die "missing .env on the host (secrets live there, never in the repository or the image)"
 mkdir -p "$STATE_DIR"
+# One backend deploy at a time. Without this, a manual deploy and a release job can stop/recreate
+# the same services and concurrently alter the recorded current image.
+exec 9>"$STATE_DIR/deploy.lock"
+flock -n 9 || die "another backend deployment is active"
 
 # Nothing may give the trading stage a signing credential before the owner has explicitly approved that step.
 for name in EXECUTOR_SIGNING_KEY WALLET_PRIVATE_KEY SOLANA_PRIVATE_KEY PRIVY_AUTHORIZATION_PRIVATE_KEY PRIVY_AUTHORIZATION_KEY; do
@@ -94,8 +98,8 @@ fi
 # before migrations or service replacement; completed layers are reused by Docker.
 pulled=0
 for attempt in 1 2 3; do
-  log "pulling image (attempt $attempt/3; 180s timeout)"
-  if timeout --kill-after=15s 180s "${compose[@]}" pull --quiet migrate "${SERVICES[@]}"; then pulled=1; break; fi
+  log "pulling image (attempt $attempt/3; 600s timeout)"
+  if timeout --kill-after=15s 600s "${compose[@]}" pull --quiet migrate "${SERVICES[@]}"; then pulled=1; break; fi
   if [ "$attempt" -lt 3 ]; then
     delay=$((attempt * 10))
     log "image pull failed; retrying in ${delay}s"
