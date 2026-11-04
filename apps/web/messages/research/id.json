@@ -77,6 +77,18 @@
    }
   },
   "enhance":{
+  "openPositions":"Posisi teramati yang masih terbuka",
+  "openPositionsScope":"Sisa inventaris token dari swap teramati selama 30 hari terakhir. Transfer, saldo on-chain saat ini, dan swap yang tidak didukung tidak direkonsiliasi; ini bukan saldo dompet langsung.",
+  "openPositionsCapped":"Berdasarkan riwayat maksimal 10.000 swap; posisi yang lebih lama dapat terlewat.",
+  "openPositionsUnavailable":"Posisi terbuka menunggu evaluasi dompet berikutnya.",
+  "noOpenPositions":"Tidak ada sisa inventaris teramati dalam 30 hari terakhir.",
+  "openToken":"Token",
+  "openQuantity":"Jumlah",
+  "openRemainingCost":"Sisa biaya · SOL",
+  "openOpened":"Dibuka",
+  "openLastSwap":"Swap terakhir teramati",
+  "openPrice":"Harga terbaru",
+  "partiallySold":"Sebagian terjual",
   "insufficientHistory":"Trade cocok belum cukup",
   "tradeSample":"{buys} pembelian · {sells} penjualan · {unmatched} penjualan tanpa pembelian tercatat.",
   "historyRepair":"Perbaikan riwayat: {accepted} swap diterima dari {scanned} transaksi dipindai. Diperiksa: {at}.",

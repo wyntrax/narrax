@@ -5,6 +5,7 @@ import type { PrismaClient } from '@narra/database';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { IdCursor, Limit, likeEscape } from './paging';
 import { canReadFeature, requireFeature } from './entitlements/access';
+import { WalletOpenPositions } from '@narra/shared';
 
 const n = (v: { toString(): string } | null | undefined) => (v == null ? null : Number(v.toString()));
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
@@ -39,13 +40,14 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     });
     if (!w) return reply.code(404).send({ error: 'NOT_FOUND' });
 
-    const [metricRows, trades, scan, intelligence, history, historyAttempt] = await Promise.all([
+    const [metricRows, trades, scan, intelligence, history, historyAttempt, openPositionsRow] = await Promise.all([
       db.walletMetric.findMany({ where: { walletId: w.id }, orderBy: { computedAt: 'desc' }, take: 40 }),
       db.walletTrade.findMany({ where: { walletId: w.id }, orderBy: [{ at: 'desc' }, { id: 'desc' }], take: WALLET_DETAIL.recentTrades, include: { token: { select: { mint: true, symbol: true, name:true } } } }),
       db.walletTrade.findMany({ where: { walletId: w.id, at: { gte: new Date(now().getTime() - WALLET_DETAIL.narrativeLookbackDays * DAY) } }, orderBy: { at: 'desc' }, take: WALLET_DETAIL.narrativeTradeScan, select: { tokenId: true, side: true, amountSol: true, at: true } }),
       db.systemSetting.findUnique({ where: { key: `wallet.intelligence.${w.id}` } }),
       db.systemSetting.findUnique({ where: { key: `wallet.history.${w.id}` } }),
       db.systemSetting.findUnique({ where: { key: `wallet.historyAttempt.${w.id}` } }),
+      db.systemSetting.findUnique({ where: { key: `wallet.openPositions.${w.id}` } }),
     ]);
 
     // Newest reading per window.
@@ -74,6 +76,29 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
 
     const f = w.funding;
     const images=await marketTokenImages(db,trades.map(t=>({id:t.tokenId,mint:t.token.mint})));
+    const openParsed = WalletOpenPositions.safeParse(openPositionsRow?.value);
+    const open = openParsed.success ? openParsed.data : null;
+    const openTokenIds = open ? [...new Set(open.positions.map((p) => p.tokenId))] : [];
+    const openTokenRows = openTokenIds.length ? await db.token.findMany({
+      where: { id: { in: openTokenIds } },
+      select: { id: true, mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1, select: { priceUsd: true, at: true } } },
+    }) : [];
+    const openImages = await marketTokenImages(db, openTokenRows.map((t) => ({ id: t.id, mint: t.mint })));
+    const openById = new Map(openTokenRows.map((t) => [t.id, t]));
+    const observedAt = now();
+    const openPositions = open ? {
+      ...open,
+      positions: open.positions.map((p) => {
+        const t = openById.get(p.tokenId), m = t?.metrics[0], priceAt = m?.at ?? null;
+        return {
+          ...p,
+          token: t ? { mint: t.mint, symbol: t.symbol, name: t.name, imageUrl: openImages.get(t.id) ?? null } : null,
+          priceUsd: n(m?.priceUsd),
+          priceAt,
+          priceStale: !priceAt || +priceAt > +observedAt || +observedAt - +priceAt > 15 * 60_000,
+        };
+      }),
+    } : null;
     return {
       address: w.address, label: w.label, source: w.source, trackedSince: w.createdAt,
       researchReview: w.researchReview, qualification: (await walletQualifications(db,[w],now())).get(w.id),
@@ -90,6 +115,7 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
       ],
       funding: f ? { status: f.status, funder: f.funder, fundedAt: f.fundedAt, amountSol: f.lamports != null ? Number(f.lamports) / LAMPORTS : null, checkedAt: f.checkedAt } : null,
       recentTrades: trades.map((t) => ({ id: t.id, at: t.at, side: t.side, amountSol: n(t.amountSol), marketCapUsd: n(t.marketCapUsd), signature: t.signature, token: {...t.token,imageUrl:images.get(t.tokenId)??null} })),
+      openPositions,
       narrativeHistory: { lookbackDays: WALLET_DETAIL.narrativeLookbackDays, scannedTrades: scan.length, scanCapped: scan.length === WALLET_DETAIL.narrativeTradeScan, items: [...hist.values()].sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime()).map((h) => ({ ...h, netSol: Math.round(h.netSol * 1e6) / 1e6 })) },
     };
   });

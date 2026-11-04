@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from '@narra/database';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import {bulkSettings,bulkProfiles,PUBLICATION_BATCH_SIZE,type ProfilePublication} from './bulkPublication';
 import {readIntelligenceInputs} from './walletIntelligenceRead';
-import { computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
+import { computeWalletOpenPositions, computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
 import {
   classifyStyle, computeConsensus, computeLeaderStats, computeWalletStats, detectTimingClusters, holdingPatterns, rotationRate, walletScore, MIN_CLOSED_LEGS, researchSample,
   type ConsensusEvent, type Entry, type TradeRow, type WalletInfo,
@@ -88,6 +88,7 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
     const performanceKey = `wallet.performance.${w.id}`, observed = performanceRows.get(w.id) ?? [];
     const performance = computeWalletPerformance(observed.slice(0,10_000),now,observed.length>10_000);
     settings.push({key:performanceKey,value:performance});
+    settings.push({key:`wallet.openPositions.${w.id}`,value:computeWalletOpenPositions(observed.slice(0,10_000),now,observed.length>10_000)});
     const mine = byWallet.get(w.id) ?? [];
     const stats = computeWalletStats(mine);
     const score = walletScore(stats);

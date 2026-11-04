@@ -22,6 +22,20 @@ export const WalletPerformance = z.object({
   bands: z.array(WalletBandPerformance),
 });
 export type WalletPerformance = z.infer<typeof WalletPerformance>;
+
+/** Snapshot of remaining observed swap inventory. This is not an on-chain balance. */
+export const WalletOpenPosition = z.object({
+  tokenId: z.string(), entryTradeId: z.string(), band: WalletEntryBand,
+  quantity: decimal, remainingCostSol: decimal, investedSol: decimal, entrySol: decimal,
+  openedAt: z.string().datetime(), lastTradeAt: z.string().datetime(), partiallySold: z.boolean(),
+});
+export type WalletOpenPosition = z.infer<typeof WalletOpenPosition>;
+export const WalletOpenPositions = z.object({
+  version: z.literal(1), checkedAt: z.string().datetime(), windowDays: z.literal(30),
+  observedTrades: count, capped: z.boolean(), invalidTrades: count, unmatchedSells: count,
+  positions: z.array(WalletOpenPosition),
+});
+export type WalletOpenPositions = z.infer<typeof WalletOpenPositions>;
 export const WalletRankingPage = z.object({
   asOf: z.string().datetime(), band: WalletEntryBand, windowDays: z.literal(30), total: count, capped: z.boolean(),
   minMedianPositionSol: n.nonnegative().optional(),
