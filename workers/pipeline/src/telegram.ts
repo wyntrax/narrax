@@ -33,8 +33,12 @@ export interface TelegramSendResult {
   description?: string;
 }
 
+export interface TelegramSendOptions {
+  parseMode?: 'HTML';
+}
+
 export interface TelegramTransport {
-  send(chatId: string, text: string): Promise<TelegramSendResult>;
+  send(chatId: string, text: string, options?: TelegramSendOptions): Promise<TelegramSendResult>;
 }
 
 export interface TelegramAlertRow {
@@ -118,6 +122,7 @@ export function telegramCursorKey(chatId: string): string {
 }
 
 const truncate = (text: string, max: number): string => max <= 0 ? '' : (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
+const escapeHtml = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 const RESEARCH_ONLY = /\s*Research signal only, not a prediction or a recommendation to buy\.?\s*$/i;
 /** The pipeline appends this suffix to new calls. Parsing it is presentation only; the stored body remains authoritative. */
@@ -149,37 +154,42 @@ export function splitTelegramBody(body: string): { body: string; safety: Telegra
 export function formatTelegramAlert(alert: TelegramAlertRow, token: TelegramTokenRow | null): string {
   const o = alert.earlyRadarOutcome;
   const profile = (o?.profile ?? (alert.kind === 'EARLY_RADAR_HOLDER' ? 'holder' : 'trencher')).toUpperCase();
-  const tier = o?.tier ? ` · ${o.tier.toUpperCase()}` : '';
+  const tier = o?.tier ? o.tier.toUpperCase() : '';
   const parsed = splitTelegramBody(alert.body);
-  const lines = [`NARRAX EARLY RADAR · ${profile}${tier}`];
-  if (token) lines.push([token.name, token.symbol ? `(${token.symbol})` : null].filter(Boolean).join(' '));
-  lines.push('', alert.title);
-  lines.push('', 'Research context');
+  const lines = [`<b>NARRAX EARLY RADAR</b> · ${escapeHtml(profile)}${tier ? ` · ${escapeHtml(tier)}` : ''}`];
+  if (token) lines.push(`<b>${escapeHtml(token.name)}${token.symbol ? ` (${escapeHtml(token.symbol)})` : ''}</b>`);
+  lines.push('', escapeHtml(alert.title));
+  lines.push('', '<b>Research context</b>');
   lines.push(o?.score != null && Number.isFinite(o.score) ? `Score: ${o.score}` : 'Score: unavailable');
-  const source = [o?.route ? `Route: ${o.route}` : null, o?.matchKind ? `Match: ${o.matchKind}` : null].filter(Boolean).join(' · ');
+  const source = [o?.route ? `Route: ${escapeHtml(o.route)}` : null, o?.matchKind ? `Match: ${escapeHtml(o.matchKind)}` : null].filter(Boolean).join(' · ');
   if (source) lines.push(source);
   let bodyIndex = -1;
   if (parsed.body) {
-    lines.push('', 'Why it surfaced', '');
+    lines.push('', '<b>Why it surfaced</b>', '');
     bodyIndex = lines.length - 1;
   }
   if (parsed.safety) {
     const s = parsed.safety;
-    lines.push('', `Safety gate: ${s.status}`);
-    if (s.codes.length) lines.push(`${s.status === 'BLOCK' ? 'Blocked by' : 'Missing evidence'}: ${s.codes.join(', ')}`);
-    if (s.top10ExLpPct) lines.push(`Top-10 excluding pool/locker accounts: ${s.top10ExLpPct}%`);
-    if (s.warnings) lines.push(`Warnings: ${s.warnings}`);
-    if (s.shadow) lines.push('Shadow mode: recorded, not enforced.');
-  } else lines.push('', 'Safety evidence: unavailable for this alert.');
+    lines.push('', `<b>Safety gate: ${s.status}</b>`);
+    if (s.codes.length) lines.push(`${s.status === 'BLOCK' ? 'Blocked by' : 'Missing evidence'}: ${escapeHtml(s.codes.join(', '))}`);
+    if (s.top10ExLpPct) lines.push(`Top-10 excluding pool/locker accounts: ${escapeHtml(s.top10ExLpPct)}%`);
+    if (s.warnings) lines.push(`Warnings: ${escapeHtml(s.warnings)}`);
+    if (s.shadow) lines.push('<i>Shadow mode: recorded, not enforced.</i>');
+  } else lines.push('', '<b>Safety evidence</b>', 'Unavailable for this alert.');
   if (token?.mint) {
-    lines.push('', 'Token details', `Mint: ${token.mint}`);
-    lines.push(`Chart: https://dexscreener.com/solana/${encodeURIComponent(token.mint)}`);
+    lines.push('', '<b>Token details</b>', `Mint (tap to copy): <code>${escapeHtml(token.mint)}</code>`);
+    lines.push(`Chart: <a href="https://dexscreener.com/solana/${encodeURIComponent(token.mint)}">DexScreener</a>`);
   }
-  lines.push('', `Alert time: ${alert.createdAt.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')}`, 'NARRAX research feed');
-  const footer = 'Research only. Not a recommendation to buy.\nNo trade was placed and no return is promised.\nSmall, unvalidated sample.';
+  lines.push('', `Alert time: ${alert.createdAt.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')}`, '<i>NARRAX research feed</i>');
+  const footer = '<i>Research only. Not a recommendation to buy.\nNo trade was placed and no return is promised.\nSmall, unvalidated sample.</i>';
   const contentLimit = TELEGRAM_LIMITS.maxText - footer.length - 2;
   // Shorten the narrative first, preserving the frozen safety evidence and the research disclaimer.
-  if (bodyIndex >= 0) lines[bodyIndex] = truncate(parsed.body, Math.max(0, contentLimit - lines.join('\n').length));
+  if (bodyIndex >= 0) {
+    const evidence = parsed.body
+      .replace(/(?<=\.) (?=Market cap\b)/g, '\n\n')
+      .replace(/ (?=Cautions:)/g, '\n');
+    lines[bodyIndex] = escapeHtml(truncate(evidence, Math.max(0, contentLimit - lines.join('\n').length)));
+  }
   return `${truncate(lines.join('\n'), contentLimit)}\n\n${footer}`;
 }
 
@@ -194,13 +204,13 @@ export class TelegramBotApiTransport implements TelegramTransport {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
   }
 
-  async send(chatId: string, text: string): Promise<TelegramSendResult> {
+  async send(chatId: string, text: string, options?: TelegramSendOptions): Promise<TelegramSendResult> {
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl}/bot${this.token}/sendMessage`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+        body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true, ...(options?.parseMode ? { parse_mode: options.parseMode } : {}) }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (error) {
@@ -322,7 +332,7 @@ export async function deliverEarlyRadarTelegram(
 
     let result: TelegramSendResult;
     try {
-      result = await opts.transport!.send(opts.chatId, text);
+      result = await opts.transport!.send(opts.chatId, text, { parseMode: 'HTML' });
     } catch (error) {
       out.stopped = true;
       out.lastError = errorText(error);

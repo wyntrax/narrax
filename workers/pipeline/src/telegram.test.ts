@@ -64,35 +64,43 @@ class FakeTransport implements TelegramTransport {
 describe('telegram Early Radar delivery', () => {
   it('formats a readable research card with the frozen outcome and a chart link', () => {
     const text = formatTelegramAlert(alert(), token);
-    expect(text).toContain('NARRAX EARLY RADAR · TRENCHER · STRONG');
-    expect(text).toContain('Marketcat (MC)');
-    expect(text).toContain('Research context\nScore: 70.3\nRoute: NARRATIVE · Match: NAME');
+    expect(text).toContain('<b>NARRAX EARLY RADAR</b> · TRENCHER · STRONG');
+    expect(text).toContain('<b>Marketcat (MC)</b>');
+    expect(text).toContain('<b>Research context</b>\nScore: 70.3\nRoute: NARRATIVE · Match: NAME');
     expect(text).toContain(alert().title);
-    expect(text).toContain('Why it surfaced');
+    expect(text).toContain('<b>Why it surfaced</b>');
     expect(text).toContain('trencher score 70.3 (strong).');
+    expect(text).toContain('trencher score 70.3 (strong).\n\nMarket cap $3K');
     expect(text).not.toContain('Research signal only');
-    expect(text).toContain(`Mint: ${token.mint}`);
-    expect(text).toContain(`https://dexscreener.com/solana/${token.mint}`);
-    expect(text).toContain('NARRAX research feed');
+    expect(text).toContain(`Mint (tap to copy): <code>${token.mint}</code>`);
+    expect(text).toContain(`<a href="https://dexscreener.com/solana/${token.mint}">DexScreener</a>`);
+    expect(text).toContain('<i>NARRAX research feed</i>');
     expect(text).toContain('Alert time: 2026-10-20 13:55:00 UTC');
-    expect(text).toContain('Research only. Not a recommendation to buy.\nNo trade was placed');
+    expect(text).toContain('<i>Research only. Not a recommendation to buy.\nNo trade was placed');
+  });
+
+  it('escapes provider text and keeps the mint copyable', () => {
+    const text = formatTelegramAlert(alert({ title: 'A <b> & B', body: 'x < y & z. Safety evidence: BLOCK (X&Y).' }), token);
+    expect(text).toContain('A &lt;b&gt; &amp; B');
+    expect(text).toContain('x &lt; y &amp; z.');
+    expect(text).toContain(`Mint (tap to copy): <code>${token.mint}</code>`);
   });
 
   it('preserves safety evidence, links and the disclaimer when a narrative is too long', () => {
     const text = formatTelegramAlert(alert({body: `${'Evidence paragraph. '.repeat(600)}Safety evidence: UNKNOWN (LP_CONTROL).`}), token);
     expect(text.length).toBeLessThanOrEqual(4000);
     expect(text).toContain('…');
-    expect(text).toContain('Safety gate: UNKNOWN\nMissing evidence: LP_CONTROL');
-    expect(text).toContain(`Mint: ${token.mint}`);
+    expect(text).toContain('<b>Safety gate: UNKNOWN</b>\nMissing evidence: LP_CONTROL');
+    expect(text).toContain(`Mint (tap to copy): <code>${token.mint}</code>`);
     expect(text).toContain('Alert time: 2026-10-20 13:55:00 UTC');
-    expect(text.endsWith('Research only. Not a recommendation to buy.\nNo trade was placed and no return is promised.\nSmall, unvalidated sample.')).toBe(true);
+    expect(text.endsWith('<i>Research only. Not a recommendation to buy.\nNo trade was placed and no return is promised.\nSmall, unvalidated sample.</i>')).toBe(true);
   });
 
   it('keeps zero scores but labels missing or invalid scores and absent safety evidence explicitly', () => {
     for (const score of [null, Number.NaN, Number.POSITIVE_INFINITY]) {
       const text = formatTelegramAlert(alert({earlyRadarOutcome: {...alert().earlyRadarOutcome!, score}}), null);
       expect(text).toContain('Score: unavailable');
-      expect(text).toContain('Safety evidence: unavailable for this alert.');
+      expect(text).toContain('<b>Safety evidence</b>\nUnavailable for this alert.');
       expect(text).not.toContain('Safety gate: PASS');
       expect(text).not.toContain('Token details');
     }
@@ -104,7 +112,7 @@ describe('telegram Early Radar delivery', () => {
       body: 'trencher score 70.3. Top 10 hold 15%. Research signal only, not a prediction or a recommendation to buy. ' +
         'Safety evidence: UNKNOWN (TOP10_EX_LP, LP_CONTROL). Top-10 excluding known pool/locker accounts 22.0%. Warnings: PRICE_EXTENDED. Shadow mode: recorded, not enforced.',
     }), token);
-    expect(text).toContain('Why it surfaced\ntrencher score 70.3. Top 10 hold 15%.');
+    expect(text).toContain('<b>Why it surfaced</b>\ntrencher score 70.3. Top 10 hold 15%.');
     expect(text).not.toContain('Safety evidence:');
     expect(text).toContain('Safety gate: UNKNOWN');
     expect(text).toContain('Missing evidence: TOP10_EX_LP, LP_CONTROL');
@@ -116,7 +124,7 @@ describe('telegram Early Radar delivery', () => {
 
   it('labels blockers, keeps a PASS free of missing-evidence text and leaves an unknown suffix intact', () => {
     expect(formatTelegramAlert(alert({ body: 'Evidence. Safety evidence: BLOCK (TOP10_CONCENTRATION, RUGGED).' }), null))
-      .toContain('Safety gate: BLOCK\nBlocked by: TOP10_CONCENTRATION, RUGGED');
+      .toContain('<b>Safety gate: BLOCK</b>\nBlocked by: TOP10_CONCENTRATION, RUGGED');
     expect(formatTelegramAlert(alert({ body: 'Evidence. Safety evidence: PASS.' }), null)).toContain('Safety gate: PASS');
     expect(formatTelegramAlert(alert({ body: 'Evidence. Safety evidence: PASS.' }), null)).not.toContain('Missing evidence');
     expect(formatTelegramAlert(alert({ body: 'Legacy body without a safety suffix.' }), null)).toContain('Legacy body without a safety suffix.');
@@ -255,5 +263,14 @@ describe('Telegram Bot API transport', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: false, description: 'Too Many Requests', parameters: { retry_after: 3 } }), { status: 429, headers: { 'content-type': 'application/json' } })));
     const result = await new TelegramBotApiTransport('secret-token', 'https://api.test').send('-100', 'hello');
     expect(result).toMatchObject({ ok: false, status: 429, retryAfterSeconds: 3, description: 'Too Many Requests' });
+  });
+
+  it('requests HTML parse mode for formatted alert cards', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, result: { message_id: 8 } }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const transport = new TelegramBotApiTransport('secret-token', 'https://api.test');
+    await transport.send('-100123', '<b>hello</b>', { parseMode: 'HTML' });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ chat_id: '-100123', text: '<b>hello</b>', disable_web_page_preview: true, parse_mode: 'HTML' });
   });
 });
