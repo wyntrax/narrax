@@ -38,7 +38,7 @@ FAKE
   cat > "$BIN/timeout" <<'FAKE'
 #!/usr/bin/env bash
 echo "timeout $*" >> "$CALLS"
-[ "$1" = --kill-after=15s ] && [ "$2" = 180s ] || exit 2
+[ "$1" = --kill-after=15s ] && [ "$2" = 600s ] || exit 2
 shift 2
 if [ "${FAKE_PULL_TIMEOUT:-0}" = 1 ]; then exit 124; fi
 exec "$@"
@@ -107,7 +107,15 @@ ok "refuses a quoted and exported signing key" '[ "$RC" -ne 0 ] && [ ! -s "$CALL
 new_host; printf 'EXECUTOR_SIGNING_KEY=""\nWALLET_PRIVATE_KEY=\nPRIVY_APP_SECRET=needed-by-the-api\n' > "$DEP/.env"; run "ghcr.io/o/r@sha256:s"
 ok "an empty signing variable and PRIVY_APP_SECRET are allowed" '[ "$RC" -eq 0 ]'
 
-# 8. Missing prerequisites fail early with a clear message.
+# 8. A concurrent deploy is refused before any Docker command runs.
+new_host
+exec 8>"$DEP/.deploy/deploy.lock"
+flock -n 8
+run "ghcr.io/o/r@sha256:locked" ci-user
+ok "concurrent deploy: refused before touching services" '[ "$RC" -ne 0 ] && [ ! -s "$CALLS" ] && grep -q "another backend deployment is active" "$HOST/out.log"'
+exec 8>&-
+
+# 9. Missing prerequisites fail early with a clear message.
 new_host; rm "$DEP/.env"; run "ghcr.io/o/r@sha256:s"
 ok "missing .env: fails before any docker command" '[ "$RC" -ne 0 ] && [ ! -s "$CALLS" ] && grep -q "missing .env" "$HOST/out.log"'
 new_host; rm "$DEP/docker/docker-compose.prod.yml"; run "ghcr.io/o/r@sha256:s"
@@ -123,6 +131,6 @@ ok "persistent pull failure: stops after three attempts" '[ "$RC" -ne 0 ] && [ "
 ok "persistent pull failure: no migrations, stops, starts or release changes" '! grep -Eq " (run|stop|up) " "$CALLS" && [ "$(cat "$DEP/.deploy/current_image")" = "ghcr.io/o/r@sha256:old" ] && [ ! -f "$DEP/.deploy/previous_image" ]'
 ok "persistent pull failure: registry logout still happens" 'grep -q "docker logout ghcr.io" "$CALLS"'
 new_host; FAKE_PULL_TIMEOUT=1 run "ghcr.io/o/r@sha256:new"
-ok "pull timeout: bounded attempts without migrations or service changes" '[ "$RC" -ne 0 ] && [ "$(grep -c "^timeout --kill-after=15s 180s" "$CALLS")" -eq 3 ] && ! grep -Eq " (run|stop|up) " "$CALLS" && [ ! -f "$DEP/.deploy/current_image" ]'
+ok "pull timeout: bounded attempts without migrations or service changes" '[ "$RC" -ne 0 ] && [ "$(grep -c "^timeout --kill-after=15s 600s" "$CALLS")" -eq 3 ] && ! grep -Eq " (run|stop|up) " "$CALLS" && [ ! -f "$DEP/.deploy/current_image" ]'
 
 echo; if [ "$FAILS" -eq 0 ]; then echo "All deploy script checks passed."; else echo "$FAILS check(s) failed."; exit 1; fi

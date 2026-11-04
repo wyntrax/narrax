@@ -2,7 +2,9 @@
 
 A `connection reset by peer` during the deployment image pull means the registry download was interrupted. It does not establish whether the fault was at GHCR or along the network path. Docker's credential-storage warning is not the cause. Compose may also suggest building a service when its configured image pull fails; release images should still be pulled by their published digest.
 
-Both deployment scripts retry image pulls up to three times, with 10-second and 20-second backoffs. Each attempt has a 180-second timeout plus a 15-second termination grace period (GNU `timeout`, provided by coreutils on the production Linux host). Docker can reuse completed image layers. The maximum pull/retry phase is about 10 minutes 15 seconds, leaving time within the backend job's 20-minute limit for migration, worker lease handoff and health checks.
+The release workflow also retries the idempotent deploy-file upload step three times after a pre-authentication SSH reset and sets `ConnectTimeout 15`. The backend script takes a non-blocking `flock` before touching services, so a manual deployment and a release job cannot overlap.
+
+Both deployment scripts retry image pulls up to three times, with 10-second and 20-second backoffs. Each attempt has a 600-second timeout plus a 15-second termination grace period (GNU `timeout`, provided by coreutils on the production Linux host). Docker can reuse completed image layers. The maximum pull/retry phase is about 30 minutes 45 seconds, within the backend job's 40-minute limit, leaving time for migration, worker lease handoff and health checks.
 
 All pull attempts occur before migrations, configuration-check containers or service replacement. Exhausting retries exits nonzero, logs out of the registry when this run logged in, and preserves the previous release records. Migration and application startup use the already-pulled image with `--pull never`; migration and startup are not retried by the pull loop. Normal health checks and rollback still apply after replacement begins.
 
