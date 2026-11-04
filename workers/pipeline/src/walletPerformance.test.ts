@@ -23,7 +23,7 @@ it('reports exact remaining inventory for open and partially sold positions',()=
   expect(WalletOpenPositions.safeParse(open).success).toBe(true);
   expect(open).toMatchObject({version:1,windowDays:30,observedTrades:4,capped:false,invalidTrades:0,unmatchedSells:0});
   expect(open.positions).toEqual([expect.objectContaining({
-    tokenId:'a',entryTradeId:'a-0',band:'SMALL_CAP',quantity:'50',remainingCostSol:'5',investedSol:'10',entrySol:'10',
+    tokenId:'a',entryTradeId:'a-0',band:'UNDER_100K',quantity:'50',remainingCostSol:'5',investedSol:'10',entrySol:'10',
     openedAt:new Date(+now-100*60_000).toISOString(),lastTradeAt:new Date(+now-90*60_000).toISOString(),partiallySold:true,
   })]);
 });
