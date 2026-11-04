@@ -196,13 +196,14 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
     const m = t.metrics[0];
     const c = t.consensus[0];
     const evidence=await marketEvidence(db,[t.id]);
+    const images=await marketTokenImages(db,[t]);
     const developerHolding=await db.systemSetting.findUnique({where:{key:`research.developerHolding.${t.id}`}});
     const safety=await radarSafetyViews(db,[t],now());
     const latestEvidence=await latestEvidenceViews(db,[t],now());
     const holderObservation=latestEvidence.get(t.id)?.holders;
     return {
       mint: t.mint, symbol: t.symbol, name: t.name, blacklisted: t.blacklisted, createdOnChainAt: t.createdOnChainAt,
-      imageUrl: marketTokenImage(evidence.get(t.id),t.mint),
+      imageUrl: images.get(t.id) ?? null,
       radarSafety:safety.get(t.id),
       latestEvidence:latestEvidence.get(t.id),
       observation:observation(evidence.get(t.id),m?.id,now()),
