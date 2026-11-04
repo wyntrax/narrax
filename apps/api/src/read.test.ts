@@ -83,6 +83,7 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     await db.systemSetting.deleteMany({where:{key:{in:artworkKeys}}});
     // Users first: their positions, orders and trades would otherwise block deleting the tokens.
     await db.user.deleteMany({ where: { id: { in: [aliceId, bobId] } } });
+    await db.walletTrade.deleteMany({ where: { walletId } });
     await db.token.deleteMany({ where: { symbol: { in: [`ROBOT${tag}`, `QCAT${tag}`, `IMGF${tag}`] } } });
     await db.narrative.deleteMany({ where: { slug: { endsWith: tag } } });
     await db.trackedWallet.deleteMany({ where: { address: walletAddress } });
@@ -202,13 +203,11 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
 
   it('shows observed open positions with cost and stored artwork on wallet detail', async () => {
     const token = await db.token.findUniqueOrThrow({ where: { mint: M('ROBOT') } });
-    const key = `wallet.openPositions.${walletId}`;
-    artworkKeys.push(key);
-    const at = new Date().toISOString();
-    await db.systemSetting.create({ data: { key, value: {
-      version: 1, checkedAt: at, windowDays: 30, observedTrades: 2, capped: false, invalidTrades: 0, unmatchedSells: 0,
-      positions: [{ tokenId: token.id, entryTradeId: 'entry-1', band: 'UNDER_100K', quantity: '50', remainingCostSol: '5', investedSol: '10', entrySol: '10', openedAt: at, lastTradeAt: at, partiallySold: true }],
-    } } });
+    const at = new Date();
+    const buyAt = new Date(at.getTime() - 120_000), sellAt = new Date(at.getTime() - 60_000);
+    const evidence = (eventAt: Date) => ({ eventAt: eventAt.toISOString(), market: { at: eventAt.toISOString(), source: 'dexscreener', marketCapIsFdv: false } });
+    await db.walletTrade.create({ data: { walletId, tokenId: token.id, side: 'BUY', amountSol: 10, tokenAmount: 100, marketCapUsd: 85_000, signature: `wallet-open-buy-${tag}`, evidence: evidence(buyAt), at: buyAt } });
+    await db.walletTrade.create({ data: { walletId, tokenId: token.id, side: 'SELL', amountSol: 9, tokenAmount: 50, marketCapUsd: 85_000, signature: `wallet-open-sell-${tag}`, evidence: evidence(sellAt), at: sellAt } });
     const response = await get(`/v1/wallets/${walletAddress}`);
     expect(response.status).toBe(200);
     expect(response.body.openPositions).toMatchObject({ version: 1, observedTrades: 2, capped: false });
