@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { WalletPerformance } from '@narra/shared';
-import { computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
+import { WalletOpenPositions, WalletPerformance } from '@narra/shared';
+import { computeWalletOpenPositions, computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
 
 const now = new Date('2026-10-26T12:00:00Z');
 function trade(side:'BUY'|'SELL',sol:string,qty:string,minute:number,cap:string|null='85000',token='a'):PerformanceTrade {
@@ -16,6 +16,16 @@ it('counts a partial exit once, with distinct first-sell/close durations and exa
 });
 it('does not count an open partial sale as a win or pretend remaining swap inventory is an on-chain balance',()=>{
   expect(band([trade('BUY','10','100',0),trade('SELL','9','50',10)])).toMatchObject({closedPositions:0,winRate:null,realisedPnlSol:'4',openPositions:1,openCostSol:'5',medianCloseSeconds:null});
+});
+it('reports exact remaining inventory for open and partially sold positions',()=>{
+  const rows=[trade('BUY','10','100',0),trade('SELL','9','50',10),trade('BUY','1','10',20,'85000','closed'),trade('SELL','2','10',30,'85000','closed')];
+  const open=computeWalletOpenPositions(rows,now);
+  expect(WalletOpenPositions.safeParse(open).success).toBe(true);
+  expect(open).toMatchObject({version:1,windowDays:30,observedTrades:4,capped:false,invalidTrades:0,unmatchedSells:0});
+  expect(open.positions).toEqual([expect.objectContaining({
+    tokenId:'a',entryTradeId:'a-0',band:'SMALL_CAP',quantity:'50',remainingCostSol:'5',investedSol:'10',entrySol:'10',
+    openedAt:new Date(+now-100*60_000).toISOString(),lastTradeAt:new Date(+now-90*60_000).toISOString(),partiallySold:true,
+  })]);
 });
 it('captures catastrophic losses despite a high win rate and treats zero proceeds as a loss',()=>{
   const rows=Array.from({length:9},(_,i)=>[trade('BUY','1','10',0,'85000',String(i)),trade('SELL','2','10',10,'85000',String(i))]).flat();

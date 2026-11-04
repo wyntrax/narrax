@@ -1,5 +1,5 @@
 import { Prisma } from '@narra/database';
-import { WalletEntryBand, type WalletBandPerformance, type WalletPerformance } from '@narra/shared';
+import { WalletEntryBand, type WalletBandPerformance, type WalletOpenPositions, type WalletPerformance } from '@narra/shared';
 import { median } from '@narra/smart-money';
 
 const D = Prisma.Decimal.clone({ precision: 80 });
@@ -60,6 +60,33 @@ function accountPositions(rows: PerformanceTrade[], now: Date) {
  * An add or partial exit is not a new entry. The caller supplies the same row cap. */
 export function walletEntryCapPositions(rows: PerformanceTrade[], now: Date) {
   return accountPositions(rows,now).valid.map(p=>({ entryTradeId:p.entryTradeId,tokenId:p.token,band:p.band,closed:p.close!==null }));
+}
+
+export function computeWalletOpenPositions(rows: PerformanceTrade[], now: Date, capped = false): WalletOpenPositions {
+  const { valid, trades, invalidTrades, unmatchedSells } = accountPositions(rows, now);
+  return {
+    version: 1,
+    checkedAt: now.toISOString(),
+    windowDays: 30,
+    observedTrades: trades.length,
+    capped,
+    invalidTrades,
+    unmatchedSells,
+    positions: valid.filter(p => p.close === null)
+      .sort((a, b) => b.last - a.last || a.entryTradeId.localeCompare(b.entryTradeId))
+      .map(p => ({
+        tokenId: p.token,
+        entryTradeId: p.entryTradeId,
+        band: p.band,
+        quantity: p.qty.toString(),
+        remainingCostSol: p.cost.toString(),
+        investedSol: p.invested.toString(),
+        entrySol: p.entry.toString(),
+        openedAt: new Date(p.start).toISOString(),
+        lastTradeAt: new Date(p.last).toISOString(),
+        partiallySold: p.sold,
+      })),
+  };
 }
 
 export function computeWalletPerformance(rows: PerformanceTrade[], now: Date, capped = false): WalletPerformance {

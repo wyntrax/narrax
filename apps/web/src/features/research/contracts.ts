@@ -83,6 +83,16 @@ export const WalletIntelligenceSchema=z.object({checkedAt:date,windowDays:number
 export const SmartWalletsSchema=pageOf(SmartWalletSchema.extend({intelligence:WalletIntelligenceSchema.nullish(),qualification:QualificationSchema.nullish(),researchReview:text.optional()}));
 const WalletTradeSchema=z.object({id:text,at:date,side:z.enum(['BUY','SELL']),amountSol:nullable,amountUsd:nullable.optional(),marketCapUsd:nullable,evidence:z.object({reasons:z.array(text),market:z.object({at:date,source:text,marketCapIsFdv:z.boolean().optional()}).nullable(),sol:z.object({at:date,source:text}).nullish()}).nullish(),signature:text,token:TokenLabel});
 export const WalletTradesSchema=pageOf(WalletTradeSchema);
+export const WalletOpenPositionSchema=z.object({
+  tokenId:text,entryTradeId:text,band:text,quantity:text,remainingCostSol:text,investedSol:text,entrySol:text,
+  openedAt:date,lastTradeAt:date,partiallySold:z.boolean(),token:TokenRef.nullable(),
+  priceUsd:nullable,priceAt:date.nullable(),priceStale:z.boolean(),
+});
+export const WalletOpenPositionsSchema=z.object({
+  version:z.literal(1),checkedAt:date,windowDays:z.literal(30),observedTrades:z.number().int().nonnegative(),
+  capped:z.boolean(),invalidTrades:z.number().int().nonnegative(),unmatchedSells:z.number().int().nonnegative(),
+  positions:z.array(WalletOpenPositionSchema),
+});
 export const WalletDetailSchema=z.object({
   qualification:QualificationSchema.nullish(),researchReview:text.optional(),
   intelligence:WalletIntelligenceSchema.extend({observedBuys:number.optional(),observedSells:number.optional(),unmatchedSells:number.optional()}).nullish(),
@@ -92,6 +102,7 @@ export const WalletDetailSchema=z.object({
  performance:z.record(z.object({winRate:nullable,pnlSol:nullable,closedTrades:number,avgRoi:nullable,computedAt:date})),
  cluster:z.object({label:text.nullable(),confidence:text.or(number),size:number,members:z.array(z.object({address:text,label:text.nullable()}))}).nullable(),
  funding:z.object({status:text,funder:text.nullable(),fundedAt:date.nullable(),amountSol:nullable,checkedAt:date}).nullable(),
+ openPositions:WalletOpenPositionsSchema.nullish(),
  narrativeHistory:z.object({lookbackDays:number,scannedTrades:number,scanCapped:z.boolean(),items:z.array(z.object({slug:text,name:text,stage:Stage,buys:number,sells:number,netSol:number,lastAt:date}))})
 });
 export const UnreadAlertsSchema=z.object({unread:z.number().int().nonnegative(),capped:z.boolean()});
