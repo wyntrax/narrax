@@ -80,7 +80,7 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     await db.systemSetting.deleteMany({where:{key:{in:artworkKeys}}});
     // Users first: their positions, orders and trades would otherwise block deleting the tokens.
     await db.user.deleteMany({ where: { id: { in: [aliceId, bobId] } } });
-    await db.token.deleteMany({ where: { symbol: { in: [`ROBOT${tag}`, `QCAT${tag}`] } } });
+    await db.token.deleteMany({ where: { symbol: { in: [`ROBOT${tag}`, `QCAT${tag}`, `IMGF${tag}`] } } });
     await db.narrative.deleteMany({ where: { slug: { endsWith: tag } } });
     await db.trackedWallet.deleteMany({ where: { address: M('WAL') } });
     await app.close();
@@ -184,6 +184,17 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     expect(['FRESH','STALE','UNVERIFIED','MISSING','INVALID']).toContain(d.body.latestEvidence.holders.state);
     expect((await get('/v1/tokens/unknownmint')).status).toBe(404);
     expect((await get('/v1/tokens?q=')).status).toBe(400);
+  });
+
+  it('uses stored token metadata artwork on detail when DexScreener omitted it', async () => {
+    const t = await db.token.create({ data: { mint: M('IMGF'), symbol: `IMGF${tag}`, name: 'Image fallback token', metrics: { create: { priceUsd: 1, marketCapUsd: 100_000, liquidityUsd: 50_000, volume24hUsd: 1_000 } } } });
+    const key = `research.tokenMetadata.${t.id}`;
+    artworkKeys.push(key);
+    const imageUrl = 'https://cdn.helius-rpc.com/cdn-cgi/image//example.png';
+    await db.systemSetting.create({ data: { key, value: { source: 'helius-das', mint: t.mint, imageUrl } } });
+    const response = await get(`/v1/tokens/${t.mint}`);
+    expect(response.status).toBe(200);
+    expect(response.body.imageUrl).toBe(imageUrl);
   });
 
   it('returns provenance-backed holder detail that passes the web contract for fresh and stale counts', async () => {
