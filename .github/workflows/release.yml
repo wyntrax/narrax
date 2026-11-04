@@ -96,7 +96,7 @@ jobs:
     # Off by default. Set the repository variable DEPLOY_ENABLED=true once the host is prepared (docs/CI_CD.md).
     if: ${{ vars.DEPLOY_ENABLED == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     # Add required reviewers to this environment in the repository settings: that is the approval gate.
     environment:
       name: production
@@ -142,13 +142,21 @@ jobs:
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           # Quiet image pulls and worker lease waits can outlast network idle timeouts.
           # Keep SSH active and fail after three unanswered 15-second probes.
-          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 15\n  ServerAliveCountMax 3\n' "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
+          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ConnectTimeout 15\n  ServerAliveInterval 15\n  ServerAliveCountMax 3\n' "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
 
       - name: Ship the deploy files (the host's .env and base compose file are never touched or sent)
         run: |
-          ssh deploy "mkdir -p '$DEPLOY_PATH/docker' '$DEPLOY_PATH/.deploy'"
-          scp docker/docker-compose.deploy.yml "deploy:$DEPLOY_PATH/docker/docker-compose.deploy.yml"
-          scp scripts/deploy-remote.sh "deploy:$DEPLOY_PATH/.deploy/deploy-remote.sh"
+          # A reset before authentication (kex_exchange_identification) is a transient host/network
+          # condition. The three uploads are idempotent, so retry the whole ship step before failing.
+          for attempt in 1 2 3; do
+            if ssh deploy "mkdir -p '$DEPLOY_PATH/docker' '$DEPLOY_PATH/.deploy'" &&
+              scp docker/docker-compose.deploy.yml "deploy:$DEPLOY_PATH/docker/docker-compose.deploy.yml" &&
+              scp scripts/deploy-remote.sh "deploy:$DEPLOY_PATH/.deploy/deploy-remote.sh"; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          exit 1
 
       # The registry token is sent on stdin, so it never appears in a command line, a process list or the logs.
       - name: Deploy (migrate, start, health check, roll back on failure)
@@ -248,12 +256,20 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           # Apply the same idle-connection protection to frontend deploys and scp.
-          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 15\n  ServerAliveCountMax 3\n' "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
+          printf 'Host deploy\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ConnectTimeout 15\n  ServerAliveInterval 15\n  ServerAliveCountMax 3\n' "$DEPLOY_HOST" "$DEPLOY_USER" > ~/.ssh/config
       - name: Ship frontend deployment files (host .env and .env.web remain untouched)
         run: |
-          ssh deploy "mkdir -p '$DEPLOY_PATH/docker' '$DEPLOY_PATH/.deploy/web'"
-          scp docker/docker-compose.web.yml "deploy:$DEPLOY_PATH/docker/docker-compose.web.yml"
-          scp scripts/deploy-web-remote.sh "deploy:$DEPLOY_PATH/.deploy/web/deploy-web-remote.sh"
+          # A reset before authentication (kex_exchange_identification) is a transient host/network
+          # condition. The three uploads are idempotent, so retry the whole ship step before failing.
+          for attempt in 1 2 3; do
+            if ssh deploy "mkdir -p '$DEPLOY_PATH/docker' '$DEPLOY_PATH/.deploy/web'" &&
+              scp docker/docker-compose.web.yml "deploy:$DEPLOY_PATH/docker/docker-compose.web.yml" &&
+              scp scripts/deploy-web-remote.sh "deploy:$DEPLOY_PATH/.deploy/web/deploy-web-remote.sh"; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          exit 1
       - name: Deploy the frontend independently, with health checks and rollback
         env:
           IMAGE: ${{ steps.web-published.outputs.image }}

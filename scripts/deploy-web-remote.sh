@@ -37,8 +37,8 @@ fi
 # Keep registry retries before config checks/replacement, within the release job budget.
 pulled=0
 for attempt in 1 2 3; do
-  log "pulling frontend image (attempt $attempt/3; 180s timeout)"
-  if timeout --kill-after=15s 180s "${compose[@]}" pull --quiet web; then pulled=1; break; fi
+  log "pulling frontend image (attempt $attempt/3; 600s timeout)"
+  if timeout --kill-after=15s 600s "${compose[@]}" pull --quiet web; then pulled=1; break; fi
   if [ "$attempt" -lt 3 ]; then
     delay=$((attempt * 10))
     log "frontend image pull failed; retrying in ${delay}s"
