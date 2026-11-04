@@ -73,8 +73,9 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
       const o = await order(`o${i}`, new Date(Date.now() - i * 60_000));
       await db.trade.create({ data: { userId: aliceId, orderId: o.id, side: 'BUY', mode: 'AI_AUTO', reason: 'x', expectedPriceUsd: 0.01, actualPriceUsd: 0.0101, slippageBps: 10, signature: `s${i}${tag}`, executedAt: new Date(Date.now() - i * 60_000) } });
     }
-    const w = await db.trackedWallet.create({ data: { address: M('WAL'), profile: { create: { score: 94, leaderScore: 91, style: 'EARLY_MOMENTUM' } }, metrics: { create: { window: '30D', winRate: 0.78, pnlSol: 482, closedTrades: 40, avgRoi: 0.42, medianRoi: 0.3, maxDrawdown: 0.1 } } } });
-    walletId = w.id; walletAddress = w.address;
+    walletAddress = M('WAL').replace(/[0OIl]/g, '1');
+    const w = await db.trackedWallet.create({ data: { address: walletAddress, profile: { create: { score: 94, leaderScore: 91, style: 'EARLY_MOMENTUM' } }, metrics: { create: { window: '30D', winRate: 0.78, pnlSol: 482, closedTrades: 40, avgRoi: 0.42, medianRoi: 0.3, maxDrawdown: 0.1 } } } });
+    walletId = w.id;
   });
   // Remove this file's rows so shared, size-limited lists do not fill up across runs.
   afterAll(async () => {
@@ -84,7 +85,7 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     await db.user.deleteMany({ where: { id: { in: [aliceId, bobId] } } });
     await db.token.deleteMany({ where: { symbol: { in: [`ROBOT${tag}`, `QCAT${tag}`, `IMGF${tag}`] } } });
     await db.narrative.deleteMany({ where: { slug: { endsWith: tag } } });
-    await db.trackedWallet.deleteMany({ where: { address: M('WAL') } });
+    await db.trackedWallet.deleteMany({ where: { address: walletAddress } });
     await app.close();
     await db.$disconnect();
   });
@@ -250,7 +251,7 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
   });
 
   it('lists scored smart-money wallets with their 30D metrics', async () => {
-    const w = (await get('/v1/smart-money/wallets?limit=100')).body.items.find((x: { address: string }) => x.address === M('WAL'));
+    const w = (await get('/v1/smart-money/wallets?limit=100')).body.items.find((x: { address: string }) => x.address === walletAddress);
     expect(w).toMatchObject({ score: 94, leaderScore: 91, style: 'EARLY_MOMENTUM', winRate: 0.78, pnl30dSol: 482, closedTrades: 40, avgRoi: 0.42, cluster: null });
   });
 
