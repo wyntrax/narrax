@@ -36,6 +36,6 @@ it('retains provider CDN artwork independently of names and never fetches a toke
  const fetch=vi.fn<typeof globalThis.fetch>(async()=>new Response(JSON.stringify({result:[{id:mint,content:{metadata:{name:'Known',symbol:'KNOWN'},links:{image:'https://untrusted.example/logo.png'},files:[{cdn_uri:imageUrl}]}}]})));
  const metadata=await heliusMetadataSource('https://rpc.example',fetch).get([mint]);expect(metadata.get(mint)?.imageUrl).toBe(imageUrl);expect(fetch).toHaveBeenCalledTimes(1);
  const upsert=vi.fn(),update=vi.fn(),db={token:{findMany:async()=>[{id:'a',mint,name:'Known',symbol:'KNOWN'}],update},systemSetting:{findUnique:async()=>null,upsert}};
- await refreshTokenMetadata(db as unknown as PrismaClient,{get:async()=>metadata});
+ await refreshTokenMetadata(db as unknown as PrismaClient,{name:'helius-das',get:async()=>metadata});
  expect(update).not.toHaveBeenCalled();expect(upsert).toHaveBeenCalledWith(expect.objectContaining({create:{key:'research.tokenMetadata.a',value:expect.objectContaining({mint,imageUrl,source:'helius-das'})}}));
 });
