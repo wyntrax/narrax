@@ -1,6 +1,6 @@
 import {it,expect,vi} from 'vitest';
 import type {PrismaClient} from '@narra/database';
-import {heliusMetadataSource,refreshTokenMetadata} from './tokenMetadata';
+import {combinedMetadataSource,heliusMetadataSource,jupiterMetadataSource,refreshTokenMetadata} from './tokenMetadata';
 const mint='So11111111111111111111111111111111111111112';
 it('resolves metadata independently of prices and checks returned asset identity',async()=>{
  const fetch=vi.fn<typeof globalThis.fetch>(async()=>new Response(JSON.stringify({result:[{id:mint,content:{metadata:{name:'Wrapped SOL',symbol:'SOL'}}},{id:'unrequested',content:{metadata:{name:'Fake',symbol:'FAKE'}}},null]})));
@@ -17,6 +17,19 @@ it('updates only placeholders and advances past unresolved tokens',async()=>{
 });
 it('does not expose RPC credentials on network or provider errors',async()=>{
  await expect(heliusMetadataSource('https://rpc.example/?api-key=secret',async()=>{throw new Error('secret');}).get([mint])).rejects.toThrow('Token metadata request failed');
+});
+it('resolves Jupiter token names for mints with no DexScreener pair',async()=>{
+ const fetch=vi.fn<typeof globalThis.fetch>(async()=>new Response(JSON.stringify([{id:mint,name:'Blackbox',symbol:'BLACKBOX'}])));
+ const result=await jupiterMetadataSource(fetch,'https://jupiter.example/search').get([mint,'not-a-mint']);
+ expect([...result]).toEqual([[mint,{name:'Blackbox',symbol:'BLACKBOX'}]]);
+ expect(fetch.mock.calls[0]?.[0]).toContain('query=');expect(fetch.mock.calls[0]?.[0]).toContain(mint);
+});
+it('fills only the mints the primary metadata source missed',async()=>{
+ const primary={name:'primary',get:async()=>new Map([[mint,{name:'Primary',symbol:'PRI'}]])};
+ const fallback={name:'fallback',get:vi.fn(async()=>new Map([['missing',{name:'Fallback',symbol:'FB'}] ]))};
+ const result=await combinedMetadataSource(primary,fallback).get([mint,'missing']);
+ expect([...result]).toEqual([[mint,{name:'Primary',symbol:'PRI'}],['missing',{name:'Fallback',symbol:'FB'}]]);
+ expect(fallback.get).toHaveBeenCalledWith(['missing']);
 });
 it('retains provider CDN artwork independently of names and never fetches a token metadata URL',async()=>{
  const imageUrl='https://cdn.helius-rpc.com/cdn-cgi/image/example.png';

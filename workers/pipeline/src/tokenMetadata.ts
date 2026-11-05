@@ -4,11 +4,13 @@ import {sanitizeUntrusted,isSolanaAddress,tokenImageUrl} from '@narra/shared';
 
 const Asset=z.object({id:z.string(),content:z.object({metadata:z.object({name:z.string().optional(),symbol:z.string().optional()}),links:z.object({image:z.string().optional()}).optional(),files:z.array(z.object({cdn_uri:z.string().optional(),uri:z.string().optional()})).optional()}).optional(),token_info:z.object({symbol:z.string().optional()}).optional()});
 const Envelope=z.object({result:z.array(Asset.nullable()).optional(),error:z.unknown().optional()});
-export interface MetadataSource {get(mints:string[]):Promise<Map<string,{name:string;symbol:string;imageUrl?:string|null}>>}
+const JupiterToken=z.object({id:z.string(),name:z.string().nullish(),symbol:z.string().nullish(),icon:z.string().nullish()});
+export interface MetadataSource {name?:string;get(mints:string[]):Promise<Map<string,{name:string;symbol:string;imageUrl?:string|null}>>}
+
 /** Helius DAS metadata is independent of price/liquidity availability. Never fetch
  * token-controlled metadata URLs, and never expose the credential-bearing RPC URL. */
 export function heliusMetadataSource(url:string,fetchImpl:typeof fetch=fetch):MetadataSource{
- return {async get(mints){
+ return {name:'helius-das',async get(mints){
    const requested=mints.filter(isSolanaAddress).slice(0,100),out=new Map<string,{name:string;symbol:string;imageUrl?:string|null}>();if(!requested.length)return out;
   let response:Response|undefined;
   for(let attempt=0;attempt<3;attempt++){
@@ -20,6 +22,36 @@ export function heliusMetadataSource(url:string,fetchImpl:typeof fetch=fetch):Me
    for(const asset of parsed.data.result){if(!asset||!requested.includes(asset.id))continue;const name=sanitizeUntrusted(asset.content?.metadata.name??'',64).trim(),symbol=sanitizeUntrusted(asset.content?.metadata.symbol??asset.token_info?.symbol??'',32).trim();
     const images=[asset.content?.links?.image,...(asset.content?.files??[]).flatMap(f=>[f.cdn_uri,f.uri])];
     const imageUrl=images.map(tokenImageUrl).find(Boolean);if(name||symbol||imageUrl)out.set(asset.id,{name,symbol,...(imageUrl?{imageUrl}:{})});}
+  return out;
+ }};
+}
+
+/** Jupiter's public token index often knows mints that have no current DexScreener pair.
+ * It supplies names/artwork only; it is not a price or safety source. */
+export function jupiterMetadataSource(fetchImpl:typeof fetch=fetch,baseUrl=process.env.JUPITER_TOKEN_API_URL??'https://api.jup.ag/tokens/v2/search'):MetadataSource{
+ return {name:'jupiter-token-api',async get(mints){
+  const requested=mints.filter(isSolanaAddress).slice(0,100),out=new Map<string,{name:string;symbol:string;imageUrl?:string|null}>();if(!requested.length)return out;
+  for(let i=0;i<requested.length;i+=50){
+   const chunk=requested.slice(i,i+50);let response:Response|undefined;
+   for(let attempt=0;attempt<3;attempt++){
+    try{response=await fetchImpl(`${baseUrl}?query=${encodeURIComponent(chunk.join(','))}`,{signal:AbortSignal.timeout(20000)});}catch{throw new Error('Token metadata request failed');}
+    if(response.status!==429)break;if(attempt<2)await new Promise(resolve=>setTimeout(resolve,1000*2**attempt));
+   }
+   if(!response?.ok)throw new Error(`Token metadata returned HTTP ${response?.status??0}`);
+   const parsed=z.array(JupiterToken).safeParse(await response.json().catch(()=>null));if(!parsed.success)throw new Error('Token metadata returned an invalid result');
+   for(const token of parsed.data){if(!chunk.includes(token.id))continue;const name=sanitizeUntrusted(token.name??'',64).trim(),symbol=sanitizeUntrusted(token.symbol??'',32).trim(),imageUrl=tokenImageUrl(token.icon);if(name||symbol||imageUrl)out.set(token.id,{name,symbol,...(imageUrl?{imageUrl}:{})});}
+  }
+  return out;
+ }};
+}
+
+/** Try the primary provider first, then fill only the mints it could not resolve. */
+export function combinedMetadataSource(primary:MetadataSource|null,fallback:MetadataSource):MetadataSource{
+ return {name:primary?.name?`${primary.name}+${fallback.name??'fallback'}`:fallback.name,async get(mints){
+  const out=new Map<string,{name:string;symbol:string;imageUrl?:string|null}>();
+  if(primary){try{for(const [mint,value] of await primary.get(mints))out.set(mint,value);}catch{}}
+  const missing=mints.filter(mint=>!out.has(mint));
+  if(missing.length){try{for(const [mint,value] of await fallback.get(missing))out.set(mint,value);}catch{}}
   return out;
  }};
 }
@@ -37,7 +69,7 @@ export async function refreshTokenMetadata(db:PrismaClient,source:MetadataSource
   if(t.symbol==='UNKNOWN'&&found?.symbol&&found.symbol.toUpperCase()!=='UNKNOWN')patch.symbol=found.symbol;
   if(Object.keys(patch).length)await db.token.update({where:{id:t.id},data:patch});
    if(Object.keys(patch).length)resolved++;
-   if(found){const key=`research.tokenMetadata.${t.id}`,value={source:'helius-das',at:now.toISOString(),mint:t.mint,name:patch.name??t.name,symbol:patch.symbol??t.symbol,imageUrl:tokenImageUrl(found.imageUrl)};await db.systemSetting.upsert({where:{key},create:{key,value},update:{value}});}
+   if(found){const key=`research.tokenMetadata.${t.id}`,value={source:source.name??'metadata',at:now.toISOString(),mint:t.mint,name:patch.name??t.name,symbol:patch.symbol??t.symbol,imageUrl:tokenImageUrl(found.imageUrl)};await db.systemSetting.upsert({where:{key},create:{key,value},update:{value}});}
  }
  // Advance even past unresolved assets, so one obsolete token cannot starve later mints.
   if(rows.length&&!mints){const value=rows[rows.length-1]!.id;await db.systemSetting.upsert({where:{key:cursorKey},create:{key:cursorKey,value},update:{value}});}
