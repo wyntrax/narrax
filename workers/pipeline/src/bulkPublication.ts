@@ -4,7 +4,8 @@ import {Prisma,type PrismaClient} from '@narra/database';
 // Keep JSON encoding and individual statements bounded. Callers include every
 // returned lazy operation in their existing atomic publication transaction.
 export const PUBLICATION_BATCH_SIZE=100;
-export function bulkSettings(db:PrismaClient,rows:{key:string;value:Prisma.InputJsonValue}[]):Prisma.PrismaPromise<unknown>[] {
+type PublicationClient=Pick<PrismaClient,'systemSetting'|'$executeRaw'>;
+export function bulkSettings(db:PublicationClient,rows:{key:string;value:Prisma.InputJsonValue}[]):Prisma.PrismaPromise<unknown>[] {
  const ops:Prisma.PrismaPromise<unknown>[]=[];
  for(let i=0;i<rows.length;i+=PUBLICATION_BATCH_SIZE){
   const batch=rows.slice(i,i+PUBLICATION_BATCH_SIZE);
@@ -16,7 +17,7 @@ export function bulkSettings(db:PrismaClient,rows:{key:string;value:Prisma.Input
  return ops;
 }
 export type ProfilePublication=Pick<Prisma.WalletProfileUncheckedCreateInput,'walletId'|'score'|'leaderScore'|'style'|'medianHoldSeconds'|'bestPattern'|'weakPattern'>;
-export function bulkProfiles(db:PrismaClient,rows:ProfilePublication[]):Prisma.PrismaPromise<unknown>[] {
+export function bulkProfiles(db:PublicationClient,rows:ProfilePublication[]):Prisma.PrismaPromise<unknown>[] {
  const ops:Prisma.PrismaPromise<unknown>[]=[];
  for(let i=0;i<rows.length;i+=PUBLICATION_BATCH_SIZE){
   const payload=JSON.stringify(rows.slice(i,i+PUBLICATION_BATCH_SIZE).map(r=>({id:randomUUID(),...r})));

@@ -18,19 +18,20 @@ beforeAll(async()=>{
 afterAll(async()=>{await db.trackedWallet.deleteMany({where:{id:{in:[walletId,inactiveId]}}});await db.token.delete({where:{id:tokenId}});await db.$disconnect();});
 it('reads every row once across tied timestamps and keeps a repeatable snapshot during concurrent backfill',async()=>{
  const baseline=await db.walletTrade.findMany({where:{walletId,at:{gte:from,lte:to}},orderBy:[{at:'asc'},{id:'asc'}],select:{id:true,walletId:true,tokenId:true,side:true,amountSol:true,tokenAmount:true,at:true,marketCapUsd:true,evidence:true}});
- const pageSizes:number[]=[];let inserted=false;
+ const pageSizes:number[]=[];let inserted=false,readOptions:unknown;
  const wrapped=new Proxy(db,{get(target,key){
-  if(key==='$transaction')return (fn:(tx:unknown)=>unknown,opts:unknown)=>target.$transaction(async tx=>fn(new Proxy(tx,{get(t,k){
+  if(key==='$transaction')return (fn:(tx:unknown)=>unknown,opts:unknown)=>{readOptions=opts;return target.$transaction(async tx=>fn(new Proxy(tx,{get(t,k){
    if(k==='$queryRaw')return async(sql:TemplateStringsArray,...values:unknown[])=>{
     const rows=await t.$queryRaw<unknown[]>(sql,...values);pageSizes.push(rows.length);
     if(!inserted){inserted=true;await db.walletTrade.create({data:{walletId,tokenId,side:'BUY',signature:tag+'backfill',amountSol:1,at:to}});}
     return rows;
    };
    return Reflect.get(t,k);
-  }})),opts as never);
+  }})),opts as never);};
   return Reflect.get(target,key);
  }});
  const result=await readIntelligenceInputs(wrapped as PrismaClient,from,to);
+ expect(readOptions).toMatchObject({isolationLevel:'RepeatableRead',timeout:120_000,maxWait:10_000});
  expect(result.pages).toBe(3);expect(pageSizes).toEqual([2000,2000,3]);
  expect(result.rows).toEqual(baseline);
  expect(result.wallets.some(w=>w.id===inactiveId)).toBe(false);
