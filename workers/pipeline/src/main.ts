@@ -7,7 +7,7 @@ import { Worker } from 'bullmq';
 import { publishWalletResearch, measureWalletResearch } from './walletResearch';
 import { refreshResearchHistory } from './walletResearchHistory';
 import { intakeEmergingWallets } from './walletCandidateIntake';
-import {heliusMetadataSource} from './tokenMetadata';
+import {combinedMetadataSource,heliusMetadataSource,jupiterMetadataSource} from './tokenMetadata';
 import { createPrisma } from '@narra/database';
 import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, TokenDiscoveryJobSchema, WyntraxHoldingsJobSchema, WyntraxMembershipEventSchema, createQueues, createRedis } from '@narra/queue';
 import { HeliusWebhooks, JupiterClient, SolanaRpc } from '@narra/solana';
@@ -89,7 +89,8 @@ async function main(): Promise<void> {
   // With it off, no prices, holders or risk rows are written, so token resolution ranks nothing (fail closed).
   const marketDeps = process.env.MARKET_DATA_ENABLED === 'false' ? null : (() => {
     const gecko = new GeckoTerminalSource({ baseUrl: process.env.GECKOTERMINAL_BASE_URL });
-      return { holderFallback:holderRpc,metadata:process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: process.env.HELIUS_RPC_URL ? makeDeveloperHoldingSource(db, new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 })) : null };
+      const metadata = combinedMetadataSource(process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,jupiterMetadataSource());
+      return { holderFallback:holderRpc,metadata,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: process.env.HELIUS_RPC_URL ? makeDeveloperHoldingSource(db, new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 })) : null };
   })();
   if (!marketDeps) console.log('market data disabled');
   // Bounded public RugCheck lookups for early-radar candidates only. Missing/failed data stays UNKNOWN.

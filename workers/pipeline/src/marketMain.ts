@@ -10,7 +10,7 @@ import {SolanaRpc} from '@narra/solana';
 import {makeDeveloperHoldingSource} from './developerHoldings';
 import {makeRadarSafetySource} from './radarSafetyEvidence';
 import {makeTradeabilitySource} from './tradeabilityEvidence';
-import {heliusMetadataSource} from './tokenMetadata';
+import {combinedMetadataSource,heliusMetadataSource,jupiterMetadataSource} from './tokenMetadata';
 import {trackEarlyRadarOutcomes} from './earlyRadarTracking';
 
 /** Market observations and the research that reads them. No wallet recomputation, fan-out or execution consumers. */
@@ -19,7 +19,8 @@ async function main(){
  if(process.env.MARKET_DATA_ENABLED==='false')throw Error('Market data is disabled');
  const db=createPrisma(),connection=createRedis(),queue=new Queue(QUEUE_NAMES.marketData,{connection});
  const gecko=new GeckoTerminalSource({baseUrl:process.env.GECKOTERMINAL_BASE_URL});
-   const deps={metadata:process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,developerHoldings:process.env.HELIUS_RPC_URL?makeDeveloperHoldingSource(db,new SolanaRpc({url:process.env.HELIUS_RPC_URL,timeoutMs:15000})):null,quotes:new DexScreenerSource({baseUrl:process.env.DEXSCREENER_BASE_URL}),info:gecko,launches:{name:gecko.name,getNewPools:async()=>{
+   const metadata=combinedMetadataSource(process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,jupiterMetadataSource());
+   const deps={metadata,developerHoldings:process.env.HELIUS_RPC_URL?makeDeveloperHoldingSource(db,new SolanaRpc({url:process.env.HELIUS_RPC_URL,timeoutMs:15000})):null,quotes:new DexScreenerSource({baseUrl:process.env.DEXSCREENER_BASE_URL}),info:gecko,launches:{name:gecko.name,getNewPools:async()=>{
   const results=await Promise.allSettled([gecko.getNewPools(),gecko.getTrendingPools()]);
   if(results.every(r=>r.status==='rejected'))throw Error('Pool discovery unavailable');
   for(const r of results)if(r.status==='rejected')console.error('One pool discovery source is unavailable');
