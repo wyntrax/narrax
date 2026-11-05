@@ -210,7 +210,7 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     await db.walletTrade.create({ data: { walletId, tokenId: token.id, side: 'SELL', amountSol: 9, tokenAmount: 50, marketCapUsd: 85_000, signature: `wallet-open-sell-${tag}`, evidence: evidence(sellAt), at: sellAt } });
     const response = await get(`/v1/wallets/${walletAddress}`);
     expect(response.status).toBe(200);
-    expect(response.body.openPositions).toMatchObject({ version: 1, observedTrades: 2, capped: false });
+    expect(response.body.openPositions).toMatchObject({ version: 1, observedTrades: 2, capped: false, totalPositions: 1 });
     expect(response.body.openPositions.positions[0]).toMatchObject({
       quantity: '50', remainingCostSol: '5', investedSol: '10', entrySol: '10', partiallySold: true,
       token: { symbol: `ROBOT${tag}`, imageUrl: artwork }, priceUsd: 0.01, priceStale: false,
