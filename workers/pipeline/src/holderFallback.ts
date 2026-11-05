@@ -173,7 +173,7 @@ export async function refreshHolderFallback(
     const value={mint:token.mint,metricId:metric.id,source:'solana-rpc',sourceAt:evidence.sourceAt.toISOString(),retrievedAt:retrievedAt.toISOString(),slot:evidence.slot,program:evidence.program,accounts:evidence.accounts,holders:evidence.holders,top10Pct:evidence.top10Pct,devHoldingPct:null,basis:'positive-balance-owners-including-pools',complete:true};
     await tx.systemSetting.create({data:{key:`research.holderMetric.${metric.id}`,value}});
     const key=`research.holders.${token.id}`;await tx.systemSetting.upsert({where:{key},create:{key,value},update:{value}});
-   });out.holderFallbackWritten++;persisted[token.id]={at:retrievedAt.toISOString(),ok:true};
+   },{timeout:30_000,maxWait:10_000});out.holderFallbackWritten++;persisted[token.id]={at:retrievedAt.toISOString(),ok:true};
   }else{
    out.holderFallbackUnknown++;
    const reason:HolderFailureReason=evidence.ok?'INVALID_OR_INCOMPLETE':evidence.reason;

@@ -126,7 +126,7 @@ export async function scanSocialTokens(db: PrismaClient, deps: { quotes: MarketQ
         for (const token of batch) {
           const s = snaps.get(token.mint);
           if (!s || s.mint !== token.mint) continue;
-          await db.$transaction((tx) => storeMarketSnapshot(tx, token.id, s, deps.quotes!.name, now));
+          await db.$transaction((tx) => storeMarketSnapshot(tx, token.id, s, deps.quotes!.name, now), {timeout:30_000,maxWait:10_000});
           out.metricsWritten++;
         }
       }
@@ -150,7 +150,7 @@ export async function scanSocialTokens(db: PrismaClient, deps: { quotes: MarketQ
           const token = await tx.token.create({ data: { mint: g.ref, symbol: symbol || 'UNKNOWN', name: name || 'Unknown', createdOnChainAt: s.pairCreatedAt }, select: { id: true } });
           await storeMarketSnapshot(tx, token.id, s, deps.quotes!.name, now);
           return token;
-        });
+        }, {timeout:30_000,maxWait:10_000});
         out.tokensCreated++;
         out.metricsWritten++;
         resolved.set(t.id, { group: g, via: 'MINT' });

@@ -27,5 +27,5 @@ export async function readIntelligenceInputs(db:PrismaClient,from:Date,to:Date){
    const last=page.at(-1)!;cursor={id:last.id,at:last.at};
   }
   return {wallets,rows,pages};
- },{isolationLevel:'RepeatableRead',timeout:60_000});
+ },{isolationLevel:'RepeatableRead',timeout:120_000,maxWait:10_000});
 }

@@ -73,10 +73,11 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   const clusterOf = new Map<string, string>();
   clusters.forEach((c, i) => c.wallets.forEach((w) => reassignable.has(w) && clusterOf.set(w, `timing-${i}`)));
 
-  const ops: Prisma.PrismaPromise<unknown>[] = [];
   const settings:{key:string;value:Prisma.InputJsonValue}[]=[];
   const profiles:ProfilePublication[]=[];
   const metrics:Prisma.WalletMetricCreateManyInput[]=[];
+  const clusterData:{members:string[];confidence:Prisma.WalletClusterUncheckedCreateInput['confidence']}[]=[];
+  const consensusSignals:Prisma.ConsensusSignalUncheckedCreateInput[]=[];
   const info = new Map<string, WalletInfo>();
   const unscored: string[] = [];
   let scored = 0;
@@ -110,26 +111,15 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
     profiles.push({walletId:w.id,...profile});
     metrics.push({ walletId: w.id, window: WINDOW, winRate: stats.winRate ?? 0, pnlSol: stats.pnlSol, closedTrades: stats.legs.length, avgRoi: stats.avgRoi ?? 0, medianRoi: stats.medianRoi ?? 0, maxDrawdown: stats.maxDrawdown, computedAt: now });
   }
-  ops.push(...bulkSettings(db,settings),...bulkProfiles(db,profiles));
-  for(let i=0;i<metrics.length;i+=PUBLICATION_BATCH_SIZE)ops.push(db.walletMetric.createMany({data:metrics.slice(i,i+PUBLICATION_BATCH_SIZE)}));
-  // A wallet that no longer has enough closed trades loses its profile instead of keeping a stale score.
-  if (unscored.length) ops.push(db.walletProfile.deleteMany({ where: { walletId: { in: unscored } } }));
-
   // Replace timing clusters wholesale.
-  ops.push(db.trackedWallet.updateMany({ where: { cluster: { label: 'timing' } }, data: { clusterId: null } }));
-  ops.push(db.walletRelationship.deleteMany({ where: { kind: 'TIMING' } }));
-  ops.push(db.walletCluster.deleteMany({ where: { label: 'timing' } }));
   let clusterCount = 0;
   for (const c of clusters) {
     const members = c.wallets.filter((w) => reassignable.has(w));
     if (members.length < 2) continue;
     clusterCount++;
-    ops.push(db.walletCluster.create({ data: { label: 'timing', confidence: c.confidence, wallets: { connect: members.map((id) => ({ id })) } } }));
+    clusterData.push({ members, confidence: c.confidence });
   }
   const rel = edges.filter((e) => reassignable.has(e.a) && reassignable.has(e.b));
-  if (rel.length) {
-    ops.push(db.walletRelationship.createMany({ data: rel.map((e) => ({ fromId: e.a, toId: e.b, kind: 'TIMING', confidence: e.confidence, evidence: { sharedTokens: e.sharedTokens } })) }));
-  }
 
   // Consensus per token over the recent window.
   const cutoff = now.getTime() - consensusMinutes * 60_000;
@@ -145,11 +135,32 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
     const c = computeConsensus(events, info);
     if (!c) continue;
     signals++;
-    ops.push(db.consensusSignal.create({ data: { tokenId, score: c.score, walletCount: c.walletCount, independentEntities: c.independentEntities, leaderCount: c.leaderCount, netFlowSol: c.netFlowSol, timingConcentration: c.timingConcentration, at: now } }));
+    consensusSignals.push({ tokenId, score: c.score, walletCount: c.walletCount, independentEntities: c.independentEntities, leaderCount: c.leaderCount, netFlowSol: c.netFlowSol, timingConcentration: c.timingConcentration, at: now });
   }
 
   const prepared=performance.now();
-  await db.$transaction(ops);
+  // Use an interactive transaction so publication gets an explicit budget.
+  // Prisma's array form only accepts isolationLevel and otherwise uses its 5s
+  // default, which is too short for 200+ wallet/profile/setting writes.
+  const publicationOperations=await db.$transaction(async tx=>{
+    const ops:Prisma.PrismaPromise<unknown>[]=[];
+    ops.push(...bulkSettings(tx,settings),...bulkProfiles(tx,profiles));
+    for(let i=0;i<metrics.length;i+=PUBLICATION_BATCH_SIZE)ops.push(tx.walletMetric.createMany({data:metrics.slice(i,i+PUBLICATION_BATCH_SIZE)}));
+    // A wallet that no longer has enough closed trades loses its profile instead of keeping a stale score.
+    if (unscored.length) ops.push(tx.walletProfile.deleteMany({ where: { walletId: { in: unscored } } }));
+    ops.push(tx.trackedWallet.updateMany({ where: { cluster: { label: 'timing' } }, data: { clusterId: null } }));
+    ops.push(tx.walletRelationship.deleteMany({ where: { kind: 'TIMING' } }));
+    ops.push(tx.walletCluster.deleteMany({ where: { label: 'timing' } }));
+    for (const c of clusterData) {
+      ops.push(tx.walletCluster.create({ data: { label: 'timing', confidence: c.confidence, wallets: { connect: c.members.map((id) => ({ id })) } } }));
+    }
+    if (rel.length) {
+      ops.push(tx.walletRelationship.createMany({ data: rel.map((e) => ({ fromId: e.a, toId: e.b, kind: 'TIMING', confidence: e.confidence, evidence: { sharedTokens: e.sharedTokens } })) }));
+    }
+    for (const signal of consensusSignals) ops.push(tx.consensusSignal.create({ data: signal }));
+    for (const op of ops) await op;
+    return ops.length;
+  },{timeout:30_000,maxWait:10_000});
   return { walletsScored: scored, walletsUnscored: unscored.length, clusters: clusterCount, consensusSignals: signals, tradesUsed: trades.length,
-    readPages:pages,loadMs:Math.round(loaded-started),computeMs:Math.round(prepared-loaded),publishMs:Math.round(performance.now()-prepared),publicationOperations:ops.length };
+    readPages:pages,loadMs:Math.round(loaded-started),computeMs:Math.round(prepared-loaded),publishMs:Math.round(performance.now()-prepared),publicationOperations };
 }
