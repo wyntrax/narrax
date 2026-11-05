@@ -14,7 +14,7 @@ const LAMPORTS = 1_000_000_000;
 const DAY = 86_400_000;
 
 /** Starting values, not tuned. */
-const WALLET_DETAIL = { recentTrades: 20, narrativeLookbackDays: 90, narrativeTradeScan: 500, clusterMembers: 20, relationships: 20 } as const;
+const WALLET_DETAIL = { recentTrades: 20, narrativeLookbackDays: 90, narrativeTradeScan: 500, clusterMembers: 20, relationships: 20, openPositionsDisplay: 10 } as const;
 
 /** Tracked-wallet detail and global search. Both read shared market data. Search also looks at the caller's own trades by signature. */
 export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps, 'db' | 'verifier' | 'now'>): void {
@@ -78,7 +78,12 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     const images=await marketTokenImages(db,trades.map(t=>({id:t.tokenId,mint:t.token.mint})));
     const observedAt = now();
     const open = computeWalletOpenPositions(positionTrades.slice(0, 10_000) as PerformanceTrade[], observedAt, positionTrades.length > 10_000);
-    const openTokenIds = [...new Set(open.positions.map((p) => p.tokenId))];
+    // The detail page shows only the largest observed inventory lots. Remaining swap cost is the
+    // recorded SOL exposure; missing/unsupported swaps are already excluded by the accounting.
+    const rankedOpenPositions = [...open.positions]
+      .sort((a, b) => Number(b.remainingCostSol) - Number(a.remainingCostSol) || a.entryTradeId.localeCompare(b.entryTradeId))
+      .slice(0, WALLET_DETAIL.openPositionsDisplay);
+    const openTokenIds = [...new Set(rankedOpenPositions.map((p) => p.tokenId))];
     const openTokenRows = openTokenIds.length ? await db.token.findMany({
       where: { id: { in: openTokenIds } },
       select: { id: true, mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1, select: { priceUsd: true, at: true } } },
@@ -87,7 +92,8 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     const openById = new Map(openTokenRows.map((t) => [t.id, t]));
     const openPositions = {
       ...open,
-      positions: open.positions.map((p) => {
+      totalPositions: open.positions.length,
+      positions: rankedOpenPositions.map((p) => {
         const t = openById.get(p.tokenId), m = t?.metrics[0], priceAt = m?.at ?? null;
         return {
           ...p,

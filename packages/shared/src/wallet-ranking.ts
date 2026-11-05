@@ -34,6 +34,7 @@ export const WalletOpenPositions = z.object({
   version: z.literal(1), checkedAt: z.string().datetime(), windowDays: z.literal(30),
   observedTrades: count, capped: z.boolean(), invalidTrades: count, unmatchedSells: count,
   positions: z.array(WalletOpenPosition),
+  totalPositions: count.optional(),
 });
 export type WalletOpenPositions = z.infer<typeof WalletOpenPositions>;
 export const WalletRankingPage = z.object({

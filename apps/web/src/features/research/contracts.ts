@@ -91,7 +91,7 @@ export const WalletOpenPositionSchema=z.object({
 export const WalletOpenPositionsSchema=z.object({
   version:z.literal(1),checkedAt:date,windowDays:z.literal(30),observedTrades:z.number().int().nonnegative(),
   capped:z.boolean(),invalidTrades:z.number().int().nonnegative(),unmatchedSells:z.number().int().nonnegative(),
-  positions:z.array(WalletOpenPositionSchema),
+  positions:z.array(WalletOpenPositionSchema),totalPositions:z.number().int().nonnegative().optional(),
 });
 export const WalletDetailSchema=z.object({
   qualification:QualificationSchema.nullish(),researchReview:text.optional(),

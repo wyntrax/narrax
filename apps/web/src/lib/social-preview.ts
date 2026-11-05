@@ -10,7 +10,9 @@ export function socialPreview(locale: SeoLocale, key: string) {
   const guide = researchGuides[locale].find(item => item.slug === key);
   return guide ? {title: guide.title, label: id ? 'PANDUAN RISET' : 'RESEARCH GUIDE', description: guide.description} : null;
 }
+export const DEFAULT_SOCIAL_IMAGE = {path:'/og-default.png?v=1',width:1789,height:655} as const;
 export function socialImageUrl(origin: string, locale: SeoLocale, path = '') {
   const key = path === '' || path === '/' ? 'home' : path.replace(/^\/research\//, '').replace(/^\//, '');
-  return `${origin}/share/${locale}/${socialPreview(locale, key) ? key : 'home'}.png?v=3`;
+  if (key === 'home' || !socialPreview(locale, key)) return `${origin}${DEFAULT_SOCIAL_IMAGE.path}`;
+  return `${origin}/share/${locale}/${key}.png?v=3`;
 }
