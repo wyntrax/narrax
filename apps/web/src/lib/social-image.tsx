@@ -8,6 +8,10 @@ import {socialPreview} from './social-preview';
 export async function renderSocialImage(locale: SeoLocale, key: string) {
   const copy = socialPreview(locale, key);
   if (!copy) return new Response('Not found', {status: 404});
+  if (key === 'home') {
+    const image = await readFile(path.join(process.cwd(), 'public/og-default.png'));
+    return new Response(new Uint8Array(image), {headers: {'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800'}});
+  }
   const symbol = await readFile(path.join(process.cwd(), 'public/narrax-symbol.svg'), 'utf8');
   const logo = `data:image/svg+xml;base64,${Buffer.from(symbol).toString('base64')}`;
   const id = locale === 'id';
