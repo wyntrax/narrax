@@ -21,6 +21,7 @@ export const RequirementsSchema = z.object({
   tokenImageUrl: z.string().nullish(),
   tokenMint: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/).nullable().default(null),
   tiers: z.object({MEMBER: z.number().positive(), PRO: z.number().positive()}),
+  wyntraxUrl: z.string().url().nullable().default(null),
   earlyAccess: z.object({closesAt: DateTime.nullable(), accessDays: z.number().int().positive().nullable()}),
   featureTiers: z.record(Tier).optional(),
 });

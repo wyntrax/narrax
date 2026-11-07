@@ -10,14 +10,15 @@ import {encodeSignature,validateAddress,validateChallenge} from './proof';
 import {watchMembership} from './sync';
 import {scheduleRefresh} from './refresh';
 
-export function AccessFlow(){
+export function AccessFlow({mode='standalone',onChange}:{mode?:'standalone'|'workspace';onChange?:()=>void}={}){
  const auth=useAuth();
  // Remount before rendering another identity: snapshots and proof material are private to this session.
- return <AccessController key={JSON.stringify([auth.ready,auth.authenticated,auth.userId])} auth={auth}/>;
+ return <AccessController key={JSON.stringify([auth.ready,auth.authenticated,auth.userId])} auth={auth} mode={mode} onChange={onChange}/>;
 }
 
-function AccessController({auth}:{auth:AuthAdapter}){
+function AccessController({auth,mode,onChange}:{auth:AuthAdapter;mode:'standalone'|'workspace';onChange?:()=>void}){
  const client=useQueryClient(),authRef=useRef(auth);authRef.current=auth;
+ const onChangeRef=useRef(onChange);onChangeRef.current=onChange;
  // A stable per-mount object makes cleanup ownership explicit, including Strict Mode's setup/cleanup replay.
  const [scope]=useState(()=>({epoch:0,pending:false,active:true}));
  const api=useMemo(()=>createApi(process.env.NEXT_PUBLIC_API_URL??'',()=>authRef.current.getAccessToken()),[]);
@@ -70,7 +71,7 @@ function AccessController({auth}:{auth:AuthAdapter}){
   // Best effort: ask the server to check this wallet's token holding. Early access never waits for it.
   void api.refreshMembership().catch(()=>{});
   // Membership updates also unlock access when local signup is closed or full.
-  return watchMembership(api.entitlements,data=>{if(current()&&data.effectiveTier!=='NONE')dispatch({type:'SYNC',data});},()=>{},error=>{if(current())fail(error);});
+  return watchMembership(api.entitlements,data=>{if(current()&&data.effectiveTier!=='NONE'){dispatch({type:'SYNC',data});onChangeRef.current?.();}},()=>{},error=>{if(current())fail(error);});
  },[state.name,state.data?.links.length,api,scope]);
  useEffect(()=>{if(state.name!=='active'||!state.data?.nextExpiry)return;return scheduleRefresh(state.data.nextExpiry,()=>retry());
  // Only an authoritative snapshot expiry schedules this refresh.
@@ -90,12 +91,12 @@ function AccessController({auth}:{auth:AuthAdapter}){
    if(!current())return;
    validateChallenge(snapshot.challenge,window.location.origin,snapshot.address);send({type:'SIGNED'});
    await api.verify({challengeId:snapshot.challenge.challengeId,message:snapshot.challenge.message,signature:encodeSignature(signature)});
-   const data=await load(current);if(data)send({type:'VERIFIED',data});
+   const data=await load(current);if(data){send({type:'VERIFIED',data});onChangeRef.current?.();}
   });},
   join:()=>{void run(async(send,current)=>{send({type:'JOIN'});await api.join();const data=await load(current);if(!data)return;send({type:'JOINED',data});if(current())await client.invalidateQueries({queryKey:['early-access-status']});});},
   unlink:(id:string)=>{void run(async(send,current)=>{send({type:'UNLINK'});await api.unlink(id);const data=await load(current);if(data)send({type:'LOADED',data});});},
   leave:()=>{void run(async(send,current)=>{send({type:'LEAVE'});await api.leave();const data=await load(current);if(!data)return;send({type:'LOADED',data});if(current())await client.invalidateQueries({queryKey:['early-access-status']});});},
   logout:()=>{invalidate();const own=scope.epoch;client.removeQueries({queryKey:['entitlements']});dispatch({type:'SIGN_OUT'});void auth.logout().catch(()=>{if(scope.active&&own===scope.epoch)fail(new ApiError('NETWORK'));});}
  };
- return <AccessView state={state} actions={actions} wallets={auth.wallets}/>;
+ return <AccessView state={state} actions={actions} wallets={auth.wallets} mode={mode}/>;
 }

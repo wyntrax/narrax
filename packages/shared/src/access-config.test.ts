@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_TIER_REQUIREMENTS, TokenMint, EarlyAccessClosesAt, EarlyAccessDays, POWERED_BY, TierRequirements, TokenSymbol } from './access-config';
+import { DEFAULT_TIER_REQUIREMENTS, TokenMint, EarlyAccessClosesAt, EarlyAccessDays, POWERED_BY, TierRequirements, TokenSymbol, WyntraxMembershipUrl } from './access-config';
 import { earlyAccessAdmission, earlyAccessClosed } from './entitlements';
 
 describe('tier requirements', () => {
@@ -37,6 +37,12 @@ describe('tier requirements', () => {
   });
   it('links to Wyntrax at a fixed address', () => {
     expect(POWERED_BY).toEqual({ name: 'Wyntrax', url: 'https://wyntrax.xyz' });
+  });
+  it('accepts only an HTTPS Wyntrax destination or an empty value', () => {
+    expect(WyntraxMembershipUrl.parse('https://wyntrax.example/memberships/narrax')).toBe('https://wyntrax.example/memberships/narrax');
+    expect(WyntraxMembershipUrl.parse('')).toBeNull();
+    expect(WyntraxMembershipUrl.parse(null)).toBeNull();
+    for (const bad of ['http://wyntrax.example', 'javascript:alert(1)', 'https://user:pass@wyntrax.example', 'not a url']) expect(WyntraxMembershipUrl.safeParse(bad).success).toBe(false);
   });
 });
 

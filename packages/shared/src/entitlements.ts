@@ -64,9 +64,9 @@ export function resolveEntitlements(s: EntitlementSnapshot, now: Date) {
     researchPageLimit: RESEARCH_PAGE_LIMITS[effectiveTier],
     features: Object.fromEntries(Object.entries(FEATURE_TIERS).map(([feature, requiredTier]) => [feature, { requiredTier, allowed: featureAllowed(effectiveTier, feature) }])) };
 }
-/** Seats count users with active, unexpired EARLY_ACCESS-tier grants, regardless of source or paid tier. */
+/** Public seats count active, unexpired self-service grants. Admin overrides never consume a public seat. */
 export function usedSeats(grants: readonly LocalGrant[], now: Date): number {
-  return new Set(grants.filter(g => ['EARLY_ACCESS', 'ADMIN'].includes(g.source) && g.tier === 'EARLY_ACCESS' && g.status === 'ACTIVE' && (g.validUntil === null || future(g.validUntil, now))).map(g => g.userId)).size;
+  return new Set(grants.filter(g => g.source === 'EARLY_ACCESS' && g.tier === 'EARLY_ACCESS' && g.status === 'ACTIVE' && (g.validUntil === null || future(g.validUntil, now))).map(g => g.userId)).size;
 }
 /** `closesAt` and `now` are optional so older callers keep working; when both are given, a window that has ended refuses new seats. */
 export function earlyAccessClosed(closesAt: Date | null | undefined, now: Date | undefined): boolean {

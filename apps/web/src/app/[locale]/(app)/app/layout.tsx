@@ -7,6 +7,7 @@ import {ResearchWorkspace} from '@/features/research/session';
 import {Outfit,JetBrains_Mono} from 'next/font/google';
 import './workspace.css';
 import './workspace-design.css';
+import '@/features/access/access-design.css';
 const outfit=Outfit({subsets:['latin'],display:'swap',variable:'--font-workspace'});
 const mono=JetBrains_Mono({subsets:['latin'],weight:'400',display:'swap',variable:'--font-workspace-mono',preload:false});
 export default async function WorkspaceLayout({children}:{children:ReactNode}){

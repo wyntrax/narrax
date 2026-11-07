@@ -1,18 +1,24 @@
 import {describe, expect, it} from 'vitest';
-import {effectiveStatus, shortAddress, toPayload, toSettings} from './contracts';
+import {effectiveStatus, shortAddress, toPayload, toSettings, validWyntraxUrl} from './contracts';
 
 describe('admin settings', () => {
   it('shows API defaults for settings that were never saved', () => {
-    expect(toSettings([])).toEqual({enabled: false, cap: 0, domain: '', enforced: false, shadow: true});
+    expect(toSettings([])).toEqual({enabled: false, cap: 0, domain: '', wyntraxUrl: '', enforced: false, shadow: true});
   });
   it('reads stored rows', () => {
-    const rows = [{key: 'early_access.enabled', value: true}, {key: 'early_access.seat_cap', value: 25}, {key: 'entitlements.wallet_link_domain', value: 'http://localhost:4010'}, {key: 'entitlements.enforced', value: true}, {key: 'entitlements.shadow_log', value: false}];
-    expect(toSettings(rows)).toEqual({enabled: true, cap: 25, domain: 'http://localhost:4010', enforced: true, shadow: false});
+    const rows = [{key: 'early_access.enabled', value: true}, {key: 'early_access.seat_cap', value: 25}, {key: 'entitlements.wallet_link_domain', value: 'http://localhost:4010'}, {key: 'access.wyntrax_url', value: 'https://wyntrax.example/memberships/narrax'}, {key: 'entitlements.enforced', value: true}, {key: 'entitlements.shadow_log', value: false}];
+    expect(toSettings(rows)).toEqual({enabled: true, cap: 25, domain: 'http://localhost:4010', wyntraxUrl: 'https://wyntrax.example/memberships/narrax', enforced: true, shadow: false});
   });
-  it('sends only keys the API accepts, and leaves out an empty domain', () => {
-    const body = toPayload({enabled: true, cap: 10, domain: '', enforced: false, shadow: true});
-    expect(Object.keys(body).sort()).toEqual(['early_access.enabled', 'early_access.seat_cap', 'entitlements.shadow_log']);
-    expect(toPayload({enabled: true, cap: 10, domain: 'http://localhost:4010', enforced: false, shadow: true})['entitlements.wallet_link_domain']).toBe('http://localhost:4010');
+  it('sends only keys the API accepts, and clears an empty Wyntrax destination', () => {
+    const body = toPayload({enabled: true, cap: 10, domain: '', wyntraxUrl: '', enforced: false, shadow: true});
+    expect(Object.keys(body).sort()).toEqual(['access.wyntrax_url', 'early_access.enabled', 'early_access.seat_cap', 'entitlements.shadow_log']);
+    expect(body['access.wyntrax_url']).toBeNull();
+    expect(toPayload({enabled: true, cap: 10, domain: 'http://localhost:4010', wyntraxUrl: 'https://wyntrax.example/narrax', enforced: false, shadow: true})).toMatchObject({'entitlements.wallet_link_domain': 'http://localhost:4010', 'access.wyntrax_url': 'https://wyntrax.example/narrax'});
+  });
+  it('accepts only an HTTPS Wyntrax destination or an empty value', () => {
+    expect(validWyntraxUrl('')).toBe(true);
+    expect(validWyntraxUrl('https://wyntrax.example/memberships/narrax')).toBe(true);
+    for (const bad of ['http://wyntrax.example', 'javascript:alert(1)', 'https://user:pass@wyntrax.example', 'not a url']) expect(validWyntraxUrl(bad)).toBe(false);
   });
 });
 
