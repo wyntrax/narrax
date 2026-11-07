@@ -34,7 +34,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): void {
   const ports = makeAgentPorts(db, now);
   const auth = makeAuthenticate(deps);
   const opts = { preHandler: auth, config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
-  const chatOpts = { preHandler: auth, config: { rateLimit: { max: deps.questionsPerMinute ?? 20, timeWindow: '1 minute' } } };
+  // The Agent has its own 45s turn budget. This route-level deadline is a final safety net for a slow tool or
+  // database call, and stays below the frontend's 55s request timeout and nginx's usual 60s read timeout.
+  const chatOpts = { preHandler: auth, handlerTimeout: AGENT_LIMITS.turnTimeoutMs + 5_000, config: { rateLimit: { max: deps.questionsPerMinute ?? 20, timeWindow: '1 minute' } } };
   const busy = new Set<string>(); // one question at a time per user, per process
   const audit = (userId: string, action: string, detail: Prisma.InputJsonValue) => db.auditLog.create({ data: { userId, action, detail } });
 

@@ -7,6 +7,11 @@ export interface LlmRequest {
   reasoningLevel?: 'low' | 'medium' | 'high';
   /** Stable identifier for provider routing and cache affinity. Never user-authored text. */
   sessionId?: string;
+  /**
+   * Caller's remaining budget for this request. Providers clamp their own timeout to this value.
+   * Used by multi-step callers such as the Agent to keep one turn inside its overall deadline.
+   */
+  timeoutMs?: number;
 }
 
 export interface LlmResponse {

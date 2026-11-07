@@ -69,9 +69,11 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     };
   }
 
-  private async post(body: Record<string, unknown>, sessionId?: string): Promise<Response> {
+  private async post(body: Record<string, unknown>, sessionId?: string, timeoutMs?: number): Promise<Response> {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), this.opts.timeoutMs ?? 60_000);
+    const requested = timeoutMs != null && Number.isFinite(timeoutMs) ? timeoutMs : undefined;
+    const budget = Math.max(1, Math.min(this.opts.timeoutMs ?? 60_000, requested ?? Number.POSITIVE_INFINITY));
+    const timer = setTimeout(() => ctrl.abort(), budget);
     try {
       return await (this.opts.fetch ?? fetch)(chatCompletionsUrl(this.opts.baseUrl), {
         method: 'POST',
@@ -94,9 +96,12 @@ export class OpenAiCompatibleProvider implements LlmProvider {
 
   async complete(req: LlmRequest): Promise<LlmResponse> {
     const style: RequestStyle = this.bareModels.has(req.model) ? 'bare' : (this.opts.requestStyle ?? 'full');
-    let res = await this.post(this.body(req, style), req.sessionId);
+    // A caller deadline covers the retry too. Do not grant each attempt a fresh full budget.
+    const deadline = req.timeoutMs != null && Number.isFinite(req.timeoutMs) ? Date.now() + Math.max(0, req.timeoutMs) : null;
+    const remaining = () => deadline == null ? undefined : Math.max(1, deadline - Date.now());
+    let res = await this.post(this.body(req, style), req.sessionId, remaining());
     if ((res.status === 400 || res.status === 422) && style !== 'bare') {
-      const retry = await this.post(this.body(req, 'bare'), req.sessionId);
+      const retry = await this.post(this.body(req, 'bare'), req.sessionId, remaining());
       if (retry.ok) this.bareModels.add(req.model);
       res = retry;
     }

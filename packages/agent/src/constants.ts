@@ -5,6 +5,8 @@
 export const AGENT_LIMITS = {
   /** Tool calls the agent may make to answer one message. Then it must answer or give up. */
   maxToolCalls: 5,
+  /** Overall wall-clock budget for one user message, including every model and tool step. */
+  turnTimeoutMs: 45_000,
   /** A reply that is not valid JSON in the expected shape is retried this many times, then the turn ends. */
   maxBadOutputs: 2,
   /** A tool result longer than this (as JSON) is not shown to the model at all. Tools also cap their own lists. */
@@ -25,6 +27,7 @@ export const AGENT_LIMITS = {
 export const FALLBACK = {
   badOutput: 'Sorry, I could not put together an answer to that. Please try rephrasing.',
   maxSteps: 'I could not finish looking that up within my limits. Please ask something narrower.',
+  timeout: 'That answer took too long to finish. Please ask a narrower question.',
   llmError: 'The assistant is unavailable right now. Please try again in a moment.',
   empty: 'I do not have anything to add.',
 } as const;
