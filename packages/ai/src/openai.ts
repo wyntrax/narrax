@@ -24,9 +24,18 @@ export interface OpenAiCompatibleOptions {
   timeoutMs?: number;
   fetch?: typeof fetch;
   requestStyle?: RequestStyle;
+  /** Fallback routing ID when a request does not carry its own session. */
+  sessionId?: string;
 }
 
 const DEFAULT_BASE = 'https://api.openai.com/v1';
+const DEFAULT_SESSION_ID = 'narrax-ai';
+const CLIENT_USER_AGENT = 'narrax-ai/1.0';
+
+function providerSessionId(requestId?: string, fallback?: string): string {
+  const raw = requestId?.trim() || fallback?.trim() || DEFAULT_SESSION_ID;
+  return raw.replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 128) || DEFAULT_SESSION_ID;
+}
 /** Fixed text only. The provider's own error body is never echoed because it can contain request data. */
 const HINTS: Record<number, string> = {
   400: 'the model id or a request field was rejected',
@@ -60,13 +69,19 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     };
   }
 
-  private async post(body: Record<string, unknown>): Promise<Response> {
+  private async post(body: Record<string, unknown>, sessionId?: string): Promise<Response> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.opts.timeoutMs ?? 60_000);
     try {
       return await (this.opts.fetch ?? fetch)(chatCompletionsUrl(this.opts.baseUrl), {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.opts.apiKey}` },
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${this.opts.apiKey}`,
+          'user-agent': CLIENT_USER_AGENT,
+          // OpenCode Go requires this header to route a conversation consistently.
+          'x-opencode-session': providerSessionId(sessionId, this.opts.sessionId),
+        },
         signal: ctrl.signal,
         body: JSON.stringify(body),
       });
@@ -79,9 +94,9 @@ export class OpenAiCompatibleProvider implements LlmProvider {
 
   async complete(req: LlmRequest): Promise<LlmResponse> {
     const style: RequestStyle = this.bareModels.has(req.model) ? 'bare' : (this.opts.requestStyle ?? 'full');
-    let res = await this.post(this.body(req, style));
+    let res = await this.post(this.body(req, style), req.sessionId);
     if ((res.status === 400 || res.status === 422) && style !== 'bare') {
-      const retry = await this.post(this.body(req, 'bare'));
+      const retry = await this.post(this.body(req, 'bare'), req.sessionId);
       if (retry.ok) this.bareModels.add(req.model);
       res = retry;
     }

@@ -17,8 +17,13 @@ export async function grantEarlyAccess(db: PrismaClient, userId: string, input: 
     await lock(tx, 'seats');
     await lockUser(tx, userId);
     const settings = await localSettings(tx);
-    const users = await tx.accessGrant.findMany({ where: active(now), distinct: ['userId'], select: { userId: true } });
-    const denied = earlyAccessAdmission({ ...settings, now, occupied: users.length, alreadySeated: users.some(u => u.userId === userId), hasWallet: (await tx.linkedWallet.count({ where: { userId } })) > 0 });
+    const users = await tx.accessGrant.findMany({ where: { ...active(now), source: 'EARLY_ACCESS' }, distinct: ['userId'], select: { userId: true } });
+    // Admin grants are an override, not a public seat. They are creatable before verification and never held back
+    // by the public early-access window, invite policy or cap. Entitlement resolution still requires a linked wallet.
+    const alreadySeated = users.some(u => u.userId === userId) || (await tx.accessGrant.count({ where: { ...active(now), userId } })) > 0;
+    const denied = actorId === null
+      ? earlyAccessAdmission({ ...settings, now, occupied: users.length, alreadySeated, hasWallet: (await tx.linkedWallet.count({ where: { userId } })) > 0 })
+      : null;
     if (denied) throw new AccessError(denied);
     const source = actorId === null ? 'EARLY_ACCESS' : 'ADMIN';
     const previous = await tx.accessGrant.findUnique({ where: { userId_source: { userId, source } } });

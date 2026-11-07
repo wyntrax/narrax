@@ -126,7 +126,7 @@ export async function runAiAnalysis(db: PrismaClient, deps: { llm: LlmProvider |
 
     const collected = await collectFacts(db, row.id);
     if (!collected) continue;
-    const r = await analyzeOpportunity({ llm: deps.llm, config: cfg }, { facts: collected.facts, untrusted: collected.untrusted });
+    const r = await analyzeOpportunity({ llm: deps.llm, config: cfg }, { facts: collected.facts, untrusted: collected.untrusted, sessionId: row.id });
     const inTok = r.usage.reduce((s, u) => s + u.inputTokens, 0), outTok = r.usage.reduce((s, u) => s + u.outputTokens, 0);
     used += inTok + outTok; out.tokensUsed += inTok + outTok;
     if (!r.usage.length) { out.providerFailures++; continue; } // nothing came back at all: try again on the next run

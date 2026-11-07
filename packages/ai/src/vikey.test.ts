@@ -26,6 +26,8 @@ describe('the Vikey chat-completions flow', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe('https://api.vikey.ai/v1/chat/completions');
     expect(calls[0]!.headers.authorization).toBe('Bearer vk-secret');
+    expect(calls[0]!.headers['x-opencode-session']).toBe('narrax-ai');
+    expect(calls[0]!.headers['user-agent']).toBe('narrax-ai/1.0');
     expect(calls[0]!.body.model).toBe('vikey-model-1');
     expect(calls[0]!.body.messages).toEqual([{ role: 'system', content: 'sys' }, { role: 'user', content: 'Hello!' }]);
   });
