@@ -5,6 +5,8 @@ export interface LlmRequest {
   temperature: number;
   maxTokens: number;
   reasoningLevel?: 'low' | 'medium' | 'high';
+  /** Stable identifier for provider routing and cache affinity. Never user-authored text. */
+  sessionId?: string;
 }
 
 export interface LlmResponse {

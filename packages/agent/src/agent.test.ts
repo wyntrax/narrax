@@ -91,7 +91,14 @@ describe('the loop', () => {
     const { result, requests } = await go(() => final('Hello. I can explain your positions.'));
     expect(result).toMatchObject({ text: 'Hello. I can explain your positions.', stopReason: 'final', toolsUsed: [], proposals: [] });
     expect(requests[0]!.system).toBe(SYSTEM_PROMPT);
+    expect(requests[0]!.sessionId).toBe('c1');
     expect(result.inputTokens).toBe(10);
+  });
+  it('omits the session id when a conversation has none', async () => {
+    const ports = fakePorts();
+    const { llm, requests } = scriptedLlm(() => final('ok'));
+    await runAgent({ llm, model: 'm', temperature: 0.2, maxTokens: 800, ports: ports.ports, ctx: { userId: USER_A, now: NOW, conversationId: null }, userMessage: 'hello', history: [] });
+    expect(requests[0]!.sessionId).toBeUndefined();
   });
   it('runs a tool, hands the result back as data, then answers', async () => {
     const { result, requests } = await go((_r, n) => (n === 0 ? call('get_my_settings') : final('You are in PAPER mode.')));

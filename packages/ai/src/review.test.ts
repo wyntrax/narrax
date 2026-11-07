@@ -22,10 +22,11 @@ function llm(replies: (string | Error)[]) {
 describe('reviewPosition', () => {
   it('returns a validated review and records usage against the reasoning model', async () => {
     const l = llm([GOOD]);
-    const r = await reviewPosition({ llm: l.provider, config: cfg }, { facts, untrusted: [] });
+    const r = await reviewPosition({ llm: l.provider, config: cfg }, { facts, untrusted: [], sessionId: 'position-1' });
     expect(r.review).toMatchObject({ action: 'REDUCE', confidence: 0.82 });
     expect(r.usage).toEqual([{ stage: 'positionReview', model: cfg.reasoningModel, inputTokens: 120, outputTokens: 40 }]);
     expect(l.calls[0]!.reasoningLevel).toBe(cfg.reasoningLevel);
+    expect(l.calls[0]!.sessionId).toBe('position-1');
     const sent = JSON.parse(l.calls[0]!.user);
     expect(sent.stage).toBe('positionReview');
     expect(sent.facts.rules.summary).toMatch(/VOLUME_COLLAPSE/);

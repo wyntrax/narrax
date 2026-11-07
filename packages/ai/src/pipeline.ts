@@ -11,6 +11,8 @@ export interface AnalysisInput {
   facts: OpportunityFacts;
   /** Token names, symbols and narrative text. Reaches the model only under the "untrusted" key of the screening and bull/bear/risk prompts. */
   untrusted: UntrustedField[];
+  /** Stable routing ID for this analysis, typically the opportunity ID. */
+  sessionId?: string;
 }
 
 export interface AnalysisResult {
@@ -33,13 +35,13 @@ interface Call<T> { value: T | null; error?: string }
 
 async function runAgent<T>(
   llm: LlmProvider, cfg: AiConfig, usage: Usage[],
-  a: { stage: Stage; model: string; reasoning?: boolean; build: (retryNote?: string) => string; schema: ZodType<T> },
+  a: { stage: Stage; model: string; reasoning?: boolean; sessionId?: string; build: (retryNote?: string) => string; schema: ZodType<T> },
 ): Promise<Call<T>> {
   let note: string | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     let res;
     try {
-      res = await llm.complete({ model: a.model, system: SYSTEM_PROMPT, user: a.build(note), temperature: cfg.temperature, maxTokens: cfg.maxTokensPerCall, ...(a.reasoning ? { reasoningLevel: cfg.reasoningLevel } : {}) });
+      res = await llm.complete({ model: a.model, system: SYSTEM_PROMPT, user: a.build(note), temperature: cfg.temperature, maxTokens: cfg.maxTokensPerCall, ...(a.reasoning ? { reasoningLevel: cfg.reasoningLevel } : {}), ...(a.sessionId ? { sessionId: a.sessionId } : {}) });
     } catch {
       return { value: null, error: 'PROVIDER_ERROR' }; // a provider outage is not retried here, and it never becomes a trade
     }
@@ -112,6 +114,7 @@ export async function analyzeOpportunity(deps: { llm: LlmProvider; config: AiCon
 
   const fastCall = await runAgent(llm, cfg, usage, {
     stage: 'fast', model: cfg.fastModel, schema: FastAgentOutputSchema,
+    sessionId: input.sessionId,
     build: (retryNote) => buildUserMessage('fast', { facts: input.facts, untrusted: input.untrusted, retryNote }),
   });
   const fast = fastCall.value;
@@ -120,7 +123,7 @@ export async function analyzeOpportunity(deps: { llm: LlmProvider; config: AiCon
   if (fast.classification === 'WATCH') return result(plainDecision(cfg, 'WATCH', fast.reasonCodes, fast.summary, fast.score / 100), { fast });
 
   const role = (stage: 'bull' | 'bear' | 'risk') => runAgent<ArgumentOutput | RiskOutput>(llm, cfg, usage, {
-    stage, model: cfg.reasoningModel, reasoning: true,
+    stage, model: cfg.reasoningModel, reasoning: true, sessionId: input.sessionId,
     schema: (stage === 'risk' ? RiskAgentSchema : ArgumentSchema) as ZodType<ArgumentOutput | RiskOutput>,
     build: (retryNote) => buildUserMessage(stage, { facts: input.facts, untrusted: input.untrusted, retryNote }),
   });
@@ -131,7 +134,7 @@ export async function analyzeOpportunity(deps: { llm: LlmProvider; config: AiCon
 
   // The decision agent never sees the untrusted text. It gets our facts and the roles' structured arguments.
   const decisionCall = await runAgent(llm, cfg, usage, {
-    stage: 'decision', model: cfg.reasoningModel, reasoning: true, schema: AgentDecisionSchema,
+    stage: 'decision', model: cfg.reasoningModel, reasoning: true, sessionId: input.sessionId, schema: AgentDecisionSchema,
     build: (retryNote) => buildUserMessage('decision', { facts: input.facts, modelArguments: { bull, bear, risk }, retryNote }),
   });
   if (!decisionCall.value) return result(plainDecision(cfg, 'WATCH', ['MODEL_OUTPUT_INVALID'], 'The decision step did not return a valid answer, so this stays on watch.', 0), parts);
@@ -143,7 +146,7 @@ export async function analyzeOpportunity(deps: { llm: LlmProvider; config: AiCon
 
   if (decision.action === 'BUY' && cfg.judgeModel) {
     const jc = await runAgent(llm, cfg, usage, {
-      stage: 'judge', model: cfg.judgeModel, reasoning: true, schema: JudgeSchema,
+      stage: 'judge', model: cfg.judgeModel, reasoning: true, sessionId: input.sessionId, schema: JudgeSchema,
       build: (retryNote) => buildUserMessage('judge', { facts: input.facts, modelArguments: { bull, bear, risk }, proposedDecision: decision, retryNote }),
     });
     judge = jc.value;
@@ -164,10 +167,10 @@ export interface PositionReviewResult { review: PositionReviewOutput | null; usa
  * reach it only under the "untrusted" key. A provider failure or an invalid answer returns review: null, and the
  * monitor then simply uses the rules. The answer cannot place a trade and can at most make an exit more cautious.
  */
-export async function reviewPosition(deps: { llm: LlmProvider; config: AiConfig }, input: { facts: PositionReviewFacts; untrusted: UntrustedField[] }): Promise<PositionReviewResult> {
+export async function reviewPosition(deps: { llm: LlmProvider; config: AiConfig }, input: { facts: PositionReviewFacts; untrusted: UntrustedField[]; sessionId?: string }): Promise<PositionReviewResult> {
   const usage: Usage[] = [];
   const call = await runAgent(deps.llm, deps.config, usage, {
-    stage: 'positionReview', model: deps.config.reasoningModel, reasoning: true, schema: PositionReviewSchema,
+    stage: 'positionReview', model: deps.config.reasoningModel, reasoning: true, sessionId: input.sessionId, schema: PositionReviewSchema,
     build: (retryNote) => buildUserMessage('positionReview', { facts: input.facts, untrusted: input.untrusted, retryNote }),
   });
   return { review: call.value, usage, ...(call.error ? { error: call.error } : {}) };

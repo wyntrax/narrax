@@ -56,7 +56,7 @@ export async function runAgent(i: AgentRunInput): Promise<AgentRunResult> {
     const stepsLeft = AGENT_LIMITS.maxToolCalls - toolCalls;
     let raw: string;
     try {
-      const r = await i.llm.complete({ model: i.model, system: SYSTEM_PROMPT, user: buildStepMessage({ userMessage, history, toolResults: results, stepsLeft }), temperature: i.temperature, maxTokens: i.maxTokens });
+      const r = await i.llm.complete({ model: i.model, system: SYSTEM_PROMPT, user: buildStepMessage({ userMessage, history, toolResults: results, stepsLeft }), temperature: i.temperature, maxTokens: i.maxTokens, ...(i.ctx.conversationId ? { sessionId: i.ctx.conversationId } : {}) });
       raw = r.text; out.inputTokens += r.inputTokens; out.outputTokens += r.outputTokens;
     } catch (e) {
       return { ...out, text: FALLBACK.llmError, stopReason: 'llm_error', llmError: e instanceof LlmError ? e.message.slice(0, 200) : 'unexpected error' };
