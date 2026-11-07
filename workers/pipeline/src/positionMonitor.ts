@@ -149,6 +149,7 @@ export async function monitorPositions(db: PrismaClient, deps: { llm: LlmProvide
         const r = await reviewPosition({ llm: deps.llm, config: cfg }, {
           facts: reviewFacts(pos, entry, facts, det, now),
           untrusted: [wrapUntrusted('token.symbol', pos.token.symbol, 32), wrapUntrusted('token.name', pos.token.name, 64), ...(narrativeName ? [wrapUntrusted('narrative.name', narrativeName, 80)] : [])],
+          sessionId: pos.id,
         });
         ran = true; out.reviewed++;
         aiTokens = r.usage.reduce((s, u) => s + u.inputTokens + u.outputTokens, 0);
