@@ -1,14 +1,14 @@
 import {test,expect} from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import {researchApi,enterWorkspace,access,overview,narrative,token,opportunity} from './research-fixtures';
-import {empty,ADDRESS} from '../src/test/fixtures';
+import {linked,ADDRESS} from '../src/test/fixtures';
 import messages from '../messages/research/en.json';
 
 const screens=[['overview','/app','A clearer view of the market.'],['radar','/app/radar','Narrative radar'],['narrative','/app/narratives/robotics','Robotics'],['opportunities','/app/opportunities','Opportunities'],['tokens','/app/tokens','Tokens'],['token',`/app/tokens/${ADDRESS}`,'ROBOT / Robotics sample']] as const;
 for(const [name,path,title] of screens)for(const width of [1440,390])for(const theme of ['dark','light'])test(`${name}: ${width} ${theme}, accessible and contained`,async({page})=>{
  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
  await page.setViewportSize({width,height:900});await page.context().addCookies([{name:'NARRA_THEME',value:theme,url:'http://localhost:4010'}]);await researchApi(page);await enterWorkspace(page,path);
- await expect(page.getByRole('heading',{level:1,name:title,exact:true})).toBeVisible();await expect(page.getByText('Loading research…')).toHaveCount(0);await page.evaluate(()=>document.fonts.ready);
+ await expect(page.getByRole('heading',{level:1,name:title,exact:true})).toBeVisible();await expect(page.getByText('Loading researchâ€¦')).toHaveCount(0);await page.evaluate(()=>document.fonts.ready);
  await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content',/noindex/);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  expect(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight+1)).toBe(true);
@@ -27,10 +27,10 @@ test('linked research journey and structured analysis use authenticated read-onl
  expect(requests).toContain('/v1/opportunities/o1/analysis');await page.getByRole('button',{name:'Sign out',exact:true}).click();await expect(page.getByRole('heading',{name:'Sign in to your workspace'})).toBeVisible();await expect(page.getByText('Wait for more evidence.')).toHaveCount(0);
 });
 test('NONE cannot mount shared research but retains own account settings',async({page})=>{
- const requests=await researchApi(page,path=>path==='/v1/me/entitlements'?{body:empty}:path==='/v1/overview'?{body:{...overview,bar:null,locked:{overview:true,narratives:true,rotation:true,opportunities:true},strip:{topNarratives:[],hottestOpportunity:null},rotation:null,brief:{generated:'rules',points:[]}}}:undefined);
+ const requests=await researchApi(page,path=>path==='/v1/me/entitlements'?{body:linked}:path==='/v1/overview'?{body:{...overview,bar:null,locked:{overview:true,narratives:true,rotation:true,opportunities:true},strip:{topNarratives:[],hottestOpportunity:null},rotation:null,brief:{generated:'rules',points:[]}}}:undefined);
   await enterWorkspace(page);await expect(page.getByRole('heading',{name:'Research access required'})).toBeVisible();await expect(page.getByText('Your open positions',{exact:true})).toHaveCount(0);
-  await page.locator('.research-sidebar').getByRole('link',{name:'Radar · Research access required',exact:true}).click();await expect(page.getByRole('heading',{name:'Research access required'})).toBeVisible();
-  await page.locator('.research-sidebar').getByRole('link',{name:'Opportunities · Research access required',exact:true}).click();await expect(page.getByRole('heading',{name:'Research access required'})).toBeVisible();await expect(page.getByText('Wait for more evidence.')).toHaveCount(0);
+  await page.locator('.research-sidebar').getByRole('link',{name:'Radar Â· Research access required',exact:true}).click();await expect(page.getByRole('heading',{name:'Research access required'})).toBeVisible();
+  await page.locator('.research-sidebar').getByRole('link',{name:'Opportunities Â· Research access required',exact:true}).click();await expect(page.getByRole('heading',{name:'Research access required'})).toBeVisible();await expect(page.getByText('Wait for more evidence.')).toHaveCount(0);
   await page.locator('.research-sidebar').getByRole('link',{name:'Settings',exact:true}).click();await expect(page.locator('#st-name')).toBeVisible();
   expect(requests.some(path=>/^\/v1\/(overview|narratives|opportunities)(?:[/?]|$)/.test(path))).toBe(false);expect(requests).toContain('/v1/settings');
 });
@@ -85,11 +85,11 @@ test('mobile navigation, full-width workspace, theme and Indonesian research cop
  await expect(page.getByRole('heading',{name:'Radar narasi',exact:true})).toBeVisible();await expect(page.locator('html')).toHaveAttribute('data-theme','light');expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
 });
 test('refreshing downgraded access clears restricted research',async({page})=>{
-   let downgraded=false;await researchApi(page,path=>path==='/v1/me/entitlements'?{body:downgraded?empty:access}:undefined);await enterWorkspace(page,'/app/narratives/robotics');await expect(page.getByRole('heading',{name:'Robotics',exact:true})).toBeVisible();downgraded=true;await page.locator('.research-sidebar').getByRole('link',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Refresh access',exact:true}).click();const radar=page.locator('.research-sidebar').getByRole('link',{name:'Radar · Research access required',exact:true});await expect(radar).toHaveAttribute('data-locked','true');await radar.click();await expect(page.getByRole('heading',{name:'Research access required'})).toHaveCount(1);await expect(page.getByRole('heading',{name:'Research access required'})).toBeVisible();await expect(page.getByRole('heading',{name:'Robotics',exact:true})).toHaveCount(0);
+   let downgraded=false;await researchApi(page,path=>path==='/v1/me/entitlements'?{body:downgraded?linked:access}:undefined);await enterWorkspace(page,'/app/narratives/robotics');await expect(page.getByRole('heading',{name:'Robotics',exact:true})).toBeVisible();downgraded=true;await page.locator('.research-sidebar').getByRole('link',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Refresh access',exact:true}).click();const radar=page.locator('.research-sidebar').getByRole('link',{name:'Radar Â· Research access required',exact:true});await expect(radar).toHaveAttribute('data-locked','true');await radar.click();await expect(page.getByRole('heading',{name:'Research access required'})).toHaveCount(1);await expect(page.getByRole('heading',{name:'Research access required'})).toBeVisible();await expect(page.getByRole('heading',{name:'Robotics',exact:true})).toHaveCount(0);
 });
 test('loading, missing records, and missing analysis are explicit states',async({page})=>{
  let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});await researchApi(page,path=>path==='/v1/opportunities/o1/analysis'?{status:404,body:{error:'NOT_FOUND'}}:path==='/v1/narratives/missing'?{status:404,body:{error:'NOT_FOUND'}}:undefined);
  await page.route('**/v1/opportunities?*',async route=>{if(route.request().method()==='OPTIONS')return route.fallback();await gate;await route.fallback();});
-    await enterWorkspace(page,'/app/opportunities');await expect(page.getByText('Loading research…')).toBeVisible();release();await page.getByRole('button',{name:'Inspect historical scores and analysis'}).click();await page.getByRole('button',{name:'Inspect analysis'}).click();await expect(page.getByText(messages.enhance.analysisCoverage,{exact:true})).toBeVisible();await expect(page.getByText('Wait for more evidence.')).toHaveCount(0);
+    await enterWorkspace(page,'/app/opportunities');await expect(page.getByText('Loading researchâ€¦')).toBeVisible();release();await page.getByRole('button',{name:'Inspect historical scores and analysis'}).click();await page.getByRole('button',{name:'Inspect analysis'}).click();await expect(page.getByText(messages.enhance.analysisCoverage,{exact:true})).toBeVisible();await expect(page.getByText('Wait for more evidence.')).toHaveCount(0);
  await page.goto('/app/narratives/missing');await page.getByRole('button',{name:'Continue',exact:true}).click();await expect(page.getByRole('heading',{name:'This research record was not found'})).toBeVisible();
 });
