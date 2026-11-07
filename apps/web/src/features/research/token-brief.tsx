@@ -29,11 +29,13 @@ export function useTokenMarketState(token?:Token){
 export function TokenBrief({token,state}:{token:Token;state:ReturnType<typeof tokenMarketState>}){
  const t=useTranslations('workspace.brief'),w=useTranslations('workspace'),f=useFormat();
  const o=token.observation,m=state==='fresh'?token.metrics:null;
+ // DexScreener can provide h6/h24 while omitting h1 for a pool. Keep that window unknown instead of substituting.
  const change=m?o?.priceChange1hPct:null;
+ const changeValue=change==null?(state==='fresh'?t('changeUnavailable'):t('needsFresh')):`${change>0?'+':''}${f.number(change,2)}%`;
  const turnover=m&&m.liquidityUsd!=null&&m.liquidityUsd>0&&m.volume24hUsd!=null&&m.volume24hUsd>=0?m.volume24hUsd/m.liquidityUsd:null;
  return <Section title={t('title')}>
   <div className="token-brief-status" role="status"><strong>{t(`states.${state}`)}</strong><span>{t(`stateHelp.${state}`)}</span></div>
-  <Metrics items={[{label:w('trench.change1h'),value:change==null?t('needsFresh'):`${change>0?'+':''}${f.number(change,2)}%`},{label:w('trench.turnover'),value:turnover==null?t('needsFresh'):`${f.number(turnover,2)}×`},{label:t('network'),value:'Solana'}]}/>
+  <Metrics items={[{label:w('trench.change1h'),value:changeValue},{label:w('trench.turnover'),value:turnover==null?t('needsFresh'):`${f.number(turnover,2)}×`},{label:t('network'),value:'Solana'}]}/>
   <p className="research-note">{w('trench.turnoverNote')}</p>
   <Facts items={[{label:t('marketAt'),value:f.date(o?.at)},{label:w('trench.poolCreated'),value:f.date(o?.pairCreatedAt)},{label:t('tokenCreated'),value:f.date(token.createdOnChainAt)}]}/>
   <p className="research-note">{t('timingNote')}</p>
