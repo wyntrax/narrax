@@ -21,6 +21,10 @@ it('renders frozen blockers, unknowns, mode and timestamps with zero and false p
  expect(screen.getByText('BLOCK — recorded blockers')).toBeVisible();expect(screen.getByText('Shadow mode: recorded, not enforced.')).toBeVisible();
  expect(screen.getByText(/Evidence is now stale/)).toBeVisible();
  expect(screen.getByText(/Separate from the opportunity record/)).toBeVisible();
+ expect(screen.getByText('Supply concentration')).toBeVisible();
+ expect(screen.getByText('Insider-network supply')).toBeVisible();
+ expect(screen.getByText('17.18%')).toBeVisible();
+ expect(screen.getAllByText('Not available')).toHaveLength(2);
  fireEvent.click(screen.getByText('Inspect frozen checks',{selector:'summary'}));
  const table=screen.getByRole('table');expect(within(table).getByText('0')).toBeVisible();expect(within(table).getByText('false')).toBeVisible();
  expect(screen.getByText('fixture-alert')).toBeVisible();

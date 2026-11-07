@@ -30,6 +30,10 @@ const report = (over: Record<string, unknown> = {}) => ({
   totalHolders: 50,
   rugged: false,
   risks: [{ name: 'Low Liquidity', level: 'warn' }],
+  insiderNetworks: [
+    { id: 'network-a', type: 'transfer', currentHolding: '60' },
+    { id: 'network-b', type: 'transfer', currentHolding: '40' },
+  ],
   detectedAt: '2026-10-20T23:51:17.840Z',
   ...over,
 });
@@ -43,10 +47,30 @@ describe('parseRugCheckReport', () => {
       top10ExLpPct: 55,
       lpLockedPct: 100,
       lpLocked: true,
+      insiderPct: 10,
       rugged: false,
       riskFlags: [],
       totalHolders: 50,
     });
+  });
+
+  it('maps only complete insider-network holdings and leaves bundle/sniper undefined', () => {
+    expect(parseRugCheckReport(report({ insiderNetworks: [] })).insiderPct).toBe(0);
+    expect(parseRugCheckReport(report({ insiderNetworks: undefined })).insiderPct).toBeNull();
+    expect(parseRugCheckReport(report({ insiderNetworks: [
+      { id: 'network-a', currentHolding: '60' },
+      { id: 'network-b', currentHolding: null },
+    ] })).insiderPct).toBeNull();
+    expect(parseRugCheckReport(report({ insiderNetworks: [
+      { id: 'network-a', currentHolding: '1200' },
+    ] })).insiderPct).toBeNull();
+    expect(parseRugCheckReport(report({ insiderNetworks: [
+      { id: 'network-a', currentHolding: '60' },
+      { id: 'network-a', currentHolding: '40' },
+    ] })).insiderPct).toBe(4);
+    const malformed = parseRugCheckReport(report({ insiderNetworks: 'not-an-array' }));
+    expect(malformed.insiderPct).toBeNull();
+    expect(malformed.top10ExLpPct).toBe(55);
   });
 
   it('does not claim a top-10 sum when the report is missing holders', () => {

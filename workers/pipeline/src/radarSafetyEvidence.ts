@@ -17,6 +17,8 @@ export interface RadarSafetyEvidence {
   top10ExLpPct: number | null;
   lpBurnedPct: number | null;
   lpLocked: boolean | null;
+  /** Current holdings of RugCheck's linked insider networks, as a share of reported supply. */
+  insiderPct: number | null;
   riskFlags: string[];
 }
 
@@ -45,6 +47,7 @@ const Cache = z.object({
   top10ExLpPct: z.number().finite().min(0).max(100).nullable(),
   lpBurnedPct: z.number().finite().min(0).max(100).nullable(),
   lpLocked: z.boolean().nullable(),
+  insiderPct: z.number().finite().min(0).max(100).nullable().default(null),
   riskFlags: z.array(z.string().min(1).max(80)).max(20),
 });
 const cacheKey = (mint: string): string => `${RADAR_SAFETY_EVIDENCE_PREFIX}${mint}`;
@@ -93,6 +96,7 @@ export function makeRadarSafetySource(db: PrismaClient, opts: RadarSafetySourceO
       top10ExLpPct: report.top10ExLpPct,
       lpBurnedPct: null,
       lpLocked: report.lpLocked,
+      insiderPct: report.insiderPct,
       riskFlags: report.riskFlags,
     };
     if (!Cache.safeParse(value).success) return null;
