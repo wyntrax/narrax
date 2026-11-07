@@ -9,6 +9,7 @@ import {EntitlementsSchema,type Entitlements} from '@/lib/schemas';
 import {Link} from '@/i18n/navigation';
 import {BrandMark} from '@/components/brand-mark';
 import {scheduleRefresh} from '@/features/access/refresh';
+import {AccessFlow} from '@/features/access/controller';
 import {createResearchApi,createResearchDownload,createResearchWriter,RESEARCH_STALE_MS} from './api';
 import {ResearchShell} from './shell';
 import {GateShell,SignInGate} from './gate';
@@ -57,6 +58,8 @@ function SessionGate({auth,children,theme}:{auth:AuthAdapter;children:ReactNode;
  if(query.isError)return <GateShell theme={theme}><ResourceError error={query.error} retry={refresh}/></GateShell>;
  if(query.isPending||!query.data||rechecking)return <PageLoader/>;
  const access=query.data;
+ // Wallet verification is a one-time account step. A linked wallet skips this gate on every later sign-in.
+ if(!access.admin&&access.links.length===0)return <GateShell theme={theme}><AccessFlow mode="workspace" onChange={refresh}/></GateShell>;
  const version=JSON.stringify([userId,access.effectiveTier,access.admin,access.features,access.rollout,access.nextExpiry]);
  return <QueryProvider key={version}><ResearchContext.Provider value={{read,send,download,access,userId:userId!,refreshAccess:refresh}}><ResearchShell theme={theme}>{children}</ResearchShell></ResearchContext.Provider></QueryProvider>;
 }

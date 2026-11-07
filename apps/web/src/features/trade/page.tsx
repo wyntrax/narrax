@@ -152,7 +152,7 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
      <div className="trade-wallet-actions">
       <button type="button" className="research-control" disabled={busy||pending||!!walletBusy} onClick={()=>void Promise.resolve(auth.connectWallet()).catch(()=>setError(c.errors.WALLET_REJECTED!))}><Plus size={14}/>{auth.wallets.length?c.connectAnother:c.connect}</button>
       {!hasPrivy&&<button type="button" className="research-control" disabled={busy||pending||!!walletBusy} onClick={()=>void Promise.resolve(auth.createWallet()).catch(()=>setError(c.errors.WALLET_REJECTED!))}><Wallet size={14}/>{c.createPrivy}</button>}
-      <Link className="research-control" href="/early-access">{c.manageWallets}</Link>
+      <Link className="research-control" href="/app/settings">{c.manageWallets}</Link>
      </div>
     </div>
     {side==='SELL'&&<p className="trade-stamp">{c.sellNote}</p>}

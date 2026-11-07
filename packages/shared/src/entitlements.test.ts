@@ -70,8 +70,9 @@ describe('pure entitlement resolution', () => {
     s.memberships = s.memberships.map(m => m.key === 'PRO' ? { ...m, validUntil: now } : m);
     expect(resolveEntitlements(s, now).effectiveTier).toBe('MEMBER');
   });
-  it('counts distinct active EARLY_ACCESS users including ADMIN, independent of wallets/Wyntrax', () => {
+  it('counts distinct active self-service seats, excluding ADMIN overrides, wallets and Wyntrax', () => {
     expect(usedSeats([grant, { ...grant, id: 'a', source: 'ADMIN' }, { ...grant, userId: 'v' }, { ...grant, userId: 'expired', validUntil: now }, { ...grant, userId: 'revoked', status: 'REVOKED' }], now)).toBe(2);
+    expect(usedSeats([{ ...grant, source: 'ADMIN' }], now)).toBe(0);
   });
   it('admission respects cap and preserves existing seats after lowering the cap', () => {
     const s = { enabled: true, cap: 1, occupied: 1, hasWallet: true, alreadySeated: false, inviteRequired: false };

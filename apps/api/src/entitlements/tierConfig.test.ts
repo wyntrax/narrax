@@ -15,7 +15,7 @@ import { assertTestDatabase } from '../../../../scripts/test-database';
 const target = new URL(process.env.DATABASE_URL ?? 'invalid:');
 assertTestDatabase(target);
 const db = createPrisma(target.toString()), tag = `tier-cfg-${randomUUID()}`;
-const keys = ['early_access.enabled', 'early_access.seat_cap', 'early_access.invite_required', 'early_access.closes_at', 'early_access.access_days', 'access.tier_requirements', 'access.token_symbol', 'access.token_mint'];
+const keys = ['early_access.enabled', 'early_access.seat_cap', 'early_access.invite_required', 'early_access.closes_at', 'early_access.access_days', 'access.tier_requirements', 'access.token_symbol', 'access.token_mint', 'access.wyntrax_url'];
 let saved: Awaited<ReturnType<typeof db.systemSetting.findMany>>, at = new Date('2026-10-10T00:00:00Z');
 const verifier = { verify: vi.fn(async () => { throw Error('Public routes must not authenticate'); }) };
 const make = async () => { const app = Fastify(); await app.register(rateLimit, { global: false }); registerEntitlementRoutes(app, { db, verifier, now: () => at }); return app; };
@@ -61,7 +61,7 @@ describe('public tier requirements', () => {
     try {
       const r = await app.inject('/v1/access/requirements');
       expect(r.statusCode).toBe(200);
-      expect(r.json()).toMatchObject({ tokenSymbol: '$WYNTRAX', tokenMint: null, tiers: DEFAULT_TIER_REQUIREMENTS, earlyAccess: { closesAt: null, accessDays: null }, featureTiers: { 'research.chat': 'EARLY_ACCESS', 'research.personal_radar': 'PRO', 'research.thesis_tracker': 'PRO', 'research.personal_briefing': 'PRO' } });
+      expect(r.json()).toMatchObject({ tokenSymbol: '$WYNTRAX', tokenMint: null, wyntraxUrl: null, tiers: DEFAULT_TIER_REQUIREMENTS, earlyAccess: { closesAt: null, accessDays: null }, featureTiers: { 'research.chat': 'EARLY_ACCESS', 'research.personal_radar': 'PRO', 'research.thesis_tracker': 'PRO', 'research.personal_briefing': 'PRO' } });
       expect(r.json().tiers).not.toHaveProperty('ELITE');
       expect(verifier.verify).not.toHaveBeenCalled();
     } finally { await app.close(); }
@@ -70,18 +70,19 @@ describe('public tier requirements', () => {
     const app = await make();
     try {
       expect((await app.inject('/v1/access/requirements')).json().tiers.MEMBER).toBe(500_000);
-      await updateLocalSettings(db, admin, { 'access.tier_requirements': { MEMBER: 250_000, PRO: 750_000, ELITE: 5_000_000 }, 'access.token_symbol': '$WYN', 'access.token_mint': 'So11111111111111111111111111111111111111112', 'early_access.closes_at': '2026-12-01T00:00:00.000Z', 'early_access.access_days': 14 }, 'Launch pricing');
+      await updateLocalSettings(db, admin, { 'access.tier_requirements': { MEMBER: 250_000, PRO: 750_000, ELITE: 5_000_000 }, 'access.token_symbol': '$WYN', 'access.token_mint': 'So11111111111111111111111111111111111111112', 'access.wyntrax_url': 'https://wyntrax.example/memberships/narrax', 'early_access.closes_at': '2026-12-01T00:00:00.000Z', 'early_access.access_days': 14 }, 'Launch pricing');
       expect((await app.inject('/v1/access/requirements')).json().tiers.MEMBER).toBe(500_000); // still cached
       at = new Date(+at + 31_000);
-      expect((await app.inject('/v1/access/requirements')).json()).toMatchObject({ tokenSymbol: '$WYN', tokenMint: 'So11111111111111111111111111111111111111112', tiers: { MEMBER: 250_000, PRO: 750_000 }, earlyAccess: { closesAt: '2026-12-01T00:00:00.000Z', accessDays: 14 } });
+      expect((await app.inject('/v1/access/requirements')).json()).toMatchObject({ tokenSymbol: '$WYN', tokenMint: 'So11111111111111111111111111111111111111112', wyntraxUrl: 'https://wyntrax.example/memberships/narrax', tiers: { MEMBER: 250_000, PRO: 750_000 }, earlyAccess: { closesAt: '2026-12-01T00:00:00.000Z', accessDays: 14 } });
     } finally { await app.close(); }
   });
   it('rejects tiers that do not increase, junk symbols and non-admin writers, and writes nothing', async () => {
     await expect(updateLocalSettings(db, admin, { 'access.tier_requirements': { MEMBER: 1_000_000, PRO: 1_000_000, ELITE: 2_000_000 } }, 'bad order')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     await expect(updateLocalSettings(db, admin, { 'access.token_symbol': '<script>' }, 'bad symbol')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     await expect(updateLocalSettings(db, admin, { 'access.token_mint': 'not-an-address' }, 'bad mint')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(updateLocalSettings(db, admin, { 'access.wyntrax_url': 'http://wyntrax.example' }, 'not https')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     await expect(updateLocalSettings(db, plain, { 'access.token_symbol': '$ABC' }, 'not an admin')).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    expect(await db.systemSetting.count({ where: { key: { in: ['access.tier_requirements', 'access.token_symbol', 'access.token_mint'] } } })).toBe(0);
+    expect(await db.systemSetting.count({ where: { key: { in: ['access.tier_requirements', 'access.token_symbol', 'access.token_mint', 'access.wyntrax_url'] } } })).toBe(0);
   });
   it('audits every change with the reason', async () => {
     await updateLocalSettings(db, admin, { 'access.token_symbol': '$WYN' }, 'Rename ticker');
@@ -128,6 +129,23 @@ describe('early-access time window', () => {
     const again = await grantEarlyAccess(db, joiner, { tier: 'EARLY_ACCESS', validUntil: null, reason: 'Self join' }, null, at);
     expect(again.id).toBe(grant.id);
     expect(again.status).toBe('ACTIVE');
+  });
+  it('lets an admin grant bypass disabled/full admission and create without a wallet', async () => {
+    await put('early_access.enabled', false);
+    await put('early_access.seat_cap', 0);
+    const grant = await grantEarlyAccess(db, plain, { tier: 'EARLY_ACCESS', validUntil: new Date(+at + 86_400_000), reason: 'Admin override' }, admin, at);
+    expect(grant).toMatchObject({ userId: plain, source: 'ADMIN', status: 'ACTIVE' });
+  });
+  it('does not count an admin override against the public seat cap', async () => {
+    await put('early_access.enabled', true);
+    await put('early_access.seat_cap', 1);
+    await grantEarlyAccess(db, plain, { tier: 'EARLY_ACCESS', validUntil: new Date(+at + 86_400_000), reason: 'Admin override' }, admin, at);
+    const app = await make();
+    try {
+      expect((await app.inject('/v1/early-access/status')).json()).toMatchObject({ enabled: true, seatsLeft: 1 });
+    } finally { await app.close(); }
+    const joined = await grantEarlyAccess(db, joiner, { tier: 'EARLY_ACCESS', validUntil: null, reason: 'Self join' }, null, at);
+    expect(joined.status).toBe('ACTIVE');
   });
 });
 

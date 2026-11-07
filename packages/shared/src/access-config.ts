@@ -35,3 +35,13 @@ export const TokenMint = z.string().trim().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/
 export const EarlyAccessClosesAt = z.string().datetime({ offset: true }).nullable();
 /** How long a self-joined seat lasts. Null means it does not expire by itself. */
 export const EarlyAccessDays = z.number().int().min(1).max(3650).nullable();
+/** Where the public Early access CTA sends visitors. HTTPS only; empty clears the destination. */
+export const WyntraxMembershipUrl = z.string().trim().max(2048).nullable()
+  .transform(value => value || null)
+  .refine(value => {
+    if (value === null) return true;
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' && !url.username && !url.password;
+    } catch { return false; }
+  }, { message: 'A valid HTTPS URL is required' });

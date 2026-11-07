@@ -4,7 +4,7 @@ import {afterEach,it,expect,vi} from 'vitest';
 import {NextIntlClientProvider} from 'next-intl';
 import type {ReactNode} from 'react';
 import {AuthContext,type AuthAdapter} from '@/components/auth/context';
-import {empty as baseAccess} from '@/test/fixtures';
+import {active as baseAccess} from '@/test/fixtures';
 import messages from '../../../messages/research/en.json';
 import site from '../../../messages/en.json';
 import {ResearchWorkspace} from './session';

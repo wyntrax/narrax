@@ -166,6 +166,18 @@ describe('atomic seats and restricted manual grants (services; HTTP administrati
     expect(logs.map(r => r.action).sort()).toEqual(['entitlements.granted', 'entitlements.revoked']);
     expect(await db.accessGrant.count({ where: { userId: id, status: 'ACTIVE' } })).toBe(0);
   });
+  it('admin grants bypass public admission and may be created before wallet verification', async () => {
+    await clearGrants(); await configure(0);
+    await updateLocalSettings(db, admin, { 'early_access.enabled': false }, 'admin override');
+    const id = await user(), row = await grant(id, admin);
+    expect(row).toMatchObject({ userId: id, source: 'ADMIN', tier: 'EARLY_ACCESS', status: 'ACTIVE' });
+    const before = await entitlementTrace(db, id, now);
+    expect(before.effectiveTier).toBe('NONE');
+    expect(before.grants).toContainEqual(expect.objectContaining({ id: row.id, source: 'ADMIN', reasonCode: 'WALLET_REQUIRED' }));
+    await db.linkedWallet.create({ data: { userId: id, chain: 'solana', address: address(), verifiedAt: now } });
+    expect((await entitlementTrace(db, id, now)).effectiveTier).toBe('EARLY_ACCESS');
+    await clearGrants(); await configure();
+  });
   it('disabled, invite-required, wallet missing and expiration fail closed; revoked seat can be reused', async () => {
     await clearGrants(); await configure(1);
     const id = await linkedUser(), other = await linkedUser();
