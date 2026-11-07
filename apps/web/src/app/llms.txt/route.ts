@@ -1,5 +1,5 @@
 import {productFacts} from '@/content/product-facts';
-import {researchCopy, researchGuides} from '@/content/research-guides';
+import {researchCopy, researchGuides, researchReferences} from '@/content/research-guides';
 import {publicUrl, searchIndexable} from '@/lib/seo';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +14,12 @@ export function GET() {
       ...researchGuides[locale].map(guide => `- [${guide.title}](${publicUrl(locale, `/research/${guide.slug}`)}): ${guide.description}`),
     ].join('\n');
   });
-  return new Response(`# Narrax\n\n> ${productFacts.en.summary}\n\n${sections.join('\n\n')}\n\n## Interpretation\n\n${productFacts.en.questions.map(item => `### ${item.question}\n\n${item.answer}`).join('\n\n')}\n\nPublic guides are educational research, not financial advice. Workspace data requires authentication. Availability and missing observations must not be inferred from these guides.\n`, {
+  const interpretation = (['en', 'id'] as const).map(locale =>
+    `### ${locale === 'en' ? 'English' : 'Bahasa Indonesia'} — ${productFacts[locale].title}\n\n` +
+    productFacts[locale].questions.map(item => `#### ${item.question}\n\n${item.answer}`).join('\n\n')
+  ).join('\n\n');
+  const references = researchReferences.map(ref => `- [${ref.name}](${ref.url})`).join('\n');
+  return new Response(`# Narrax\n\n> ${productFacts.en.summary}\n\n${sections.join('\n\n')}\n\n## Full Public Corpus\n\n- [Complete public research & methodology corpus](${publicUrl('en', '/llms-full.txt')}): Full text of authored English and Bahasa Indonesia research guides, checklists, and methodology.\n\n## Interpretation\n\n${interpretation}\n\n## Primary Technical References\n\n${references}\n\nPublic guides are educational research, not financial advice. Workspace data requires authentication. Availability and missing observations must not be inferred from these guides.\n`, {
     headers: {'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=3600', ...(!searchIndexable() ? {'X-Robots-Tag': 'noindex, nofollow'} : {})},
   });
 }
