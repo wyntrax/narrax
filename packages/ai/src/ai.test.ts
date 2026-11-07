@@ -211,5 +211,6 @@ describe('OpenAiCompatibleProvider', () => {
     await expect(mk((async () => new Response(JSON.stringify({ nope: 1 }))) as unknown as typeof fetch).complete(req)).rejects.toThrow('unexpected shape');
     const hang = ((_u: string, init: RequestInit) => new Promise((_r, rej) => init.signal?.addEventListener('abort', () => rej(new Error('x'))))) as unknown as typeof fetch;
     await expect(mk(hang, 20).complete(req)).rejects.toThrow(LlmError);
+    await expect(mk(hang, 1000).complete({ ...req, timeoutMs: 20 })).rejects.toThrow(LlmError);
   });
 });

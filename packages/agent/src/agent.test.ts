@@ -100,6 +100,28 @@ describe('the loop', () => {
     await runAgent({ llm, model: 'm', temperature: 0.2, maxTokens: 800, ports: ports.ports, ctx: { userId: USER_A, now: NOW, conversationId: null }, userMessage: 'hello', history: [] });
     expect(requests[0]!.sessionId).toBeUndefined();
   });
+  it('stops a turn at its overall deadline and returns the bounded timeout answer', async () => {
+    const ports = fakePorts();
+    const llm = {
+      async complete() {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return { text: final('late answer'), inputTokens: 10, outputTokens: 5 };
+      },
+    };
+    const result = await runAgent({ llm, model: 'm', temperature: 0.2, maxTokens: 800, ports: ports.ports, ctx: { userId: USER_A, now: NOW, conversationId: 'c1' }, userMessage: 'hello', history: [], timeoutMs: 5 });
+    expect(result).toMatchObject({ stopReason: 'timeout', text: FALLBACK.timeout, toolsUsed: [] });
+  });
+  it('stops a turn when a tool runs past the deadline', async () => {
+    const ports = fakePorts();
+    const settings = ports.settings[USER_A]!;
+    ports.ports.mySettings = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return settings;
+    };
+    const { llm } = scriptedLlm((_r, n) => n === 0 ? call('get_my_settings') : final('late'));
+    const result = await runAgent({ llm, model: 'm', temperature: 0.2, maxTokens: 800, ports: ports.ports, ctx: { userId: USER_A, now: NOW, conversationId: 'c1' }, userMessage: 'hello', history: [], timeoutMs: 5 });
+    expect(result).toMatchObject({ stopReason: 'timeout', text: FALLBACK.timeout, toolsUsed: ['get_my_settings'] });
+  });
   it('runs a tool, hands the result back as data, then answers', async () => {
     const { result, requests } = await go((_r, n) => (n === 0 ? call('get_my_settings') : final('You are in PAPER mode.')));
     expect(result).toMatchObject({ stopReason: 'final', toolsUsed: ['get_my_settings'] });
