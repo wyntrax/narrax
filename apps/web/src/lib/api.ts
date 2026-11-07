@@ -1,6 +1,8 @@
 import type {z} from 'zod';
 import {ApiErrorSchema, ChallengeSchema, EntitlementsSchema, GrantSchema, LinkSchema, OkSchema, RequirementsSchema, StatusSchema} from './schemas';
 export const REQUEST_TIMEOUT_MS = 10000;
+/** Agent answers may take several model/tool steps. Keep this above the API's 45s turn budget and below nginx's 60s read timeout. */
+export const CHAT_REQUEST_TIMEOUT_MS = 55000;
 export class ApiError extends Error {
   constructor(readonly code: string, readonly status = 0, readonly retryAfter = 0, readonly requiredTier?: string) {super(code);}
 }
@@ -12,7 +14,7 @@ export function errorKey(error: unknown): typeof ERROR_CODES[number] {return err
  * into an `ApiError`. Returns the raw body text so a JSON reader and a file download can share it.
  */
 function transportSender(base: string, getAccessToken: () => Promise<string | null>, fetcher: typeof fetch, getIdentityToken?: () => Promise<string | null>) {
-  return async function send(path: string, method: string, body: unknown, authenticated: boolean, signal?: AbortSignal): Promise<string> {
+  return async function send(path: string, method: string, body: unknown, authenticated: boolean, signal?: AbortSignal, timeoutMs = REQUEST_TIMEOUT_MS): Promise<string> {
     let url: URL;
     try {url = new URL(base); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error();} catch {throw new ApiError('CONFIGURATION');}
     const controller = new AbortController();
@@ -20,7 +22,7 @@ function transportSender(base: string, getAccessToken: () => Promise<string | nu
     signal?.addEventListener('abort', abort, {once:true});
     if (signal?.aborted) controller.abort();
     let timer: ReturnType<typeof setTimeout>;
-    const timeout = new Promise<never>((_, reject) => {timer = setTimeout(() => {controller.abort(); reject(new ApiError('TIMEOUT'));}, REQUEST_TIMEOUT_MS);});
+    const timeout = new Promise<never>((_, reject) => {timer = setTimeout(() => {controller.abort(); reject(new ApiError('TIMEOUT'));}, timeoutMs);});
     try {
       return await Promise.race([timeout, (async () => {
         const token = authenticated ? await getAccessToken() : null;
@@ -42,8 +44,8 @@ function transportSender(base: string, getAccessToken: () => Promise<string | nu
 }
 export function createTransport(base: string, getAccessToken: () => Promise<string | null>, fetcher: typeof fetch = fetch, getIdentityToken?: () => Promise<string | null>) {
   const send = transportSender(base, getAccessToken, fetcher, getIdentityToken);
-  return async function request<T>(path: string, schema: z.ZodType<T>, method = 'GET', body?: unknown, authenticated = true, signal?: AbortSignal): Promise<T> {
-    const text = await send(path, method, body, authenticated, signal);
+  return async function request<T>(path: string, schema: z.ZodType<T>, method = 'GET', body?: unknown, authenticated = true, signal?: AbortSignal, timeoutMs?: number): Promise<T> {
+    const text = await send(path, method, body, authenticated, signal, timeoutMs);
     let value: unknown = null; try {value = text ? JSON.parse(text) : null;} catch {value = null;}
     const parsed = schema.safeParse(value); if (!parsed.success) throw new ApiError('INVALID_RESPONSE'); return parsed.data;
   };

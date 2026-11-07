@@ -11,7 +11,7 @@ const StepSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('final'), message: z.string().max(8000) }).strict(),
 ]);
 
-export type StopReason = 'final' | 'max_steps' | 'bad_output' | 'llm_error';
+export type StopReason = 'final' | 'max_steps' | 'bad_output' | 'llm_error' | 'timeout';
 
 export interface AgentRunInput {
   llm: LlmProvider;
@@ -23,6 +23,8 @@ export interface AgentRunInput {
   ctx: AgentContext;
   userMessage: string;
   history: { role: 'user' | 'assistant'; text: string }[];
+  /** Overall deadline for this turn. Defaults to AGENT_LIMITS.turnTimeoutMs. */
+  timeoutMs?: number;
 }
 
 export interface AgentRunResult {
@@ -50,17 +52,39 @@ export async function runAgent(i: AgentRunInput): Promise<AgentRunResult> {
   const out: AgentRunResult = { text: '', proposals: [], toolsUsed: [], refusedCalls: 0, stopReason: 'bad_output', inputTokens: 0, outputTokens: 0 };
   const results: StepInput['toolResults'] = [];
   const userMessage = sanitizeUserText(i.userMessage), history = i.history.slice(-AGENT_LIMITS.historyMessages).map((h) => ({ role: h.role, text: h.text.slice(0, AGENT_LIMITS.maxUserMessageChars) }));
+  const budgetMs = i.timeoutMs ?? AGENT_LIMITS.turnTimeoutMs;
+  const deadline = Number.isFinite(budgetMs) ? Date.now() + Math.max(0, budgetMs) : null;
+  const remaining = () => deadline == null ? undefined : Math.max(0, deadline - Date.now());
+  const timedOut = () => deadline != null && Date.now() >= deadline;
+  const timeoutResult = (): AgentRunResult => ({ ...out, text: FALLBACK.timeout, stopReason: 'timeout' });
+  const withBudget = async <T>(work: Promise<T>): Promise<T> => {
+    const left = remaining();
+    if (left == null) return work;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('deadline')), Math.max(1, left)); }),
+      ]);
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+    }
+  };
   let toolCalls = 0, bad = 0;
 
   for (let guard = 0; guard < AGENT_LIMITS.maxToolCalls + AGENT_LIMITS.maxBadOutputs + 2; guard++) {
+    if (timedOut()) return timeoutResult();
     const stepsLeft = AGENT_LIMITS.maxToolCalls - toolCalls;
     let raw: string;
     try {
-      const r = await i.llm.complete({ model: i.model, system: SYSTEM_PROMPT, user: buildStepMessage({ userMessage, history, toolResults: results, stepsLeft }), temperature: i.temperature, maxTokens: i.maxTokens, ...(i.ctx.conversationId ? { sessionId: i.ctx.conversationId } : {}) });
+      const left = remaining();
+      const r = await i.llm.complete({ model: i.model, system: SYSTEM_PROMPT, user: buildStepMessage({ userMessage, history, toolResults: results, stepsLeft }), temperature: i.temperature, maxTokens: i.maxTokens, ...(left != null ? { timeoutMs: left } : {}), ...(i.ctx.conversationId ? { sessionId: i.ctx.conversationId } : {}) });
       raw = r.text; out.inputTokens += r.inputTokens; out.outputTokens += r.outputTokens;
     } catch (e) {
+      if (timedOut()) return timeoutResult();
       return { ...out, text: FALLBACK.llmError, stopReason: 'llm_error', llmError: e instanceof LlmError ? e.message.slice(0, 200) : 'unexpected error' };
     }
+    if (timedOut()) return timeoutResult();
     const step = StepSchema.safeParse(extractJson(raw));
     if (!step.success) {
       if (++bad >= AGENT_LIMITS.maxBadOutputs) return { ...out, text: FALLBACK.badOutput, stopReason: 'bad_output' };
@@ -80,7 +104,7 @@ export async function runAgent(i: AgentRunInput): Promise<AgentRunResult> {
 
     out.toolsUsed.push(tool.name);
     try {
-      const r = await tool.run(i.ports, i.ctx, args.data);
+      const r = await withBudget(tool.run(i.ports, i.ctx, args.data));
       if (r.error) { results.push({ tool: tool.name, ok: false, error: r.error, facts: r.facts }); continue; }
       if (r.proposal) out.proposals.push(r.proposal);
       const entry = { tool: tool.name, ok: true, facts: r.facts, ...(r.untrusted?.length ? { untrusted: r.untrusted } : {}) };
@@ -88,6 +112,7 @@ export async function runAgent(i: AgentRunInput): Promise<AgentRunResult> {
     } catch {
       results.push({ tool: tool.name, ok: false, error: 'tool_failed' }); // the error text can hold query details, so the model never sees it
     }
+    if (timedOut()) return timeoutResult();
   }
-  return { ...out, text: FALLBACK.maxSteps, stopReason: 'max_steps' };
+  return timedOut() ? timeoutResult() : { ...out, text: FALLBACK.maxSteps, stopReason: 'max_steps' };
 }

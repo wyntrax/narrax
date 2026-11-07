@@ -6,7 +6,7 @@ import {useLocale,useTranslations} from 'next-intl';
 import {hasFeature,useResearch} from './session';
 import {ChatReplySchema} from './contracts';
 import {Locked,PageHeading,ResourceError} from './ui';
-import {ApiError} from '@/lib/api';
+import {ApiError,CHAT_REQUEST_TIMEOUT_MS} from '@/lib/api';
 import './chat.css';
 
 const MAX_CHARS=2000; // Same limit as the API (AGENT_LIMITS.maxUserMessageChars).
@@ -32,7 +32,7 @@ function ChatSession(){
   observer.observe(node);return()=>observer.disconnect();
  },[]);
  const ask=useMutation({
-  mutationFn:(message:string)=>send('chat',ChatReplySchema,'POST',{...(conversation.current?{conversationId:conversation.current}:{}),message}),
+  mutationFn:(message:string)=>send('chat',ChatReplySchema,'POST',{...(conversation.current?{conversationId:conversation.current}:{}),message},undefined,CHAT_REQUEST_TIMEOUT_MS),
    onSuccess:reply=>{conversation.current=reply.conversationId;setTurns(c=>[...c,{id:next.current++,role:'assistant',text:reply.reply.text,tools:reply.toolsUsed,notes:reply.proposals.map(p=>p.summary)}]);},
    onError:(_error,message)=>setDraft(current=>current||message),
   });
