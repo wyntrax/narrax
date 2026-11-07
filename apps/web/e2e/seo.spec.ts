@@ -12,7 +12,7 @@ test('public product answers and preview metadata are readable without JavaScrip
  for(const agent of ['Twitterbot/1.0','TelegramBot (like TwitterBot)']){
   const response=await request.get('/',{headers:{'user-agent':agent}}),html=await response.text(),head=html.split('</head>')[0];
   expect(response.status()).toBe(200);
-   expect(head).toContain('summary_large_image');expect(head).toContain('/share/en/home.png?v=4');
+  expect(head).toContain('summary_large_image');expect(head).toContain('/share/en/home.png?v=5');
   expect(html).toContain(productFacts.en.summary);
   for(const item of productFacts.en.questions)expect(html).toContain(item.question);
   expect(html).toContain('FAQPage');
@@ -20,7 +20,10 @@ test('public product answers and preview metadata are readable without JavaScrip
  }
  const directory=await request.get('/llms.txt');expect(directory.status()).toBe(200);
  expect(directory.headers()['content-type']).toContain('text/plain');
- const text=await directory.text();expect(text).toContain('/id/research/');expect(text).not.toContain('/app/');
+ const text=await directory.text();expect(text).toContain('/id/research/');expect(text).toContain('/llms-full.txt');expect(text).not.toContain('/app/');
+ const fullCorpus=await request.get('/llms-full.txt');expect(fullCorpus.status()).toBe(200);
+ expect(fullCorpus.headers()['content-type']).toContain('text/plain');
+ const fullText=await fullCorpus.text();expect(fullText).toContain(researchGuides.en[0]!.sections[0]!.title);expect(fullText).not.toContain('/app/');
 });
 
 for(const locale of ['en','id'] as const)test(`public SEO: ${locale} canonicals, hreflang and server-rendered guides`,async({page,request})=>{
@@ -39,10 +42,10 @@ for(const locale of ['en','id'] as const)test(`public SEO: ${locale} canonicals,
   await expect(page.locator('head meta[name="description"]')).toHaveAttribute('content',/.{50,}/);
   await expect(page.locator('head link[rel="canonical"]')).toHaveCount(1);
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content',indexable?/^index,/:/noindex/);
-   const image=await page.locator('meta[property="og:image"]').getAttribute('content');
-   if(path==='') expect(image).toContain(`/share/${locale}/home.png?v=4`);
-   else expect(image).toContain(`/share/${locale}/`);
-   await expect(page.locator('meta[name="twitter:image"]')).toHaveAttribute('content',image!);
+  const image=await page.locator('meta[property="og:image"]').getAttribute('content');
+  if(path==='') expect(image).toContain(`/share/${locale}/home.png?v=5`);
+  else expect(image).toContain(`/share/${locale}/`);
+  await expect(page.locator('meta[name="twitter:image"]')).toHaveAttribute('content',image!);
   const scripts=await page.locator('script[type="application/ld+json"]').evaluateAll(nodes=>nodes.map(node=>({nonce:(node as HTMLScriptElement).nonce,data:JSON.parse(node.textContent!)})));
   expect(scripts.length).toBeGreaterThan(0);expect(scripts.every(script=>!!script.nonce)).toBe(true);
   const policy=response?.headers()['content-security-policy']??'';
@@ -80,20 +83,19 @@ test('unknown guides return a real 404 and are not indexed',async({request})=>{
 
 test('localized social preview images are valid PNGs',async({request})=>{
  test.setTimeout(120000);
-   for(const path of ['/opengraph-image','/id/opengraph-image',...(['en','id'] as const).flatMap(locale=>['home','research','methodology',...researchGuides[locale].map(g=>g.slug)].map(key=>`/share/${locale}/${key}.png?v=4`))]){
-   const response=await request.get(path,{headers:{'user-agent':'TelegramBot (like TwitterBot)'}});expect(response.status()).toBe(200);
+ for(const path of ['/opengraph-image','/id/opengraph-image',...(['en','id'] as const).flatMap(locale=>['home','research','methodology',...researchGuides[locale].map(g=>g.slug)].map(key=>`/share/${locale}/${key}.png?${key==='home'?'v=5':'v=4'}`))]){
+  const response=await request.get(path,{headers:{'user-agent':'TelegramBot (like TwitterBot)'}});expect(response.status()).toBe(200);
   expect(response.headers()['content-type']).toContain('image/png');const bytes=await response.body();
-   expect(bytes.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');
-   const isHome=path.includes('/opengraph-image')||path.includes('/home.png');
-   expect(bytes.readUInt32BE(16)).toBe(isHome?1789:1200);expect(bytes.readUInt32BE(20)).toBe(isHome?655:630);
-   expect(bytes.length).toBeLessThan(5*1024*1024);
-  }
-  expect((await request.get('/share/en/not-a-real-page.png')).status()).toBe(404);
+  expect(bytes.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');
+  expect(bytes.readUInt32BE(16)).toBe(1200);expect(bytes.readUInt32BE(20)).toBe(630);
+  expect(bytes.length).toBeLessThan(5*1024*1024);
+ }
+ expect((await request.get('/share/en/not-a-real-page.png')).status()).toBe(404);
 });
 
 for(const width of [390,1440])for(const theme of ['dark','light'])test(`research guides accessibility: ${width}px ${theme}`,async({page})=>{
  test.setTimeout(120000);
-  await page.setViewportSize({width,height:900});await page.context().addCookies([{name:'NARRA_THEME',value:theme,url:process.env.E2E_BASE_URL??'http://localhost:4010'}]);
+ await page.setViewportSize({width,height:900});await page.context().addCookies([{name:'NARRA_THEME',value:theme,url:process.env.E2E_BASE_URL??'http://localhost:4010'}]);
  for(const path of ['/research','/research/early-token-risk-checklist','/id/methodology']){
   await page.goto(path);await expect(page.locator('h1')).toBeVisible();await page.evaluate(()=>document.fonts.ready);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
