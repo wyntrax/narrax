@@ -34,6 +34,21 @@ export function fakePorts(planted: Partial<FakeData> = {}) {
     async myConfirmations(userId) { log('myConfirmations', userId); return []; },
     async systemLimits() { log('systemLimits'); return { ...GLOBAL_LIMITS }; },
     async backtestSummary() { log('backtestSummary'); return { generatedAt: NOW.toISOString(), findings: [], noConclusion: ['Not enough data.'] }; },
+    async accessSummary() { log('accessSummary'); return { effectiveTier: 'PRO', admin: false, features: { 'research.smart_money_rankings': { allowed: true, requiredTier: 'PRO' } } }; },
+    async featureAccess(_userId, feature) { log('featureAccess', _userId); return { feature, allowed: true, requiredTier: 'PRO', effectiveTier: 'PRO', admin: false }; },
+    async smartMoneyRankings() {
+      log('smartMoneyRankings');
+      const performance = {
+        band: 'SMALL_CAP' as const, positions: 12, closedPositions: 10, closedTokens: 5, wins: 6, losses: 3, breakeven: 1,
+        openPositions: 2, winRate: 0.6, winRateLowerBound: 0.31, realisedPnlSol: '1.25', openCostSol: '0.4', medianRoi: 0.2,
+        medianWinSol: '0.5', medianLossSol: '-0.2', profitFactor: 2, medianFirstSellSeconds: 120, medianCloseSeconds: 600,
+        realisedDrawdownSol: '0.2', observedDays: 14, fastCloseRate: 0.1, medianEntrySol: '0.2', deployedSol: '2.0',
+        medianClosedPositionSol: '0.25', entryCapKnownPositions: 10, entryCapTotalPositions: 10,
+      };
+      return { asOf: NOW.toISOString(), band: 'SMALL_CAP' as const, windowDays: 30 as const, total: 1, capped: false, minMedianPositionSol: 0.01,
+        counts: { reviewReady: 1, observing: 0 }, pipeline: null,
+        items: [{ address: 'wallet-alpha', label: 'Alpha wallet', review: 'APPROVED', status: 'REVIEW_READY' as const, reasons: [], checkedAt: NOW.toISOString(), historyComplete: true, linked: false, developer: false, performance }] };
+    },
     async countPendingProposals(userId) { log('countPendingProposals', userId); return proposals.filter((p) => p.userId === userId).length; },
     async createProposal(userId, _conv, p: ProposalInput) {
       log('createProposal', userId);

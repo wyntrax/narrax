@@ -3,6 +3,8 @@ import { AGENT_LIMITS, TIGHTENABLE_FIELDS, type AgentPorts, type ProposalView, t
 import { AgentDecisionSchema } from '@narra/shared';
 import { PROFILES, SYSTEM_LIMITS_KEY, resolveSystemLimits } from '@narra/risk';
 import { effectiveStatus } from '@narra/trading';
+import { entitlementTrace, featureDecision } from './entitlements/access';
+import { walletRanking } from './walletRanking';
 
 const n = (d: { toString(): string }) => Number(d.toString());
 const nn = (d: { toString(): string } | null) => (d == null ? null : Number(d.toString()));
@@ -79,6 +81,21 @@ export function makeAgentPorts(db: PrismaClient, now: () => Date = () => new Dat
       const rep = r.report as { generatedAt?: unknown; findings?: unknown; noConclusion?: unknown };
       const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').map((x) => x.slice(0, 300)) : []);
       return { generatedAt: typeof rep.generatedAt === 'string' ? rep.generatedAt : r.createdAt.toISOString(), findings: strs(rep.findings), noConclusion: strs(rep.noConclusion) };
+    },
+    async accessSummary(userId) {
+      const trace = await entitlementTrace(db, userId, now());
+      return {
+        effectiveTier: trace.effectiveTier,
+        admin: trace.admin,
+        features: Object.fromEntries(Object.entries(trace.features).map(([feature, value]) => [feature, { allowed: value.allowed, requiredTier: value.requiredTier }])),
+      };
+    },
+    async featureAccess(userId, feature) {
+      const decision = await featureDecision(db, userId, feature, now());
+      return { feature, ...decision };
+    },
+    async smartMoneyRankings(input) {
+      return walletRanking(db, now(), input.band, input.limit, input.status, input.minMedianPositionSol);
     },
     async systemLimits() {
       const row = await db.systemSetting.findUnique({ where: { key: SYSTEM_LIMITS_KEY } });

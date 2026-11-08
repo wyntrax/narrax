@@ -49,7 +49,7 @@ export async function featureDecision(db: PrismaClient, userId: string, key: Fea
   if (!Object.hasOwn(FEATURE_TIERS, key)) throw new AccessError('ENTITLEMENTS_UNAVAILABLE', 503);
   const trace = await entitlementTrace(db, userId, now), feature = trace.features[key];
   if (!feature.allowed && trace.rollout.shadow_log) log?.({ code: 'ENTITLEMENT_DENIAL', feature: key, enforced: trace.rollout.enforced });
-  return { allowed: feature.allowed, requiredTier: feature.requiredTier, pageLimit: Math.max(1, trace.researchPageLimit) };
+  return { allowed: feature.allowed, requiredTier: feature.requiredTier, pageLimit: Math.max(1, trace.researchPageLimit), effectiveTier: trace.effectiveTier, admin: trace.admin };
 }
 /** Mixed envelopes preserve own fields even if entitlement storage/resolution fails. */
 export async function canReadFeature(db: PrismaClient, userId: string, key: FeatureKey, now: Date, log?: (entry: object) => void) {
