@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { wrapUntrusted, sanitizeUntrusted, type UntrustedField } from '@narra/shared';
+import { wrapUntrusted, sanitizeUntrusted, WalletEntryBand, type UntrustedField } from '@narra/shared';
 import { AGENT_LIMITS } from './constants';
 import type { AgentPorts, ProposalView } from './ports';
 import { TIGHTENABLE_FIELDS, describeTighten, validateTighten } from './proposals';
@@ -28,6 +28,9 @@ function defineTool<S extends z.ZodTypeAny>(t: { name: string; description: stri
 // Mints are base58. This is the only free-form identifier a model can pass, and it can only look something up.
 const mint = z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
 const limit = (max: number, dflt: number) => z.number().int().min(1).max(max).default(dflt);
+const RANKING_BANDS = ['SMALL_CAP', 'UNDER_100K', '100K_500K', '500K_1M', 'OVER_1M', 'UNKNOWN', 'ALL'] as const satisfies readonly WalletEntryBand[];
+const rankingBand = z.enum(RANKING_BANDS);
+const rankingStatus = z.enum(['ALL', 'REVIEW_READY', 'OBSERVING']);
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 const text = (source: string, s: string, max = 200) => wrapUntrusted(source, s, max);
 /**
@@ -64,6 +67,49 @@ export const TOOLS: Tool[] = [
           consensus: t.consensus && { score: t.consensus.score, walletCount: t.consensus.walletCount, independentEntities: t.consensus.independentEntities, leaderCount: t.consensus.leaderCount, at: iso(t.consensus.at) },
         },
         untrusted: [text('token.symbol', t.symbol, 32), text('token.name', t.name, 64)],
+      };
+    },
+  }),
+  defineTool({
+    name: 'get_my_access',
+    description: "The signed-in user's effective access tier and which research features are available. Use this when they ask what they can access or why a feature is locked.",
+    argsHelp: '{}', schema: z.object({}).strict(),
+    async run(p, c) {
+      const access = await p.accessSummary(c.userId);
+      return { facts: { effectiveTier: access.effectiveTier, admin: access.admin, features: access.features } };
+    },
+  }),
+  defineTool({
+    name: 'get_smart_money_rankings',
+    description: 'Top tracked smart-money wallets by 30-day observed swap performance. Smart-money rankings require PRO access by default. If access is denied, tell the user the required tier and their effective tier; do not say the ranking is empty or invent data.',
+    argsHelp: '{"band"?: "SMALL_CAP"|"UNDER_100K"|"100K_500K"|"500K_1M"|"OVER_1M"|"UNKNOWN"|"ALL", "limit"?: 1-10, "status"?: "ALL"|"REVIEW_READY"|"OBSERVING", "minMedianPositionSol"?: 0-1000}',
+    schema: z.object({
+      band: rankingBand.default('SMALL_CAP'),
+      limit: limit(10, 5),
+      status: rankingStatus.default('REVIEW_READY'),
+      minMedianPositionSol: z.number().finite().min(0).max(1000).default(0.01),
+    }).strict(),
+    async run(p, c, a) {
+      const access = await p.featureAccess(c.userId, 'research.smart_money_rankings');
+      if (!access.allowed) return {
+        facts: { access, note: `Smart-money rankings require ${access.requiredTier}. This account's effective tier is ${access.effectiveTier}.` },
+        error: 'feature_requires_higher_tier',
+      };
+      const data = await p.smartMoneyRankings(a);
+      const items = data.items.slice(0, a.limit);
+      return {
+        facts: {
+          access, asOf: data.asOf, band: data.band, windowDays: data.windowDays, total: data.total, capped: data.capped,
+          counts: data.counts ?? null, minMedianPositionSol: data.minMedianPositionSol ?? null,
+          items: items.map((w, i) => ({
+            ref: i, address: w.address, status: w.status, reasons: w.reasons, historyComplete: w.historyComplete,
+            linked: w.linked, developer: w.developer, winRate: w.performance.winRate, winRateLowerBound: w.performance.winRateLowerBound,
+            closedPositions: w.performance.closedPositions, closedTokens: w.performance.closedTokens,
+            realisedPnlSol: w.performance.realisedPnlSol, medianRoi: w.performance.medianRoi,
+            medianClosedPositionSol: w.performance.medianClosedPositionSol ?? null, checkedAt: w.checkedAt,
+          })),
+        },
+        untrusted: items.flatMap((w, i) => w.label ? [text(`ranking[${i}].label`, w.label, 80)] : []),
       };
     },
   }),

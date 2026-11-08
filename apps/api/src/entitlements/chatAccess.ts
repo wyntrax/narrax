@@ -1,6 +1,6 @@
 import type { AgentPorts } from '@narra/agent';
 import type { PrismaClient } from '@narra/database';
-import { canReadFeature, featureDecision } from './access';
+import { canReadFeature, entitlementTrace, featureDecision } from './access';
 
 /** Closure binds the authenticated user; model/tool input cannot select identity or feature. */
 export function researchPorts(ports: AgentPorts, db: PrismaClient, userId: string, now: () => Date, log?: (entry: object) => void): AgentPorts {
@@ -18,6 +18,18 @@ export function researchPorts(ports: AgentPorts, db: PrismaClient, userId: strin
     async recentDecisions(mint, limit) {
       const d = await featureDecision(db, userId, 'research.decision_analytics', now(), log);
       return d.allowed ? ports.recentDecisions(mint, Math.min(limit, d.pageLimit)) : [];
+    },
+    async accessSummary() {
+      const trace = await entitlementTrace(db, userId, now());
+      return {
+        effectiveTier: trace.effectiveTier,
+        admin: trace.admin,
+        features: Object.fromEntries(Object.entries(trace.features).map(([feature, value]) => [feature, { allowed: value.allowed, requiredTier: value.requiredTier }])),
+      };
+    },
+    async featureAccess(_userId, feature) {
+      const decision = await featureDecision(db, userId, feature, now(), log);
+      return { feature, ...decision };
     },
     async backtestSummary() { return await canReadFeature(db, userId, 'research.advanced_analytics', now(), log) ? ports.backtestSummary() : null; },
   };

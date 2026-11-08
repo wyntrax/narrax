@@ -18,7 +18,7 @@ const go = async (script: Script, o: Parameters<typeof run>[1] = {}) => { const 
 describe('what the agent is, structurally', () => {
   const PROPOSE = ['propose_pause_agent', 'propose_tighten_limit'];
   it('has exactly the expected tools. Adding one means changing this test on purpose, and rereading the safety rules', () => {
-    expect([...TOOL_NAMES].sort()).toEqual(['get_backtest_summary', 'get_my_alerts', 'get_my_confirmations', 'get_my_positions', 'get_my_settings', 'get_my_trades', 'get_recent_decisions', 'get_system_limits', 'get_token', 'list_opportunities', 'propose_pause_agent', 'propose_tighten_limit']);
+    expect([...TOOL_NAMES].sort()).toEqual(['get_backtest_summary', 'get_my_access', 'get_my_alerts', 'get_my_confirmations', 'get_my_positions', 'get_my_settings', 'get_my_trades', 'get_recent_decisions', 'get_smart_money_rankings', 'get_system_limits', 'get_token', 'list_opportunities', 'propose_pause_agent', 'propose_tighten_limit']);
   });
   it('every tool is a read, or one of the two cautious proposals', () => {
     for (const t of TOOLS) expect(/^(get|list)_/.test(t.name) || PROPOSE.includes(t.name), t.name).toBe(true);
@@ -129,6 +129,31 @@ describe('the loop', () => {
     expect(Object.keys(second).sort()).toEqual(['history', 'stepsLeft', 'toolResults', 'userMessage']);
     expect(second.toolResults[0]).toMatchObject({ tool: 'get_my_settings', ok: true, facts: { mode: 'PAPER', agentPaused: false } });
     expect(second.stepsLeft).toBe(4);
+  });
+  it('returns smart-money ranking facts and keeps wallet labels untrusted', async () => {
+    const { result, requests } = await go((_r, n) => (n === 0 ? call('get_smart_money_rankings', { limit: 3 }) : final('Rankings returned.')));
+    const toolResult = JSON.parse(requests[1]!.user).toolResults[0];
+    expect(result.toolsUsed).toEqual(['get_smart_money_rankings']);
+    expect(toolResult).toMatchObject({
+      tool: 'get_smart_money_rankings', ok: true,
+      facts: { band: 'SMALL_CAP', windowDays: 30, total: 1, items: [{ address: 'wallet-alpha', status: 'REVIEW_READY', winRate: 0.6 }] },
+      untrusted: [expect.objectContaining({ text: 'Alpha wallet' })],
+    });
+  });
+  it('reports the required and effective tier instead of silently returning no rankings', async () => {
+    const ports = fakePorts();
+    ports.ports.featureAccess = async (_userId, feature) => ({ feature, allowed: false, requiredTier: 'PRO', effectiveTier: 'EARLY_ACCESS', admin: false });
+    const { requests } = await go((_r, n) => (n === 0 ? call('get_smart_money_rankings') : final('Explain the tier gate.')), { ports });
+    const toolResult = JSON.parse(requests[1]!.user).toolResults[0];
+    expect(toolResult).toMatchObject({
+      tool: 'get_smart_money_rankings', ok: false, error: 'feature_requires_higher_tier',
+      facts: { access: { allowed: false, requiredTier: 'PRO', effectiveTier: 'EARLY_ACCESS' } },
+    });
+  });
+  it('reports the signed-in account access summary without choosing a user', async () => {
+    const { requests } = await go((_r, n) => (n === 0 ? call('get_my_access') : final('Access explained.')));
+    const toolResult = JSON.parse(requests[1]!.user).toolResults[0];
+    expect(toolResult).toMatchObject({ ok: true, facts: { effectiveTier: 'PRO', features: { 'research.smart_money_rankings': { allowed: true, requiredTier: 'PRO' } } } });
   });
   it('uses the signed-in user for every personal read, whatever the model says', async () => {
     const ports = fakePorts();

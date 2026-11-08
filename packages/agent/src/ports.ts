@@ -1,3 +1,5 @@
+import type { z } from 'zod';
+import type { FeatureKey, WalletEntryBand, WalletRankingPage } from '@narra/shared';
 import type { TightenableField } from './proposals';
 
 /**
@@ -19,6 +21,25 @@ export interface SettingsView { mode: string; aiTradingEnabled: boolean; agentPa
 export interface AlertView { id: string; kind: string; priority: string; title: string; body: string; createdAt: Date }
 export interface ConfirmationView { id: string; kind: string; status: string; mint: string; symbol: string; sizeSol: number; expiresAt: Date }
 export interface BacktestSummaryView { generatedAt: string; findings: string[]; noConclusion: string[] }
+export type SmartMoneyRankingsView = z.infer<typeof WalletRankingPage>;
+export interface SmartMoneyRankingsInput {
+  band: WalletEntryBand;
+  limit: number;
+  status: 'ALL' | 'REVIEW_READY' | 'OBSERVING';
+  minMedianPositionSol: number;
+}
+export interface FeatureAccessView {
+  feature: FeatureKey;
+  allowed: boolean;
+  requiredTier: string;
+  effectiveTier: string;
+  admin: boolean;
+}
+export interface AccessSummaryView {
+  effectiveTier: string;
+  admin: boolean;
+  features: Record<string, { allowed: boolean; requiredTier: string }>;
+}
 export interface ProposalView { id: string; kind: 'PAUSE_AGENT' | 'TIGHTEN_LIMIT'; field: TightenableField | null; fromValue: number | null; value: number | null; reason: string; summary: string; expiresAt: Date }
 
 export interface ProposalInput { kind: 'PAUSE_AGENT' | 'TIGHTEN_LIMIT'; field?: TightenableField; fromValue?: number; value?: number; reason: string; summary: string }
@@ -33,6 +54,12 @@ export interface AgentPorts {
   myAlerts(userId: string, limit: number): Promise<AlertView[]>;
   myConfirmations(userId: string, limit: number): Promise<ConfirmationView[]>;
   backtestSummary(): Promise<BacktestSummaryView | null>;
+  /** The signed-in user's effective access and feature eligibility. The model never chooses the user. */
+  accessSummary(userId: string): Promise<AccessSummaryView>;
+  /** One feature decision, including the required and effective tier. */
+  featureAccess(userId: string, feature: FeatureKey): Promise<FeatureAccessView>;
+  /** PRO-gated smart-money wallet rankings; the caller checks featureAccess first. */
+  smartMoneyRankings(input: SmartMoneyRankingsInput): Promise<SmartMoneyRankingsView>;
   /** The system limits actually enforced now: the code defaults with any admin overrides. */
   systemLimits(): Promise<Record<string, number>>;
   countPendingProposals(userId: string): Promise<number>;

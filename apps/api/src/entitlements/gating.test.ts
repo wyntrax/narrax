@@ -109,6 +109,21 @@ describe('enforced research boundaries on scratch PostgreSQL', () => {
     const read = await app.inject({ method: 'GET', url: '/v1/narratives', headers: { authorization: 'Bearer admin' } });
     expect(read.statusCode).toBe(200);
   });
+  it('Agent reports the Smart Money Rankings PRO gate and lets an admin through', async () => {
+    await membership('EARLY_ACCESS');
+    const early = researchPorts(makeAgentPorts(db, () => at), db, user, () => at);
+    expect(await early.featureAccess(user, 'research.smart_money_rankings')).toMatchObject({
+      allowed: false, requiredTier: 'PRO', effectiveTier: 'EARLY_ACCESS', admin: false,
+    });
+    expect(await early.accessSummary(user)).toMatchObject({
+      effectiveTier: 'EARLY_ACCESS', admin: false,
+      features: { 'research.smart_money_rankings': { allowed: false, requiredTier: 'PRO' } },
+    });
+    const adminPorts = researchPorts(makeAgentPorts(db, () => at), db, admin, () => at);
+    expect(await adminPorts.featureAccess(admin, 'research.smart_money_rankings')).toMatchObject({
+      allowed: true, requiredTier: 'PRO', effectiveTier: 'PRO', admin: true,
+    });
+  });
   it.each([
     ['GET', '/v1/me/entitlements'], ['POST', '/v1/me/early-access/join'], ['DELETE', '/v1/me/early-access'],
     ['GET', '/v1/admin/entitlements/settings'], ['PUT', '/v1/admin/entitlements/settings'], ['GET', '/v1/admin/users/:userId/entitlements'],
