@@ -23,6 +23,12 @@ describe('topic packs', () => {
   it('the default solana pack is the previous single topic', () => {
     expect(mergeTopics(['solana'], [])).toEqual([{ name: 'Solana ecosystem', query: 'solana' }]);
   });
+  it('the optional sectors pack extends trencher/chatter to ten without changing the existing seven',()=>{
+    const existing=mergeTopics(['trencher','chatter'],[]),expanded=mergeTopics(['trencher','chatter','sectors'],[]);
+    expect(expanded.slice(0,7)).toEqual(existing);expect(expanded).toHaveLength(MAX_TOPICS);
+    expect(expanded.slice(7).map(t=>t.name)).toEqual(['Solana DePIN','Solana RWA','Solana DeFi']);
+    expect(mergeTopics(['holder','sectors'],[])).toHaveLength(5);
+  });
   it('custom topics come first and win a name clash', () => {
     const merged = mergeTopics(['solana'], [{ name: 'Solana ecosystem', query: 'solana ("my query")' }, { name: 'Zorblax', query: 'zorblax' }]);
     expect(merged.map(t => t.query)).toEqual(['solana ("my query")', 'zorblax']);

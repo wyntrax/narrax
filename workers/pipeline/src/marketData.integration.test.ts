@@ -2,7 +2,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPrisma } from '@narra/database';
 import { FixtureMarketData, MarketDataError, WSOL_MINT, info, snapshot, type LaunchSource } from '@narra/market-data';
-import { readSolUsd, refreshMarketData } from './marketData';
+import { readSolUsd, refreshMarketData, MARKET_DATA_LIMITS } from './marketData';
 import { resolveTokens } from './tokenResolution';
 // The end-to-end case scans accumulated shared PostgreSQL fixtures; files run serially but can exceed 5 s.
 vi.setConfig({ testTimeout: 30_000 });
@@ -192,5 +192,84 @@ describe.skipIf(!up)('market data refresh on a real Postgres', () => {
     const quotes = { name: 'probe', getSnapshots: async (mints: string[]) => new Map(mints.map((m) => [m, snapshot(m, { liquidityUsd: 300_000, priceUsd: 0.05 })])) };
     await refreshMarketData(db, { quotes: quotes as never, info: null, launches: null }, new Date(NOW.getTime() + 3 * H), { maxTokens: cap });
     expect((await tok(candidate.mint)).metrics).toHaveLength(1);
+  });
+  it('caps placeholder retries so ancient UNKNOWN tokens cannot crowd the general lane', async () => {
+    const mints = Array.from({ length: 7 }, (_, i) => mint(`UNK${i}`));
+    for (const m of mints) await db.token.create({ data: { mint: m, symbol: 'UNKNOWN', name: 'Unknown' } });
+    const quotes = { name: 'probe', getSnapshots: async (ms: string[]) => new Map(ms.map((m) => [m, snapshot(m, { liquidityUsd: 300_000, priceUsd: 0.01 })])) };
+    await refreshMarketData(db, { quotes: quotes as never, info: null, launches: null }, new Date(NOW.getTime() + 4 * H), ROOMY);
+    const priced = await db.tokenMetric.findMany({ where: { token: { mint: { in: mints } } }, select: { tokenId: true } });
+    expect(new Set(priced.map((p) => p.tokenId)).size).toBe(5);
+  });
+  it('refreshes warm, watched and top emerging-narrative tokens in the bounded focus lane', async () => {
+    const warm = await db.token.create({ data: { mint: mint('FOCUSW'), symbol: `FW${tag}`, name: 'Focus warm', marketPriorityUntil: new Date(NOW.getTime() + 100 * H), metrics: { create: { priceUsd: 1, marketCapUsd: 100_000, liquidityUsd: 50_000, volume24hUsd: 1_000, at: ago(48) } } } });
+    const watched = await db.token.create({ data: { mint: mint('FOCUSM'), symbol: `FM${tag}`, name: 'Focus monitored' } });
+    const user = await db.user.create({ data: { privyUserId: `focus-${tag}` } });
+    await db.researchMonitor.create({ data: { userId: user.id, kind: 'TOKEN', name: 'Focus monitor', thesis: 'test', mint: watched.mint, rules: { active: true }, active: true } });
+    const narrative = await db.narrative.create({ data: { name: `Focus narrative ${tag}`, slug: `focus-${tag}`, stage: 'EMERGING', score: 1_000_000_000, velocity: 1 } });
+    const narrativeToken = await db.token.create({ data: { mint: mint('FOCUSN'), symbol: `FN${tag}`, name: 'Focus narrative token', metrics: { create: { priceUsd: 1, marketCapUsd: 100_000, liquidityUsd: 50_000, volume24hUsd: 1_000, at: ago(48) } } } });
+    await db.narrativeTokenRelation.create({ data: { narrativeId: narrative.id, tokenId: narrativeToken.id, relation: 'DERIVATIVE', ogScore: 10, matchScore: 1, confidence: 1 } });
+    try {
+      const good = { name: 'focus-probe', getSnapshots: async (mints: string[]) => new Map(mints.map(m => [m, snapshot(m, { liquidityUsd: 300_000, priceUsd: 0.01 })])) };
+      const r = await refreshMarketData(db, { quotes: good as never, info: null, launches: null }, new Date(NOW.getTime() + H), ROOMY);
+      expect(r.priceCoverage.focus.selected).toBeGreaterThanOrEqual(3);
+      expect((await tok(warm.mint)).metrics).toHaveLength(2);
+      expect((await tok(watched.mint)).metrics).toHaveLength(1);
+      expect((await tok(narrativeToken.mint)).metrics).toHaveLength(2);
+    } finally {
+      await db.token.deleteMany({ where: { id: { in: [warm.id, watched.id, narrativeToken.id] } } });
+      await db.narrative.deleteMany({ where: { id: narrative.id } });
+      await db.user.deleteMany({ where: { id: user.id } });
+    }
+  });
+
+  it('backs off dead general-lane pools and clears the backoff after a real quote', async () => {
+    const dead = await db.token.create({ data: { mint: mint('DEAD'), symbol: `DEAD${tag}`, name: 'Dead pool' } });
+    await db.narrativeTokenRelation.create({ data: { narrativeId, tokenId: dead.id, relation: 'DERIVATIVE', matchScore: 0.5, ogScore: 10, confidence: 0.5 } });
+    const deadQuotes = {
+      name: 'dead-probe',
+      getSnapshots: async () => new Map(),
+      getSnapshotsWithDiagnostics: async (mints: string[]) => ({ snapshots: new Map(), omissions: new Map(mints.filter(m => m === dead.mint).map(m => [m, 'NO_MATCHING_PAIR' as const])) }),
+    };
+    const first = new Date(NOW.getTime() + 5 * H);
+    await refreshMarketData(db, { quotes: deadQuotes as never, info: null, launches: null }, first, ROOMY);
+    expect((await db.token.findUniqueOrThrow({ where: { id: dead.id } })).marketQuoteFailures).toBe(1);
+    const second = new Date(first.getTime() + 60_000);
+    await refreshMarketData(db, { quotes: deadQuotes as never, info: null, launches: null }, second, ROOMY);
+    const blocked = await db.token.findUniqueOrThrow({ where: { id: dead.id } });
+    expect(blocked.marketQuoteFailures).toBe(2);
+    expect(blocked.marketQuarantineUntil?.getTime()).toBe(second.getTime() + MARKET_DATA_LIMITS.quoteQuarantineMs);
+
+    const good = { name: 'good-probe', getSnapshots: async (mints: string[]) => new Map(mints.map(m => [m, snapshot(m, { liquidityUsd: 300_000, priceUsd: 0.01 })])) };
+    await refreshMarketData(db, { quotes: good as never, info: null, launches: null }, new Date(second.getTime() + 60_000), ROOMY);
+    expect(await db.tokenMetric.count({ where: { tokenId: dead.id } })).toBe(0);
+
+    await refreshMarketData(db, { quotes: good as never, info: null, launches: null }, new Date(second.getTime() + MARKET_DATA_LIMITS.quoteQuarantineMs + 1), ROOMY);
+    const recovered = await db.token.findUniqueOrThrow({ where: { id: dead.id }, include: { metrics: true } });
+    expect(recovered.metrics).toHaveLength(1);
+    expect(recovered.marketQuoteFailures).toBe(0);
+    expect(recovered.marketQuarantineUntil).toBeNull();
+  });
+
+  it('does not spend a general-lane quote on a quarantined priced token', async () => {
+    const priced = await db.token.create({ data: { mint: mint('QP'), symbol: `QP${tag}`, name: 'Quarantined priced', metrics: { create: { priceUsd: 1, marketCapUsd: 100_000, liquidityUsd: 50_000, volume24hUsd: 1_000, at: ago(48) } } } });
+    await db.narrativeTokenRelation.create({ data: { narrativeId, tokenId: priced.id, relation: 'DERIVATIVE', matchScore: 0.5, ogScore: 10, confidence: 0.5 } });
+    await db.token.update({ where: { id: priced.id }, data: { marketQuarantineUntil: new Date(NOW.getTime() + 6 * H) } });
+    const before = await db.tokenMetric.count({ where: { tokenId: priced.id } });
+    const good = { name: 'good-probe', getSnapshots: async (mints: string[]) => new Map(mints.map(m => [m, snapshot(m, { liquidityUsd: 300_000, priceUsd: 0.01 })])) };
+    await refreshMarketData(db, { quotes: good as never, info: null, launches: null }, new Date(NOW.getTime() + H), ROOMY);
+    expect(await db.tokenMetric.count({ where: { tokenId: priced.id } })).toBe(before);
+  });
+
+  it('keeps cached holder source time and excludes stale counts from freshly computed risk',async()=>{
+    const token=await db.token.create({data:{mint:mint('CACHED'),symbol:'CACHE',name:'Cached holders',createdOnChainAt:NOW}}),sourceAt=ago(24);
+    const cached=new FixtureMarketData({snapshots:[snapshot(token.mint)],info:[info(token.mint,{holders:5919,top10Pct:88.83,holdersUpdatedAt:sourceAt})]});
+    await refreshMarketData(db,{quotes:cached,info:cached,launches:null},NOW,ROOMY);
+    const row=await db.tokenHolderMetric.findFirstOrThrow({where:{tokenId:token.id}});
+    expect(row.at).toEqual(sourceAt);
+    const evidence=await db.systemSetting.findUniqueOrThrow({where:{key:`research.holders.${token.id}`}});
+    expect(evidence.value).toMatchObject({sourceAt:sourceAt.toISOString(),retrievedAt:NOW.toISOString(),holders:5919});
+    const risk=await db.tokenRiskMetric.findFirstOrThrow({where:{tokenId:token.id}});
+    expect(risk.flags).toContain('HOLDER_OBSERVATION_STALE_OR_UNKNOWN');expect(risk.flags).not.toContain('TOP10_OVER_60');
   });
 });

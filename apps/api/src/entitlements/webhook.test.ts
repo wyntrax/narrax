@@ -36,6 +36,25 @@ afterAll(async () => {
 const inject = (body: string, id: string, overrides: Record<string, string> = {}, server = app, remoteAddress = `127.0.0.${++seq % 200 + 1}`) => server.inject({ method: 'POST', url: '/v1/integrations/wyntrax/events', remoteAddress, payload: body,
   headers: { 'content-type': 'application/json', 'x-wyntrax-timestamp': VECTOR_TIME, 'x-wyntrax-event-id': id, 'x-wyntrax-signature': signBody(body), ...overrides } });
 describe('webhook HTTP boundary with real scratch persistence', () => {
+  it('authenticates EARLY_ACCESS grants, renewals, revocations and test deliveries with ordered persistence',async()=>{
+    const e=payload();e.data.key='EARLY_ACCESS';e.data.seq=1;
+    const body=JSON.stringify(e);
+    expect((await inject(body,e.id,{'x-wyntrax-signature':'v1='+'0'.repeat(64)})).statusCode).toBe(401);
+    expect(await db.webhookEvent.findUnique({where:{id:e.id}})).toBeNull();
+    expect((await inject(body,e.id)).json()).toEqual({ok:true,status:'applied'});
+    const send=async(sequence:number,type:string,validUntil:string|null)=>{
+      const next=payload();next.type=type;next.data={...e.data,seq:sequence,validUntil};
+      const response=await inject(JSON.stringify(next),next.id);expect(response.statusCode).toBe(200);return response.json();
+    };
+    const expiry=new Date(+now+86400000*60).toISOString();
+    expect(await send(2,'membership.granted',expiry)).toEqual({ok:true,status:'applied'});
+    expect(await db.wyntraxEntitlement.findFirstOrThrow({where:{membershipId:e.data.membershipId}})).toMatchObject({key:'EARLY_ACCESS',seq:2n,status:'ACTIVE',validUntil:new Date(expiry),proSince:null,eliteSince:null});
+    expect(await send(3,'membership.revoked',null)).toEqual({ok:true,status:'applied'});
+    expect(await send(2,'membership.granted',expiry)).toEqual({ok:true,status:'stale'});
+    expect(await send(4,'membership.test',null)).toEqual({ok:true,status:'test'});
+    expect((await inject(body,e.id)).json().status).toBe('duplicate');
+    expect(await db.wyntraxEntitlement.findFirstOrThrow({where:{membershipId:e.data.membershipId}})).toMatchObject({key:'EARLY_ACCESS',seq:3n,status:'REVOKED',validUntil:null});
+  });
   it('raw bytes before parsing; contract response, duplicate and header identity', async () => {
     const e = payload(), body = JSON.stringify(e);
     const applied = await inject(body, e.id); expect(applied.statusCode).toBe(200); expect(applied.json()).toEqual({ ok: true, status: 'applied' });

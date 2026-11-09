@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@narra/database';
 import { z } from 'zod';
-import { sanitizeUntrusted, FeatureOverrides, RUNTIME_SETTING_SCHEMAS, TierRequirements, TokenSymbol, TokenMint, EarlyAccessClosesAt, EarlyAccessDays, DEFAULT_TIER_REQUIREMENTS, DEFAULT_TOKEN_SYMBOL, type TierRequirementsValue } from '@narra/shared';
+import { sanitizeUntrusted, FeatureOverrides, RUNTIME_SETTING_SCHEMAS, TierRequirements, TokenSymbol, TokenMint, EarlyAccessClosesAt, EarlyAccessDays, WyntraxMembershipUrl, DEFAULT_TIER_REQUIREMENTS, DEFAULT_TOKEN_SYMBOL, type TierRequirementsValue } from '@narra/shared';
 import { AccessError, audit, lock, requireAdminActor, TX_OPTIONS } from './common';
 import { checkPrivyKey } from '../privy-key';
 import { AUTH_SETTING_KEYS, invalidateRuntimeSettings, readRuntimeSettings } from '../runtime-settings';
@@ -21,6 +21,8 @@ export const SETTING_SCHEMAS = {
   'access.token_symbol': TokenSymbol,
   // Where the token lives on-chain. The pipeline worker reads linked-wallet balances for it and refreshes paid access.
   'access.token_mint': TokenMint,
+  // Public Early access destination. Empty/null keeps the legacy early-access page.
+  'access.wyntrax_url': WyntraxMembershipUrl,
   'entitlements.wallet_link_domain': Domain,
   'entitlements.enforced': z.boolean(),
   'entitlements.shadow_log': z.boolean(),
@@ -40,16 +42,19 @@ export async function localSettings(tx: Pick<Prisma.TransactionClient, 'systemSe
     closesAt: closes ? new Date(closes) : null, accessDays: (values['early_access.access_days'] as number | null | undefined) ?? null };
 }
 /** Public, non-secret tier requirements. A value that was never saved falls back to the owner's starting defaults. */
-export async function tierRequirements(tx: Pick<Prisma.TransactionClient, 'systemSetting'>): Promise<{ tiers: TierRequirementsValue; tokenSymbol: string; tokenMint: string | null; stored: boolean }> {
-  const rows = await tx.systemSetting.findMany({ where: { key: { in: ['access.tier_requirements', 'access.token_symbol', 'access.token_mint'] } } });
-  let tiers: TierRequirementsValue = { ...DEFAULT_TIER_REQUIREMENTS }, tokenSymbol = DEFAULT_TOKEN_SYMBOL, tokenMint: string | null = null, stored = false;
+export async function tierRequirements(tx: Pick<Prisma.TransactionClient, 'systemSetting'>): Promise<{ tiers: TierRequirementsValue; tokenSymbol: string; tokenMint: string | null; wyntraxUrl: string | null; stored: boolean }> {
+  const rows = await tx.systemSetting.findMany({ where: { key: { in: ['access.tier_requirements', 'access.token_symbol', 'access.token_mint', 'access.wyntrax_url'] } } });
+  let tiers: TierRequirementsValue = { ...DEFAULT_TIER_REQUIREMENTS }, tokenSymbol = DEFAULT_TOKEN_SYMBOL, tokenMint: string | null = null, wyntraxUrl: string | null = null, stored = false;
   for (const r of rows) {
     // A stored value that no longer validates is an error, never a silent switch to a different number.
     const parsed = SETTING_SCHEMAS[r.key as SettingKey].safeParse(r.value);
     if (!parsed.success) throw new AccessError('ENTITLEMENTS_UNAVAILABLE', 503);
-    if (r.key === 'access.tier_requirements') { tiers = parsed.data as TierRequirementsValue; stored = true; } else if (r.key === 'access.token_mint') tokenMint = parsed.data as string | null; else tokenSymbol = parsed.data as string;
+    if (r.key === 'access.tier_requirements') { tiers = parsed.data as TierRequirementsValue; stored = true; }
+    else if (r.key === 'access.token_mint') tokenMint = parsed.data as string | null;
+    else if (r.key === 'access.wyntrax_url') wyntraxUrl = parsed.data as string | null;
+    else tokenSymbol = parsed.data as string;
   }
-  return { tiers, tokenSymbol, tokenMint, stored };
+  return { tiers, tokenSymbol, tokenMint, wyntraxUrl, stored };
 }
 /** Internal service for Stage 4's admin routes. Only these exact keys can ever be written. */
 export async function updateLocalSettings(db: PrismaClient, actorId: string, input: unknown, reasonInput: string, options: { overridePrivyCheck?: boolean; checkPrivy?: typeof checkPrivyKey } = {}) {

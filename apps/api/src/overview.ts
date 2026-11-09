@@ -7,6 +7,7 @@ import { SOL_PRICE_KEY } from '@narra/worker-pipeline';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { canReadFeature } from './entitlements/access';
 import { marketTokenImages } from './marketEvidence';
+import { registerPublicResearchSnapshot } from './publicResearchSnapshot';
 
 const HOUR = 3_600_000;
 /** A SOL price older than this is returned with stale: true, so the UI never shows an old number as current. Matches readSolUsd. */
@@ -50,7 +51,7 @@ async function loadBar(db: PrismaClient, now: Date) {
   const since = new Date(now.getTime() - 24 * HOUR);
   const [sol, top, flow, activeNarratives, accelerating, trackedWallets, opportunities24h] = await Promise.all([
     loadSolUsd(db, now),
-    db.narrative.findMany({ where: { stage: { not: 'DEAD' } }, orderBy: [{ score: 'desc' }, { id: 'asc' }], take: 5, select: { id: true, slug: true, name: true, stage: true, score: true, velocity: true } }),
+    db.narrative.findMany({ where: { stage: { not: 'DEAD' } }, orderBy: [{ score: 'desc' }, { id: 'asc' }], take: 10, select: { id: true, slug: true, name: true, stage: true, score: true, velocity: true } }),
     // The latest consensus reading per token in the last 24 hours, summed. A token with no reading in the window is not counted.
     db.$queryRaw<{ net: unknown; tokens: bigint }[]>`
       SELECT COALESCE(SUM(c."netFlowSol"), 0) AS "net", COUNT(*) AS "tokens" FROM (
@@ -67,7 +68,7 @@ async function loadBar(db: PrismaClient, now: Date) {
     bar: {
       solUsd: sol ? { priceUsd: sol.priceUsd, at: sol.at, stale: sol.stale } : null,
       // Mean score of the five strongest live narratives. A summary of the list below it, not a separate signal. Null when there are none.
-      narrativeHeat: top.length ? Math.round(top.reduce((s, x) => s + x.score, 0) / top.length) : null,
+      narrativeHeat: top.length ? Math.round(top.slice(0,5).reduce((s, x) => s + x.score, 0) / Math.min(5,top.length)) : null,
       smartMoneyNetFlowSol24h: f ? r1(Number(String(f.net))) : null,
       smartMoneyTokens24h: f ? Number(f.tokens) : 0,
       counts: { activeNarratives, acceleratingNarratives: accelerating, trackedWallets, opportunities24h },
@@ -98,6 +99,7 @@ function composeBrief(top: { name: string; stage: string; score: number }[], bar
 export function registerOverviewRoutes(app: FastifyInstance, deps: Pick<AccountDeps, 'db' | 'verifier' | 'now'>): void {
   const db: PrismaClient = deps.db;
   const now = deps.now ?? (() => new Date());
+  registerPublicResearchSnapshot(app,db,now);
   const opts = { preHandler: makeAuthenticate(deps), config: { rateLimit: { max: 120, timeWindow: '1 minute' } } };
 
   // Deliberately tier-independent, authenticated teaser. Never include identities, flows or detailed research.

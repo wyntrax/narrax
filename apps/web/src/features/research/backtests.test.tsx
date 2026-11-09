@@ -4,7 +4,7 @@ import {afterEach,it,expect,vi} from 'vitest';
 import {NextIntlClientProvider} from 'next-intl';
 import type {ReactNode} from 'react';
 import {AuthContext,type AuthAdapter} from '@/components/auth/context';
-import {empty} from '@/test/fixtures';
+import {active} from '@/test/fixtures';
 import en from '../../../messages/research/en.json';
 import id from '../../../messages/research/id.json';
 import site from '../../../messages/en.json';
@@ -26,7 +26,7 @@ function transport({admin=false,summaryBody=summary as unknown,report=detail as 
  const requests:{path:string;method:string}[]=[];
  vi.stubGlobal('fetch',vi.fn(async(input:URL,init:RequestInit)=>{
   requests.push({path:input.pathname+input.search,method:init.method??'GET'});
-  if(input.pathname.endsWith('entitlements'))return json(empty);
+  if(input.pathname.endsWith('entitlements'))return json(active);
   if(input.pathname.endsWith('/me'))return json({isAdmin:admin});
   if(input.pathname.endsWith('backtest-summary'))return json(summaryBody);
   if(input.pathname.endsWith('/backtests'))return listStatus===200?json({items:[{id:'run/1',kind:'FULL',createdAt:at,coverage,findings:0,noConclusion:1}]}):json({error:'FORBIDDEN'},listStatus);

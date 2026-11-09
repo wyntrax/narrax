@@ -23,7 +23,7 @@ let at = new Date('2026-10-08T00:00:00Z'), version = 0, ownOpp: string, sharedOp
 const get = (url: string, who = 'user') => app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${who}` }, remoteAddress: `192.0.2.${++requestNo % 200 + 1}` });
 let requestNo = 0;
 const settings = (values: Record<string, unknown>) => updateLocalSettings(db, admin, values, 'Gate test');
-const membership = (tier: 'NONE' | 'MEMBER' | 'PRO' | 'ELITE' = 'PRO', validUntil = new Date(+at + 86400000)) => applyWyntraxEvent(db, { id: `${tag}-${++version}`, type: tier === 'NONE' ? 'membership.revoked' : 'membership.granted', occurredAt: at.toISOString(), data: { membershipId: tag, seq: version, key: tier === 'NONE' ? 'PRO' : tier, validUntil: tier === 'NONE' ? null : validUntil.toISOString(), chain: 'solana', wallet: address, checkedAt: at.toISOString() } }, 'fixture', at);
+const membership = (tier: 'NONE' | 'EARLY_ACCESS' | 'MEMBER' | 'PRO' | 'ELITE' = 'PRO', validUntil = new Date(+at + 86400000)) => applyWyntraxEvent(db, { id: `${tag}-${++version}`, type: tier === 'NONE' ? 'membership.revoked' : 'membership.granted', occurredAt: at.toISOString(), data: { membershipId: tag, seq: version, key: tier === 'NONE' ? 'PRO' : tier, validUntil: tier === 'NONE' ? null : validUntil.toISOString(), chain: 'solana', wallet: address, checkedAt: at.toISOString() } }, 'fixture', at);
 beforeAll(async () => {
   saved = await db.systemSetting.findMany({ where: { key: { in: keys } } });
   const ids = await Promise.all(['user', 'admin', 'other'].map(async who => (await db.user.create({ data: { privyUserId: `${tag}-${who}`, isAdmin: who === 'admin' } })).id));
@@ -50,6 +50,17 @@ afterAll(async () => {
   await db.systemSetting.deleteMany({ where: { key: { in: keys } } }); for (const row of saved) await db.systemSetting.create({ data: { ...row, value: row.value === null ? Prisma.JsonNull : row.value as Prisma.InputJsonValue } }); await db.$disconnect();
 });
 describe('enforced research boundaries on scratch PostgreSQL', () => {
+  it('Wyntrax early access opens its tier with local signup disabled and respects feature overrides',async()=>{
+    await membership('EARLY_ACCESS');
+    expect((await get('/v1/me/entitlements')).json()).toMatchObject({effectiveTier:'EARLY_ACCESS',researchPageLimit:20,memberships:[{key:'EARLY_ACCESS',eligible:true}]});
+    expect((await get('/v1/narratives')).statusCode).toBe(200);
+    await settings({'entitlements.features':{'research.narratives':{requiredTier:'MEMBER'}}});
+    expect((await get('/v1/narratives')).statusCode).toBe(403);
+    expect((await get('/v1/narratives','admin')).statusCode).toBe(200);
+    await settings({'entitlements.features':{}});
+    await membership('EARLY_ACCESS',at);expect((await get('/v1/narratives')).statusCode).toBe(403);
+    await membership('EARLY_ACCESS');await membership('NONE');expect((await get('/v1/narratives')).statusCode).toBe(403);
+  });
   it('NONE can read only the authenticated four-metric preview; rich research remains gated',async()=>{
     expect((await app.inject('/v1/market-preview')).statusCode).toBe(401);
     const response=await get('/v1/market-preview');expect(response.statusCode).toBe(200);

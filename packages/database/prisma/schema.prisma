@@ -432,6 +432,8 @@ model WalletTrade {
 
   @@index([tokenId, at])
   @@index([walletId, at])
+  // Stable bounded reads for whole-cohort intelligence; avoids repeated full sorts per page.
+  @@index([at, id])
 }
 
 model WalletCluster {
@@ -609,6 +611,12 @@ model Token {
   blacklistReason  String?
   blacklistedAt    DateTime?
   blacklistedBy    String?
+  /// Consecutive completed quote reads with no matching pair or usable liquidity.
+  marketQuoteFailures Int @default(0)
+  /// Skip the general price lanes until this time after repeated dead-pool reads.
+  marketQuarantineUntil DateTime?
+  /// A manual refresh keeps this token in the bounded focus lane until this time.
+  marketPriorityUntil DateTime?
   metrics          TokenMetric[]
   holders          TokenHolderMetric[]
   risk             TokenRiskMetric[]
@@ -623,6 +631,8 @@ model Token {
   earlyBuyers      TokenEarlyBuyers?
 
   @@index([symbol])
+  @@index([marketQuarantineUntil])
+  @@index([marketPriorityUntil])
 }
 
 model TokenMetric {
@@ -1209,6 +1219,7 @@ enum EntitlementChain {
 
 enum WyntraxTier {
   NONE
+  EARLY_ACCESS
   MEMBER
   PRO
   ELITE

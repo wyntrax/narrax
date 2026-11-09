@@ -6,21 +6,26 @@
 import { Worker } from 'bullmq';
 import { publishWalletResearch, measureWalletResearch } from './walletResearch';
 import { refreshResearchHistory } from './walletResearchHistory';
-import {heliusMetadataSource} from './tokenMetadata';
+import { intakeEmergingWallets } from './walletCandidateIntake';
+import {combinedMetadataSource,heliusMetadataSource,jupiterMetadataSource} from './tokenMetadata';
 import { createPrisma } from '@narra/database';
-import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, WyntraxHoldingsJobSchema, WyntraxMembershipEventSchema, createQueues, createRedis } from '@narra/queue';
+import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, TokenDiscoveryJobSchema, WyntraxHoldingsJobSchema, WyntraxMembershipEventSchema, createQueues, createRedis } from '@narra/queue';
 import { HeliusWebhooks, JupiterClient, SolanaRpc } from '@narra/solana';
 import { runTregJob } from './tregJob';
 import { trackEarlyRadarOutcomes } from './earlyRadarTracking';
 import { DexScreenerSource, GeckoTerminalSource } from '@narra/market-data';
 import { aiProviderFromEnv } from '@narra/ai';
-import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhook, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, type ChainPorts, type WalletEventDeps } from './index';
+import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhook, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, discoverTokenWallets, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, type ChainPorts, type WalletEventDeps } from './index';
 import { assertEnv } from '@narra/shared';
 import { makeDeveloperHoldingSource } from './developerHoldings';
 import { makeRadarSafetySource } from './radarSafetyEvidence';
 import { makeTradeabilitySource } from './tradeabilityEvidence';
 import { deliverEarlyRadarTelegram, telegramConfigFromSettings, TelegramBotApiTransport } from './telegram';
 import { tregConfigFromSettings } from './integrationSettings';
+import {makeHolderRpcSource} from './holderRpc';
+import {makeFailoverHolderSource,holderRpcEndpoints} from './holderRpcFailover';
+import {refreshRadarHolders} from './holderFallback';
+import {deliverTelegramFeedHealth} from './telegramHealth';
 import { syncWyntraxHoldings } from './wyntraxHoldings';
 import { deliverWyntraxMembership } from './wyntraxMembership';
 import { acquireWorkerLock, WORKER_LOCK_KEY } from './workerLock';
@@ -35,7 +40,7 @@ async function main(): Promise<void> {
   // Two pipeline processes would double-consume every queue, and Telegram delivery has no
   // per-chat cursor lock, so a second process could send the same alert twice.
   const lock = await acquireWorkerLock(connection, `${process.pid}:${Date.now()}`, WORKER_LOCK_TTL_MS, () => {
-    console.error(JSON.stringify({msg:'worker_lock_lost',detail:'another process took over the pipeline worker slot'}));
+    console.error(JSON.stringify({msg:'worker_lock_lost',detail:'pipeline lease expired, was removed, or changed owner'}));
     process.exit(1);
   });
   if (!lock) {
@@ -71,11 +76,28 @@ async function main(): Promise<void> {
   if (!startupTelegram) console.log('telegram delivery off: set the bot token and group chat on the admin page or in TELEGRAM_*');
   else console.log(`telegram delivery on: chat ${startupTelegram.chatId}`);
 
+  // Holder enumeration has its own endpoint chain, independent of the shared keys when
+  // HOLDER_RPC_URL is set: the holder primary, then its fallback. A 429 or unreachable
+  // primary is retried on the fallback for the same token, so a holder burst cannot
+  // exhaust the discovery reserve by accident.
+  const holderRpc = (() => {
+    if (process.env.HOLDER_RPC_FALLBACK_ENABLED === 'false') return null;
+    const endpoints = holderRpcEndpoints();
+    if (!endpoints) return null;
+    const dedicatedPrimary = !!process.env.HOLDER_RPC_URL?.trim();
+    const dedicatedFallback = !!process.env.HOLDER_RPC_FALLBACK_URL?.trim();
+    console.log(`holder rpc endpoints: ${dedicatedPrimary ? 'dedicated' : 'shared'} primary${endpoints.fallback ? ` + ${dedicatedFallback ? 'dedicated' : 'shared'} fallback` : ' only'}`);
+    if (!endpoints.fallback) return makeHolderRpcSource(endpoints.primary);
+    console.log('holder rpc failover: enabled');
+    return makeFailoverHolderSource(makeHolderRpcSource(endpoints.primary), makeHolderRpcSource(endpoints.fallback));
+  })();
+
   // Market data comes from free public APIs that need no key. Set MARKET_DATA_ENABLED=false to turn the job off.
   // With it off, no prices, holders or risk rows are written, so token resolution ranks nothing (fail closed).
   const marketDeps = process.env.MARKET_DATA_ENABLED === 'false' ? null : (() => {
     const gecko = new GeckoTerminalSource({ baseUrl: process.env.GECKOTERMINAL_BASE_URL });
-     return { metadata:process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: process.env.HELIUS_RPC_URL ? makeDeveloperHoldingSource(db, new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 })) : null };
+      const metadata = combinedMetadataSource(process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,jupiterMetadataSource());
+      return { holderFallback:holderRpc,metadata,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: process.env.HELIUS_RPC_URL ? makeDeveloperHoldingSource(db, new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 })) : null };
   })();
   if (!marketDeps) console.log('market data disabled');
   // Bounded public RugCheck lookups for early-radar candidates only. Missing/failed data stays UNKNOWN.
@@ -90,6 +112,8 @@ async function main(): Promise<void> {
   // Wallet jobs. History scans need an RPC URL. Webhook sync needs the Helius API key, the public webhook URL and the shared secret.
   // Each job does nothing when its inputs are missing, and none of them can trade.
   const historyRpc = process.env.HELIUS_RPC_URL ? new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 }) : null;
+  const fallbackUrl = process.env.HELIUS_RPC_FALLBACK_URL?.trim();
+  const discoveryFallbackRpc = fallbackUrl ? new SolanaRpc({ url: fallbackUrl, timeoutMs: 15_000 }) : undefined;
   // $WYNTRAX holding checks write local entitlements. The optional outbound notification keeps Wyntrax membership in sync.
   const membershipWebhook = process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_URL && process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_SECRET
     ? { url: process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_URL, secret: process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_SECRET }
@@ -114,6 +138,7 @@ async function main(): Promise<void> {
     await queues.scheduleNarrativeIngestion(startupTreg?.config.intervalMs);
     await queues.scheduleTokenResolution();
     await queues.scheduleMarketData();
+    await queues.scheduleHolderRefresh();
     await queues.scheduleWalletSync();
     await queues.schedulePositionMonitor();
     await queues.scheduleWalletFunding();
@@ -135,8 +160,15 @@ async function main(): Promise<void> {
     // One recompute at a time: it rewrites profiles, clusters and consensus together.
     new Worker(QUEUE_NAMES.walletIntelligence, async () => {
       const research = process.env.SMART_MONEY_RESEARCH_ENABLED === 'true';
-      const history = research && process.env.SMART_MONEY_HISTORY_ENABLED === 'true' && process.env.HELIUS_API_KEY ? await refreshResearchHistory(db, process.env.HELIUS_API_KEY) : null;
+      const historyEnabled = process.env.SMART_MONEY_HISTORY_ENABLED === 'true', providerConfigured = !!process.env.HELIUS_API_KEY;
+      const intake = historyEnabled && providerConfigured ? await intakeEmergingWallets(db) : null;
+      if (intake?.added) await queues.requestWalletSync();
+      const history = historyEnabled && process.env.HELIUS_API_KEY ? await refreshResearchHistory(db, process.env.HELIUS_API_KEY) : null;
       const intelligence = await recomputeWalletIntelligence(db);
+      const pipeline = { checkedAt: new Date().toISOString(), historyEnabled, providerConfigured, intakeAdded: intake?.added ?? 0, scanned: history?.scanned ?? 0, failures: history?.failures ?? 0,
+        intelligence: { readPages:intelligence.readPages,loadMs:intelligence.loadMs,computeMs:intelligence.computeMs,publishMs:intelligence.publishMs,publicationOperations:intelligence.publicationOperations,tradesUsed:intelligence.tradesUsed } };
+      await db.systemSetting.upsert({ where: { key: 'wallet.evaluation.pipeline' }, create: { key: 'wallet.evaluation.pipeline', value: pipeline }, update: { value: pipeline } });
+      console.log(JSON.stringify({msg:'wallet_intelligence_complete',...pipeline.intelligence}));
       return JSON.stringify({ ...intelligence, history, research: research ? await publishWalletResearch(db) : 'disabled' });
     }, { connection, concurrency: 1 }),
     // Position monitor: recommends exits and raises alerts. It never closes a position or places an order. The AI review is optional.
@@ -146,12 +178,30 @@ async function main(): Promise<void> {
     new Worker(QUEUE_NAMES.tokenResolution, async () => JSON.stringify({ mentionLinks: await attributeNarrativeMentions(db), ...(await resolveTokens(db, undefined, { safety: radarSafety, tradeability })), social: await scanSocialTokens(db, { quotes: marketDeps?.quotes ?? null, safety: radarSafety, tradeability }).catch(() => 'social scan failed') }), { connection, concurrency: 1 }),
     // One refresh at a time: the sources are rate limited per process.
     new Worker(QUEUE_NAMES.marketData, async () => (marketDeps ? JSON.stringify(await refreshMarketData(db, marketDeps)) : 'disabled'), { connection, concurrency: 1 }),
+    // Radar-cohort holders need a 60-minute gate, but the market run is already close to its
+    // 5-minute schedule. Refresh a few cohort tokens a minute instead of lengthening that run.
+    new Worker(QUEUE_NAMES.holderRefresh, async () => {
+      const source = marketDeps?.holderFallback ?? null;
+      if (!source) return 'disabled';
+      const summary = await refreshRadarHolders(db, source);
+      console.log(JSON.stringify({ msg: 'holder_refresh_complete', ...summary }));
+      return JSON.stringify(summary);
+    }, { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletSync, async () => (syncDeps ? JSON.stringify(await syncWalletWebhook(db, syncDeps.client, syncDeps.cfg)) : 'not configured'), { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletFunding, async () => {
       const ingest = historyRpc ? await ingestWalletFunding(db, historyRpc) : null;
       return JSON.stringify({ ingest, graph: await rebuildFundingGraph(db) });
     }, { connection, concurrency: 1 }),
-    new Worker(QUEUE_NAMES.walletDiscovery, async () => (historyRpc ? JSON.stringify({ scan: await scanEarlyBuyers(db, historyRpc), discovery: await discoverCandidates(db) }) : 'needs HELIUS_RPC_URL'), { connection, concurrency: 1 }),
+    new Worker(QUEUE_NAMES.walletDiscovery, async () => (historyRpc ? JSON.stringify({ scan: await scanEarlyBuyers(db, historyRpc, new Date(), { fallbackRpc: discoveryFallbackRpc }), discovery: await discoverCandidates(db) }) : 'needs HELIUS_RPC_URL'), { connection, concurrency: 1 }),
+    // User-requested, token-scoped discovery. It adds provisional wallets and bounded recent history, then asks for a webhook sync.
+    new Worker(QUEUE_NAMES.tokenDiscovery, async (job) => {
+      const { mint } = TokenDiscoveryJobSchema.parse(job.data);
+      const token = await db.token.findUnique({ where: { mint }, select: { id: true, mint: true, symbol: true, blacklisted: true } });
+      if (!token || token.blacklisted) return 'token not found';
+      const summary = await discoverTokenWallets(db, { tokenId: token.id, mint: token.mint, symbol: token.symbol, apiKey: process.env.HELIUS_API_KEY });
+      if (summary.newWallets > 0) await queues.requestWalletSync();
+      return JSON.stringify(summary);
+    }, { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.narrativeIngestion, async (job) => {
       let integration: Awaited<ReturnType<typeof tregConfigFromSettings>>;
       try {
@@ -179,8 +229,9 @@ async function main(): Promise<void> {
     new Worker(QUEUE_NAMES.telegramDelivery, async () => {
       const config = await telegramConfigFromSettings(db).catch(() => null);
       if (!config) return 'telegram disabled';
+      const transport = new TelegramBotApiTransport(config.token, config.botApiBase);
       const summary = await deliverEarlyRadarTelegram(db, {
-        chatId: config.chatId, transport: new TelegramBotApiTransport(config.token, config.botApiBase), dryRun: false,
+        chatId: config.chatId, transport, dryRun: false,
         maxAgeMs: config.maxAgeMs, limit: config.limit, delayMs: config.delayMs,
       });
       if (summary.lastError || summary.sent || summary.failed || summary.stopped) {
@@ -189,6 +240,10 @@ async function main(): Promise<void> {
           sent: summary.sent, stale: summary.skippedStale, failed: summary.failed,
           stopped: summary.stopped, error: summary.lastError,
         }));
+      }
+      if(process.env.TELEGRAM_HEALTH_NOTICES!=='false'&&!summary.sent&&!summary.failed&&!summary.stopped){
+        const health=await deliverTelegramFeedHealth(db,{chatId:config.chatId,transport,dryRun:false});
+        if(health.sent||health.reason==='SEND_FAILED')console.log(JSON.stringify({msg:'telegram_feed_health',...health}));
       }
       return JSON.stringify(summary);
     }, { connection, concurrency: 1 }),

@@ -25,7 +25,7 @@ test('opportunities are thesis cards rather than another token screener',async({
 });
 test('pending wallet profiles remain visible and open real detail/trade routes',async({page})=>{
  const requests=await researchApi(page,(path,url)=>path==='/v1/smart-money/wallets'?{body:{items:[wallet],nextCursor:null}}:path===`/v1/wallets/${token.mint}`?{body:detail}:path===`/v1/wallets/${token.mint}/trades`?{body:{items:url.searchParams.get('side')==='SELL'?[]:[{id:'tx1',at:observation.at,side:'BUY',amountSol:1.25,marketCapUsd:null,signature:'5'.repeat(88),token:{mint:token.mint,symbol:'ROBOT'}}],nextCursor:null}}:undefined);
- await enterWorkspace(page,'/app/smart-money');await expect(page.locator('.research-table')).toContainText('Awaiting profile');
+  await enterWorkspace(page,'/app/smart-money');await page.getByRole('tab',{name:'Wallet directory',exact:true}).click();await expect(page.locator('.research-table')).toContainText('Awaiting profile');
  await page.getByLabel('Search wallet address or label').fill('New tracked');await page.getByRole('button',{name:'Search',exact:true}).click();
  await expect.poll(()=>requests.some(p=>p.includes('q=New+tracked'))).toBe(true);
  await page.getByRole('link',{name:wallet.label}).click();await expect(page.getByRole('heading',{name:wallet.label})).toBeVisible();
@@ -49,7 +49,7 @@ test('alert badge updates after marking read and disappears at zero',async({page
 });
 test('invalid retained wallet addresses are labeled and never linked as chain evidence',async({page})=>{
  await researchApi(page,path=>path==='/v1/smart-money/wallets'?{body:{items:[{...wallet,address:'invalid-historical-wallet'}],nextCursor:null}}:undefined);
- await enterWorkspace(page,'/app/smart-money');await expect(page.getByText('Invalid historical address; no chain lookup available')).toBeVisible();
+  await enterWorkspace(page,'/app/smart-money');await page.getByRole('tab',{name:'Wallet directory',exact:true}).click();await expect(page.getByText('Invalid historical address; no chain lookup available')).toBeVisible();
  await expect(page.locator('.research-table a')).toHaveCount(0);await page.getByRole('button',{name:'Inspect historical scores and analysis'}).click();await expect(page.locator('.research-table a')).toHaveCount(0);
 });
 for(const theme of ['dark','light'])test(`sign in: visible primary action and home links in ${theme}`,async({page})=>{
@@ -62,7 +62,7 @@ for(const theme of ['dark','light'])test(`sign in: visible primary action and ho
 });
 for(const locale of ['en','id'])test(`mobile wallet explorer, badges and full-width layout in ${locale}`,async({page})=>{
  await page.setViewportSize({width:390,height:844});await researchApi(page,path=>path==='/v1/smart-money/wallets'?{body:{items:[wallet],nextCursor:null}}:undefined);
- await page.goto(locale==='id'?'/id/app/smart-money':'/app/smart-money');await page.getByRole('button',{name:locale==='id'?'Lanjutkan':'Continue',exact:true}).click();await expect(page.locator('.research-table')).toBeVisible();
+  await page.goto(locale==='id'?'/id/app/smart-money':'/app/smart-money');await page.getByRole('button',{name:locale==='id'?'Lanjutkan':'Continue',exact:true}).click();await page.getByRole('tab',{name:locale==='id'?'Direktori wallet':'Wallet directory',exact:true}).click();await expect(page.locator('.research-table')).toBeVisible();
  await expect(page.locator('.research-context')).toHaveCount(0);await expect(page.locator('.research-bottom-nav .nav-alert-badge')).toHaveText('1');
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect(await page.locator('.research-main').evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
  expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa']).analyze()).violations).toEqual([]);

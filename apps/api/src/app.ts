@@ -30,10 +30,12 @@ import { createRuntimeSettings, type RuntimeSettingsResolver } from './runtime-s
 import { registerRuntimeRoutes } from './runtime-routes';
 import {registerPaperTradeRoutes} from './paper-trades';
 import type {JupiterClient} from '@narra/solana';
+import type {MarketQuoteSource} from '@narra/market-data';
 import {registerManualTradeRoutes} from './manual-trades';
 import type {ManualSwapEngine} from './manual-swap-engine';
 import { registerPersonalResearchRoutes } from './personalResearch';
 import { registerIntegrationRoutes } from './integrations';
+import { registerSmartMoneyInvestigationRoutes } from './smartMoneyInvestigation';
 
 const EvaluateBody = z.object({
   /** Raw model output. Untrusted until it passes the schema. */
@@ -43,7 +45,7 @@ const EvaluateBody = z.object({
   overrides: RiskLimitsSchema.partial().optional(),
 });
 
-export async function buildApp(opts: { manualSwaps?:ManualSwapEngine; paperQuotes?:Pick<JupiterClient,'getQuote'>; webhooks?: WebhookDeps; account?: AccountDeps; runtime?: RuntimeSettingsResolver; /** Queues a Helius webhook sync. Leave out when Helius is not configured. */ requestWalletSync?: () => Promise<unknown>; /** Queues a confirmed order for the execution worker. */ enqueueExecution?: (job: ExecutionJob) => Promise<unknown>; /** The model behind agent chat. Without it chat answers 503. */ chatLlm?: LlmProvider | null; chatQuestionsPerMinute?: number; /** Health checks for the admin status view. */ ops?: OpsDeps; /** CORS, HSTS. */ http?: HttpOptions; /** Reports which providers are configured, for the admin connections view. */ connections?: () => ConnectionStatus[]; /** Reads SOL balances for GET /v1/me/wallets/balances. Without it balances are reported as unknown. */ balances?: BalanceSource; /** WebSocket gateway. Without it GET /v1/stream does not exist. */ realtime?: Omit<GatewayDeps, 'db' | 'verifier' | 'allowedOrigins' | 'resolveAllowedOrigins'>; /** Set when the API sits behind a reverse proxy, so rate limits see the client address and not the proxy's. Never true when the API is exposed directly. */ trustProxy?: boolean; wyntrax?: WyntraxDeps } = {}): Promise<FastifyInstance> {
+export async function buildApp(opts: { manualSwaps?:ManualSwapEngine; paperQuotes?:Pick<JupiterClient,'getQuote'>; marketQuotes?:MarketQuoteSource; webhooks?: WebhookDeps; account?: AccountDeps; runtime?: RuntimeSettingsResolver; /** Queues a Helius webhook sync. Leave out when Helius is not configured. */ requestWalletSync?: () => Promise<unknown>; /** Queues a confirmed order for the execution worker. */ enqueueExecution?: (job: ExecutionJob) => Promise<unknown>; /** The model behind agent chat. Without it chat answers 503. */ chatLlm?: LlmProvider | null; chatQuestionsPerMinute?: number; /** Health checks for the admin status view. */ ops?: OpsDeps; /** CORS, HSTS. */ http?: HttpOptions; /** Reports which providers are configured, for the admin connections view. */ connections?: () => ConnectionStatus[]; /** Reads SOL balances for GET /v1/me/wallets/balances. Without it balances are reported as unknown. */ balances?: BalanceSource; /** WebSocket gateway. Without it GET /v1/stream does not exist. */ realtime?: Omit<GatewayDeps, 'db' | 'verifier' | 'allowedOrigins' | 'resolveAllowedOrigins'>; /** Set when the API sits behind a reverse proxy, so rate limits see the client address and not the proxy's. Never true when the API is exposed directly. */ trustProxy?: boolean; wyntrax?: WyntraxDeps } = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: process.env.NODE_ENV === 'test' ? false : { level: 'info', redact: ['req.headers.authorization', 'req.headers["x-wyntrax-signature"]'] },
     bodyLimit: HTTP_LIMITS.bodyLimitBytes, requestTimeout: HTTP_LIMITS.requestTimeoutMs, keepAliveTimeout: HTTP_LIMITS.keepAliveTimeoutMs,
@@ -75,10 +77,11 @@ export async function buildApp(opts: { manualSwaps?:ManualSwapEngine; paperQuote
     registerFeatureGates(app, opts.account.db, opts.account.now);
     registerPersonalResearchRoutes(app, opts.account);
     registerWalletResearchRoutes(app, opts.account);
+    registerSmartMoneyInvestigationRoutes(app, opts.account);
     registerEntitlementRoutes(app, opts.account);
     registerLinkedWalletRoutes(app, opts.account);
     registerAccountRoutes(app, opts.account);
-    registerReadRoutes(app, opts.account);
+    registerReadRoutes(app, { ...opts.account, marketQuotes: opts.marketQuotes });
     registerAdminRoutes(app, { ...opts.account, connections: opts.connections });
     registerWalletAdminRoutes(app, { ...opts.account, requestSync: opts.requestWalletSync });
     registerConfirmationRoutes(app, { ...opts.account, enqueueExecution: opts.enqueueExecution });

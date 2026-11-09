@@ -36,7 +36,7 @@ export function registerEntitlementRoutes(app: FastifyInstance, deps: AccountDep
           const settings = await localSettings(tx);
           // An ended time window reads as closed: the same state as disabled, so the existing screens need no new shape.
           settings.enabled = settings.enabled && !earlyAccessClosed(settings.closesAt, at);
-          const occupied = settings.enabled ? (await tx.accessGrant.findMany({ where: { tier: 'EARLY_ACCESS', status: 'ACTIVE', OR: [{ validUntil: null }, { validUntil: { gt: at } }] }, distinct: ['userId'], select: { userId: true } })).length : 0;
+          const occupied = settings.enabled ? (await tx.accessGrant.findMany({ where: { tier: 'EARLY_ACCESS', source: 'EARLY_ACCESS', status: 'ACTIVE', OR: [{ validUntil: null }, { validUntil: { gt: at } }] }, distinct: ['userId'], select: { userId: true } })).length : 0;
           return { enabled: settings.enabled, seatsLeft: settings.enabled ? Math.max(0, settings.cap - occupied) : null, inviteRequired: settings.inviteRequired };
         }, { isolationLevel: 'RepeatableRead' }).then(value => { publicCache = { until: +now() + 30_000, value }; return value; }).finally(() => { publicPending = undefined; });
         await publicPending;
@@ -49,7 +49,7 @@ export function registerEntitlementRoutes(app: FastifyInstance, deps: AccountDep
     }
   });
   // Public tier requirements: how many $Wyntrax each paid tier asks for, and the early-access window. No secrets, no per-user data.
-  type PublicRequirements = { tokenSymbol: string; tokenMint: string | null; tokenImageUrl: string | null; tiers: { MEMBER: number; PRO: number }; featureTiers: Record<string, AccessTier>; earlyAccess: { closesAt: string | null; accessDays: number | null } };
+  type PublicRequirements = { tokenSymbol: string; tokenMint: string | null; tokenImageUrl: string | null; tiers: { MEMBER: number; PRO: number }; featureTiers: Record<string, AccessTier>; wyntraxUrl: string | null; earlyAccess: { closesAt: string | null; accessDays: number | null } };
   let reqCache: { until: number; value: PublicRequirements } | undefined;
   // A change to settings or seats must reach the public pages at once, not after the thirty-second cache window.
   const invalidatePublic = () => { publicCache = undefined; reqCache = undefined; };
@@ -58,12 +58,12 @@ export function registerEntitlementRoutes(app: FastifyInstance, deps: AccountDep
       const at = now();
       if (!reqCache || reqCache.until <= +at) {
         const value = await db.$transaction(async tx => {
-          const { tiers, tokenSymbol, tokenMint } = await tierRequirements(tx), settings = await localSettings(tx);
+          const { tiers, tokenSymbol, tokenMint, wyntraxUrl } = await tierRequirements(tx), settings = await localSettings(tx);
           const access = await accessSettings(tx as typeof db);
           const featureTiers = Object.fromEntries(Object.entries(FEATURE_TIERS).map(([key, base]) => [key, activeTier(access.overrides[key]?.requiredTier ?? base)]));
           const token=tokenMint?await tx.token.findUnique({where:{mint:tokenMint},select:{id:true,mint:true}}):null;
           const images=await marketTokenImages(tx,token?[token]:[]);
-          return { tokenSymbol, tokenMint, tokenImageUrl:token?images.get(token.id)??null:null, tiers, featureTiers, earlyAccess: { closesAt: settings.closesAt?.toISOString() ?? null, accessDays: settings.accessDays } };
+          return { tokenSymbol, tokenMint, tokenImageUrl:token?images.get(token.id)??null:null, tiers, featureTiers, wyntraxUrl, earlyAccess: { closesAt: settings.closesAt?.toISOString() ?? null, accessDays: settings.accessDays } };
         }, { isolationLevel: 'RepeatableRead' });
         reqCache = { until: +now() + 30_000, value };
       }
@@ -81,7 +81,7 @@ export function registerEntitlementRoutes(app: FastifyInstance, deps: AccountDep
     const grant = await db.accessGrant.findUnique({ where: { userId_source: { userId: r.userId!, source: 'EARLY_ACCESS' } } });
     if (grant) await revokeLocalGrant(db, r.userId!, grant.id, null, 'Self leave', now()); invalidatePublic(); return { ok: true };
   }));
-  app.get('/v1/admin/entitlements/settings', opts(true), handle(async () => ({ defaults: { 'entitlements.enforced': false, 'entitlements.shadow_log': true, 'early_access.enabled': false, 'early_access.seat_cap': 0, 'early_access.closes_at': null, 'early_access.access_days': null, 'access.tier_requirements': DEFAULT_TIER_REQUIREMENTS, 'access.token_symbol': DEFAULT_TOKEN_SYMBOL, 'access.token_mint': null, 'entitlements.features': {} }, items: await db.systemSetting.findMany({ where: { key: { in: Object.keys(SETTING_SCHEMAS) } } }) })));
+  app.get('/v1/admin/entitlements/settings', opts(true), handle(async () => ({ defaults: { 'entitlements.enforced': false, 'entitlements.shadow_log': true, 'early_access.enabled': false, 'early_access.seat_cap': 0, 'early_access.closes_at': null, 'early_access.access_days': null, 'access.tier_requirements': DEFAULT_TIER_REQUIREMENTS, 'access.token_symbol': DEFAULT_TOKEN_SYMBOL, 'access.token_mint': null, 'access.wyntrax_url': null, 'entitlements.features': {} }, items: await db.systemSetting.findMany({ where: { key: { in: Object.keys(SETTING_SCHEMAS) } } }) })));
   app.put('/v1/admin/entitlements/settings', opts(true), handle(async r => { const v = z.object({ settings: z.unknown(), reason: Reason, overridePrivyCheck: z.boolean().optional() }).strict().parse(r.body); await updateLocalSettings(db, r.userId!, v.settings, v.reason, { overridePrivyCheck: v.overridePrivyCheck }); invalidatePublic(); return { ok: true }; }));
   app.get('/v1/admin/users/:userId/entitlements', opts(true), handle(r => entitlementTrace(db, params(r).userId, now())));
   app.post('/v1/admin/users/:userId/entitlements/grants', opts(true, 10), handle(async r => {
@@ -113,7 +113,7 @@ export function registerEntitlementRoutes(app: FastifyInstance, deps: AccountDep
   app.get('/v1/admin/early-access/stats', opts(true), handle(async () => {
     const at = now(), settings = await localSettings(db);
     const active = { tier: 'EARLY_ACCESS' as const, status: 'ACTIVE' as const, OR: [{ validUntil: null }, { validUntil: { gt: at } }] };
-    const occupied = (await db.accessGrant.findMany({ where: active, distinct: ['userId'], select: { userId: true } })).length;
+    const occupied = (await db.accessGrant.findMany({ where: { ...active, source: 'EARLY_ACCESS' }, distinct: ['userId'], select: { userId: true } })).length;
     return { occupied, available: Math.max(0, settings.cap - occupied), cap: settings.cap, active: await db.accessGrant.count({ where: active }), expired: await db.accessGrant.count({ where: { OR: [{ status: 'EXPIRED' }, { status: 'ACTIVE', validUntil: { lte: at } }] } }), revoked: await db.accessGrant.count({ where: { status: 'REVOKED' } }) };
   }));
 }

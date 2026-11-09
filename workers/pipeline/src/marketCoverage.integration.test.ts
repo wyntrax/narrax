@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createPrisma, type Prisma } from '@narra/database';
 import { FixtureMarketData, MarketDataError, WSOL_MINT, snapshot, info, type MarketQuoteSource } from '@narra/market-data';
-import { GENERAL_PRICE_CURSOR_KEY, INFO_CURSOR_KEY, DISCOVERY_PRICE_CURSOR_KEY, refreshMarketData } from './marketData';
+import { GENERAL_PRICE_CURSOR_KEY, INFO_CURSOR_KEY, DISCOVERY_PRICE_CURSOR_KEY, WALLET_PRICE_CURSOR_KEY, refreshMarketData } from './marketData';
 
 const db = createPrisma(), tag = `coverage-${Date.now()}`;
 const now = new Date('2050-01-01T12:00:00Z');
 const prefix = `000-${tag}-`;
-const keys = [GENERAL_PRICE_CURSOR_KEY, INFO_CURSOR_KEY, DISCOVERY_PRICE_CURSOR_KEY];
+const keys = [GENERAL_PRICE_CURSOR_KEY, INFO_CURSOR_KEY, DISCOVERY_PRICE_CURSOR_KEY, WALLET_PRICE_CURSOR_KEY];
 let saved: { key: string; value: Prisma.JsonValue }[] = [];
 let cap = 8;
 beforeAll(async () => {
@@ -106,4 +106,25 @@ it('rotates holder attempts past a failing token, preserves missingness, and sto
   await refreshMarketData(db, { quotes, info: source, launches: null }, new Date(+now + 3_000), { maxTokens: 100_000, maxInfoCalls: 20 });
   expect(calls).toHaveLength(4);
   expect((await db.systemSetting.findUniqueOrThrow({ where: { key: INFO_CURSOR_KEY } })).value).toBe(before);
+});
+it('reserves rotating recent-wallet coverage without exceeding the quote cap or advancing on throttling',async()=>{
+ const wallet=await db.trackedWallet.create({data:{address:`${tag}-wallet`,source:'MANUAL',active:true}});
+ try{
+  const tokens=[];for(let i=0;i<12;i++)tokens.push(await make(`wallet-${i.toString().padStart(2,'0')}`));
+  for(const token of tokens)await db.walletTrade.create({data:{walletId:wallet.id,tokenId:token.id,side:'BUY',at:now,amountSol:'.00003',signature:`${tag}-${token.id}`}});
+  await cursor(WALLET_PRICE_CURSOR_KEY,prefix+'wallet-');
+  const seen=new Set<string>();
+  const quotes:MarketQuoteSource={name:'wallet-coverage',getSnapshots:async mints=>{expect(new Set(mints).size).toBe(mints.length);mints.forEach(m=>seen.add(m));return new Map();}};
+  for(let i=0;i<6;i++){
+   const result=await refreshMarketData(db,{quotes,info:null,launches:null},now,{maxTokens:cap});
+   expect(result.tokensConsidered).toBeLessThanOrEqual(cap);
+   expect(result.priceCoverage.wallets.selected).toBeGreaterThan(0);
+   expect(result.priceCoverage.wallets.unavailable).toBe(result.priceCoverage.wallets.selected);
+  }
+  expect(tokens.every(t=>seen.has(t.mint))).toBe(true);
+  const before=(await db.systemSetting.findUniqueOrThrow({where:{key:WALLET_PRICE_CURSOR_KEY}})).value;
+  const throttled:MarketQuoteSource={name:'throttled',getSnapshots:async mints=>{if(mints.includes(WSOL_MINT))return new Map();throw new MarketDataError('rate_limited','retry');}};
+  await refreshMarketData(db,{quotes:throttled,info:null,launches:null},now,{maxTokens:cap});
+  expect((await db.systemSetting.findUniqueOrThrow({where:{key:WALLET_PRICE_CURSOR_KEY}})).value).toEqual(before);
+ }finally{await db.trackedWallet.delete({where:{id:wallet.id}});}
 });

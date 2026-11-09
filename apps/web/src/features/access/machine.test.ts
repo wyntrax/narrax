@@ -11,7 +11,7 @@ describe('access state machine',()=>{
  [{type:'SIGN'},['challenge'],'signing'],[{type:'SIGNED'},['signing'],'verifying'],
  [{type:'VERIFIED',data:linked},['verifying'],'linked'],
  [{type:'JOIN'},['linked'],'joining'],[{type:'JOINED',data:active},['joining'],'active'],
- [{type:'SYNC',data:{...active,effectiveTier:'PRO'}},['linked','active'],'active'],
+  [{type:'SYNC',data:{...active,effectiveTier:'PRO'}},['linked','active','disabled','full','inviteOnly'],'active'],
  [{type:'UNLINK'},['linked','active','disabled','full','inviteOnly','error'],'unlinking'],
  [{type:'LEAVE'},['active','linked','disabled','full','inviteOnly','error'],'leaving'],
  [{type:'LOADED',data:linked,status},['checking','unlinking','leaving'],'linked']

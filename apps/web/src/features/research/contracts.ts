@@ -66,7 +66,7 @@ export const TokenSchema=TokenRef.extend({
  observation:MarketObservation.nullish(),
  blacklisted:z.boolean(),createdOnChainAt:date.nullable(),
  metrics:z.object({priceUsd:nullable,marketCapUsd:nullable,liquidityUsd:nullable,volume24hUsd:nullable,at:date}).nullable(),
- holders:z.object({holders:number,top10Pct:number,devHoldingPct:nullable,smartWalletHolders:number,at:date}).nullable(),
+  holders:z.object({holders:number,top10Pct:nullable,devHoldingPct:nullable,smartWalletHolders:nullable.optional(),at:date}).nullable(),
  risk:z.object({riskScore:number,flags:z.array(text),at:date}).nullable(),
  consensus:z.object({score:number,walletCount:number,independentEntities:number,leaderCount:number,netFlowSol:nullable,timingConcentration:number}).nullable(),
  narratives:z.array(NarrativeRef.extend({relation:text,ogScore:number}))
@@ -74,14 +74,25 @@ export const TokenSchema=TokenRef.extend({
 export type Token=z.infer<typeof TokenSchema>;
 export const TokenHistorySchema=z.object({window:z.enum(['1h','24h','7d']),asOf:date,points:z.array(z.object({at:date,priceUsd:number.positive(),source:z.literal('dexscreener'),pairAddress:text})),truncated:z.boolean(),excludedUnverified:z.number().int().nonnegative()});
 export type PricePoint=z.infer<typeof TokenHistorySchema>['points'][number];
+export const TokenRefreshSchema=z.object({ok:z.literal(true),reused:z.boolean(),at:date});
 
 // ---- Smart money, alerts, analytics, settings and chat. Mirrors apps/api/src/{read,alerts,analytics,settings,chat}.ts. ----
 export const SmartWalletSchema=z.object({address:text,label:text.nullish(),score:nullable,source:text.optional(),profileAt:date.nullish(),metricsAt:date.nullish(),trackedSince:date.optional(),lastTradeAt:date.nullish(),observedTrades:z.number().int().nonnegative().optional(),evidenceStatus:z.literal('UNVERIFIED').optional(),leaderScore:nullable.optional(),style:text.nullish(),medianHoldSeconds:nullable.optional(),bestPattern:text.nullish(),weakPattern:text.nullish(),winRate:nullable.optional(),pnl30dSol:nullable.optional(),closedTrades:nullable.optional(),avgRoi:nullable.optional(),cluster:z.object({id:text,confidence:text.or(number)}).nullable().optional()});
 export type SmartWallet=z.infer<typeof SmartWalletSchema>;
 export const WalletIntelligenceSchema=z.object({checkedAt:date,windowDays:number,observedTrades:number,closedTrades:number,requiredClosedTrades:number,status:z.enum(['INSUFFICIENT_HISTORY','READY'])});
 export const SmartWalletsSchema=pageOf(SmartWalletSchema.extend({intelligence:WalletIntelligenceSchema.nullish(),qualification:QualificationSchema.nullish(),researchReview:text.optional()}));
-const WalletTradeSchema=z.object({id:text,at:date,side:z.enum(['BUY','SELL']),amountSol:nullable,amountUsd:nullable.optional(),marketCapUsd:nullable,evidence:z.object({reasons:z.array(text),market:z.object({at:date,source:text}).nullable()}).nullish(),signature:text,token:TokenLabel});
+const WalletTradeSchema=z.object({id:text,at:date,side:z.enum(['BUY','SELL']),amountSol:nullable,amountUsd:nullable.optional(),marketCapUsd:nullable,evidence:z.object({reasons:z.array(text),market:z.object({at:date,source:text,marketCapIsFdv:z.boolean().optional()}).nullable(),sol:z.object({at:date,source:text}).nullish()}).nullish(),signature:text,token:TokenLabel});
 export const WalletTradesSchema=pageOf(WalletTradeSchema);
+export const WalletOpenPositionSchema=z.object({
+  tokenId:text,entryTradeId:text,band:text,quantity:text,remainingCostSol:text,investedSol:text,entrySol:text,
+  openedAt:date,lastTradeAt:date,partiallySold:z.boolean(),token:TokenRef.nullable(),
+  priceUsd:nullable,priceAt:date.nullable(),priceStale:z.boolean(),
+});
+export const WalletOpenPositionsSchema=z.object({
+  version:z.literal(1),checkedAt:date,windowDays:z.literal(30),observedTrades:z.number().int().nonnegative(),
+  capped:z.boolean(),invalidTrades:z.number().int().nonnegative(),unmatchedSells:z.number().int().nonnegative(),
+  positions:z.array(WalletOpenPositionSchema),totalPositions:z.number().int().nonnegative().optional(),
+});
 export const WalletDetailSchema=z.object({
   qualification:QualificationSchema.nullish(),researchReview:text.optional(),
   intelligence:WalletIntelligenceSchema.extend({observedBuys:number.optional(),observedSells:number.optional(),unmatchedSells:number.optional()}).nullish(),
@@ -91,6 +102,7 @@ export const WalletDetailSchema=z.object({
  performance:z.record(z.object({winRate:nullable,pnlSol:nullable,closedTrades:number,avgRoi:nullable,computedAt:date})),
  cluster:z.object({label:text.nullable(),confidence:text.or(number),size:number,members:z.array(z.object({address:text,label:text.nullable()}))}).nullable(),
  funding:z.object({status:text,funder:text.nullable(),fundedAt:date.nullable(),amountSol:nullable,checkedAt:date}).nullable(),
+ openPositions:WalletOpenPositionsSchema.nullish(),
  narrativeHistory:z.object({lookbackDays:number,scannedTrades:number,scanCapped:z.boolean(),items:z.array(z.object({slug:text,name:text,stage:Stage,buys:number,sells:number,netSol:number,lastAt:date}))})
 });
 export const UnreadAlertsSchema=z.object({unread:z.number().int().nonnegative(),capped:z.boolean()});
@@ -106,7 +118,7 @@ export type Described=z.infer<typeof DescribedSchema>;
 const Bucket=z.object({label:text,described:DescribedSchema});
 export const SummarySchema=z.object({
  range:z.object({days:number}),costPct:number,
- decisions:z.object({read:number,independent:number,pending:number,final:number,unknown:number,truncated:z.boolean()}),
+ decisions:z.object({total:number,awaitingMeasurement:number,read:number,independent:number,pending:number,final:number,known:number,unknown:number,unknownRate:nullable,truncated:z.boolean()}),
  labels:z.object({WIN:number,LOSS:number,FLAT:number}),returns:DescribedSchema,medianLeadTimeSeconds:nullable,
  byConfidence:z.array(Bucket),caveats:z.array(text)
 });

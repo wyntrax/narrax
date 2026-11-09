@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { WalletAddress } from './common';
 
 export const WyntraxData = z.object({
-  membershipId: z.string().min(1).max(256), key: z.enum(['MEMBER', 'PRO', 'ELITE']),
+  membershipId: z.string().min(1).max(256), key: z.enum(['EARLY_ACCESS', 'MEMBER', 'PRO', 'ELITE']),
   chain: z.literal('solana'), wallet: WalletAddress, seq: z.number().int().safe().positive(),
   validUntil: z.string().datetime({ offset: true }).nullable(), checkedAt: z.string().datetime({ offset: true }),
 }).strict();

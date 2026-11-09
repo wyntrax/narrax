@@ -1,6 +1,7 @@
 'use client';
 import {useMemo,useRef,useState} from 'react';
 import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query';
+import * as Tabs from '@radix-ui/react-tabs';
 import {useLocale,useTranslations} from 'next-intl';
 import {useAuth} from '@/components/auth/context';
 import {ApiError} from '@/lib/api';
@@ -8,7 +9,7 @@ import {Link} from '@/i18n/navigation';
 import {useResearch,useResearchQuery} from '@/features/research/session';
 import {Loading,PageHeading,ResourceError} from '@/features/research/ui';
 import {createAdminApi,type AdminApi} from './api';
-import {effectiveStatus,shortAddress,toPayload,toSettings,toTierForm,MeSchema,type AdminGrant,type AdminSettings,type AdminStats} from './contracts';
+import {effectiveStatus,shortAddress,toPayload,toSettings,toTierForm,validWyntraxUrl,MeSchema,type AdminGrant,type AdminSettings,type AdminStats} from './contracts';
 import {TiersCard} from './tiers-card';
 import {RuntimeCard} from './runtime-card';
 import {DataHealthCard} from './data-health-card';
@@ -60,17 +61,33 @@ export function AdminPage() {
   const current = toSettings(settings.data.items);
   return <div className="admin-page">{heading}
     <AdminOverview settings={current} stats={stats.data}/>
-    <DataHealthCard api={api} queryKey={key('data-health')}/>
-    <WalletResearchCard api={api} queryKey={key('wallet-research')}/>
-    <div className="admin-grid">
-      <SettingsCard api={api} initial={current} stats={stats.data}/>
-      <WhitelistCard api={api}/>
-    </div>
-    <TiersCard api={api} initial={toTierForm(settings.data.items)}/>
-    <FeaturesCard api={api} items={settings.data.items}/>
-    <GrantsCard api={api}/>
-    <IntegrationsCard api={api} queryKey={key('integrations')}/>
-    <RuntimeCard api={api} queryKey={key('runtime')}/>
+    <Tabs.Root defaultValue="access" className="admin-tabs">
+      <Tabs.List className="admin-tab-list" aria-label={t('adminTitle')}>
+        <Tabs.Trigger className="admin-tab" value="access">{t('adminTabAccess')}</Tabs.Trigger>
+        <Tabs.Trigger className="admin-tab" value="tiers">{t('adminTabTiers')}</Tabs.Trigger>
+        <Tabs.Trigger className="admin-tab" value="research">{t('adminTabResearch')}</Tabs.Trigger>
+        <Tabs.Trigger className="admin-tab" value="runtime">{t('adminTabRuntime')}</Tabs.Trigger>
+      </Tabs.List>
+      <Tabs.Content className="admin-tab-panel" value="access">
+        <div className="admin-grid">
+          <SettingsCard api={api} initial={current} stats={stats.data}/>
+          <WhitelistCard api={api}/>
+        </div>
+        <GrantsCard api={api}/>
+      </Tabs.Content>
+      <Tabs.Content className="admin-tab-panel" value="tiers">
+        <TiersCard api={api} initial={toTierForm(settings.data.items)}/>
+        <FeaturesCard api={api} items={settings.data.items}/>
+      </Tabs.Content>
+      <Tabs.Content className="admin-tab-panel" value="research">
+        <DataHealthCard api={api} queryKey={key('data-health')}/>
+        <WalletResearchCard api={api} queryKey={key('wallet-research')}/>
+      </Tabs.Content>
+      <Tabs.Content className="admin-tab-panel" value="runtime">
+        <IntegrationsCard api={api} queryKey={key('integrations')}/>
+        <RuntimeCard api={api} queryKey={key('runtime')}/>
+      </Tabs.Content>
+    </Tabs.Root>
   </div>;
 }
 
@@ -115,7 +132,8 @@ function SettingsCard({api, initial, stats}: {api: AdminApi; initial: AdminSetti
     mutationFn: () => api.save(toPayload({...form, cap: Number(form.cap)}), reason.trim()),
     onSuccess: async () => {await client.invalidateQueries({queryKey: key('stats')});},
   });
-  const valid = /^\d{1,9}$/.test(form.cap) && reason.trim().length > 0;
+  const urlValid = validWyntraxUrl(form.wyntraxUrl);
+  const valid = /^\d{1,9}$/.test(form.cap) && urlValid && reason.trim().length > 0;
   const set = <K extends keyof typeof form>(name: K, value: (typeof form)[K]) => {save.reset(); setForm(current => ({...current, [name]: value}));};
   return <section className="admin-card" aria-labelledby="admin-settings">
     <h2 id="admin-settings">{t('adminSettings')}</h2>
@@ -124,6 +142,7 @@ function SettingsCard({api, initial, stats}: {api: AdminApi; initial: AdminSetti
       <label className="admin-check"><input type="checkbox" checked={form.enabled} onChange={event => set('enabled', event.target.checked)}/><span><b>{t('adminOpen')}</b><small>{t('adminOpenHelp')}</small></span></label>
       <div className="admin-field"><label htmlFor="admin-cap">{t('adminCap')}</label><input id="admin-cap" inputMode="numeric" value={form.cap} onChange={event => set('cap', event.target.value.trim())} aria-invalid={!/^\d{1,9}$/.test(form.cap)}/></div>
       <div className="admin-field"><label htmlFor="admin-domain">{t('adminDomain')}</label><div className="admin-inline"><input id="admin-domain" value={form.domain} placeholder="http://localhost:4010" onChange={event => set('domain', event.target.value.trim())}/><button type="button" className="research-control" onClick={() => set('domain', window.location.origin)}>{t('adminUseOrigin')}</button></div><small>{t('adminDomainHelp')}</small></div>
+      <div className="admin-field"><label htmlFor="admin-wyntrax-url">{t('adminWyntraxUrl')}</label><input id="admin-wyntrax-url" type="url" value={form.wyntraxUrl} placeholder="https://wyntrax.xyz/memberships/narrax" onChange={event => set('wyntraxUrl', event.target.value.trim())} aria-invalid={!urlValid}/><small>{t('adminWyntraxUrlHelp')}</small></div>
       <p className="admin-hint">{t('featureAccess.enforcement')}</p>
       <label className="admin-check"><input type="checkbox" checked={form.shadow} onChange={event => set('shadow', event.target.checked)}/><span><b>{t('featureAccess.logging')}</b></span></label>
       <div className="admin-field"><label htmlFor="admin-reason">{t('adminReason')}</label><input id="admin-reason" maxLength={300} value={reason} onChange={event => {save.reset(); setReason(event.target.value);}}/></div>
@@ -131,7 +150,7 @@ function SettingsCard({api, initial, stats}: {api: AdminApi; initial: AdminSetti
         <button type="submit" className="research-control admin-primary" disabled={!valid || save.isPending}>{t('adminSave')}</button>
         <button type="button" className="research-control" onClick={() => {save.reset(); setForm(current => ({...current, enabled: true, cap: String(Math.max(Number(current.cap) || 0, 25)), domain: window.location.origin})); setReason(current => current || 'Local testing');}}>{t('adminPreset')}</button>
       </div>
-      {!valid && <p className="admin-hint" role="status">{!reason.trim() ? t('adminHintReason') : t('adminHintCap')}</p>}
+      {!valid && <p className="admin-hint" role="status">{!reason.trim() ? t('adminHintReason') : !/^\d{1,9}$/.test(form.cap) ? t('adminHintCap') : t('adminErrUrl')}</p>}
       {save.isSuccess && <p role="status" className="admin-ok">{t('adminSaved')}</p>}
       {save.isError && <p role="alert" className="admin-bad">{text(save.error)}</p>}
     </form>
@@ -165,11 +184,11 @@ function UserResult({api, user}: {api: AdminApi; user: {id: string; wallets: {id
   return <div className="admin-user">
     <p className="admin-mono" title={user.id}>{user.id}</p>
     <p><b>{t('adminUserWallets')}</b></p>
-    {user.wallets.length ? <ul className="admin-wallets">{user.wallets.map(wallet => <li key={wallet.id} className="admin-mono" title={wallet.address}>{wallet.address}</li>)}</ul> : <p className="admin-bad" role="status">{t('adminNoWallets')}</p>}
+    {user.wallets.length ? <ul className="admin-wallets">{user.wallets.map(wallet => <li key={wallet.id} className="admin-mono" title={wallet.address}>{wallet.address}</li>)}</ul> : <p className="admin-hint" role="status">{t('adminNoWallets')}</p>}
     <div className="admin-inline">
       <label className="sr-only" htmlFor={`days-${user.id}`}>{t('adminDuration')}</label>
       <select id={`days-${user.id}`} value={days} onChange={event => {grant.reset(); setDays(Number(event.target.value));}}>{DAYS.map(value => <option key={value} value={value}>{t('adminDays', {days: value})}</option>)}</select>
-      <button type="button" className="research-control admin-primary" disabled={!user.wallets.length || !reason.trim() || grant.isPending} onClick={() => grant.mutate()}>{t('adminGrant')}</button>
+      <button type="button" className="research-control admin-primary" disabled={!reason.trim() || grant.isPending} onClick={() => grant.mutate()}>{t('adminGrant')}</button>
     </div>
     <div className="admin-field"><label htmlFor={`reason-${user.id}`}>{t('adminReason')}</label><input id={`reason-${user.id}`} maxLength={300} value={reason} onChange={event => {grant.reset(); setReason(event.target.value);}}/></div>
     {grant.isSuccess && <p role="status" className="admin-ok">{t('adminGranted')}</p>}

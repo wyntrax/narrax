@@ -10,6 +10,7 @@ import {TokensSchema,TokenSchema} from './contracts';
 import {pagePath} from './api';
 import {usePagination} from './pagination';
 import {PageHeading,Section,Metrics,Facts,DataTable,Loading,ResourceError,Locked,Empty,Pager,Stamp,useFormat} from './ui';
+import {InvestigationLink} from '../investigation/link';
 import {MarketWatch} from './market-watch';
 import {isSolanaAddress} from '@narra/shared';
 import {ApiError} from '@/lib/api';
@@ -41,7 +42,8 @@ export function TokenPage({mint}:{mint:string}){
     const token=query.data,m=observedTokenMetrics(token),h=token.holders,r=token.risk,c=token.consensus;
   return <><Link className="research-back" href="/app/tokens">← {t('tokens')}</Link><div className="token-detail-heading"><TokenAvatar symbol={token.symbol} imageUrl={token.imageUrl}/><PageHeading title={`${token.symbol} / ${token.name}`} actions={<button className="research-control" onClick={()=>void query.refetch()} disabled={query.isFetching}>{t('brief.refresh')}</button>}/></div><p className="token-address"><span>{t('mint')}</span> <code>{token.mint}</code></p><Stamp at={m?.at}/>{token.blacklisted&&<div className="research-notice" role="status"><strong>{t('blacklisted')}</strong><p>{t('blacklistBody')}</p></div>}
     <div className="token-trade-cta"><div className="token-trade-cta-copy"><span className="trade-eyebrow">{trade.ctaEyebrow}</span><h2>{trade.ctaTitle}</h2><p>{trade.ctaBody}</p></div><div className="token-trade-cta-actions"><Link className="research-control button-primary" href={`/app/trade?mint=${encodeURIComponent(token.mint)}`}><ArrowDownUp size={16}/>{trade.ctaButton}<ArrowUpRight size={15}/></Link><CopyMint key={token.mint} mint={token.mint}/></div></div><p className="research-notice">{token.observation?t('trench.sourceDetail',{source:token.observation.source,at:f.date(token.observation.at)}):t('trench.historyNote')}{marketState==='stale'&&` · ${t('trench.stale')}`}</p>
-   <section aria-label={t(marketState==='fresh'?'brief.states.fresh':'brief.lastObserved')}>
+    {!token.blacklisted&&<div className="market-links"><InvestigationLink mint={token.mint}/></div>}
+    <section aria-label={t(marketState==='fresh'?'brief.states.fresh':'brief.lastObserved')}>
     {m&&marketState!=='fresh'&&<div className="research-notice" role="status"><strong>{t('brief.lastObserved')}</strong><p>{t('brief.staleDisplay',{at:f.date(m.at)})}</p></div>}
     {!m&&<p className="research-notice" role="status">{t('brief.marketMissing')}</p>}
     <Metrics items={[{label:t('price'),value:f.usd(m?.priceUsd)},{label:t(token.observation?.marketCapIsFdv?'trench.fdv':'marketCap'),value:f.usd(m?.marketCapUsd)},{label:t('liquidity'),value:f.usd(m?.liquidityUsd)},{label:t('volume'),value:f.usd(m?.volume24hUsd)}]}/>
@@ -54,6 +56,6 @@ export function TokenPage({mint}:{mint:string}){
   <Section title={t('priceEvents')}><TokenPricePanel token={token}/></Section>
    <details id="token-history" className="research-history"><summary>{t('trench.historicalModels')}</summary><p className="research-notice">{t('trench.historyNote')}</p><div className="research-columns"><Section title={t('holders')}><Facts items={[{label:t('holders'),value:f.number(h?.holders,0)},{label:t('top10'),value:f.number(h?.top10Pct)},{label:t('devHolding'),value:f.number(h?.devHoldingPct)},{label:t('smartHolders'),value:f.number(h?.smartWalletHolders,0)}]}/><Stamp at={h?.at}/></Section>
  <Section title={t('riskFlags')}><Facts items={[{label:t('risk'),value:f.number(r?.riskScore)}]}/>{!r?<p>{t('unavailable')}</p>:r.flags.length?<ul>{r.flags.map((flag,i)=><li key={i}>{flag}</li>)}</ul>:<p>{t('noFlags')}</p>}<Stamp at={r?.at}/></Section></div>
- <Section title={t('consensus')}><Metrics items={[{label:t('score'),value:f.number(c?.score)},{label:t('walletCount'),value:f.number(c?.walletCount,0)},{label:t('entities'),value:f.number(c?.independentEntities,0)},{label:t('leaders'),value:f.number(c?.leaderCount,0)},{label:t('netFlow'),value:f.number(c?.netFlowSol)},{label:t('concentration'),value:f.number(c?.timingConcentration)}]}/></Section>
+ <Section title={t('consensus')}>{c?<Metrics items={[{label:t('score'),value:f.number(c.score)},{label:t('walletCount'),value:f.number(c.walletCount,0)},{label:t('entities'),value:f.number(c.independentEntities,0)},{label:t('leaders'),value:f.number(c.leaderCount,0)},{label:t('netFlow'),value:f.number(c.netFlowSol)},{label:t('concentration'),value:f.number(c.timingConcentration)}]}/>:<p className="research-note">{t('consensusUnavailable')}</p>}</Section>
    </details><div id="token-narratives"><Section title={t('relatedNarratives')}>{token.narratives.length?<DataTable caption={t('relatedNarratives')} headers={[t('name'),t('stage'),t('relation'),t('og')]} rows={token.narratives.map(n=>({key:n.slug,cells:[<Link key="name" href={`/app/narratives/${encodeURIComponent(n.slug)}`}>{n.name}</Link>,t(`stages.${n.stage}`),n.relation,f.number(n.ogScore)]}))}/>:<Empty body={t('brief.narrativesMissing')}/>}<p className="research-note">{t('ogNote')}</p></Section></div></>;
 }

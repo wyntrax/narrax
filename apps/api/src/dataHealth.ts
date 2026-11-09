@@ -8,7 +8,7 @@ const Receipt=z.object({at:z.string().datetime(),items:z.number().int().positive
 const Sync=z.object({at:z.string().datetime(),action:z.string(),webhookActive:z.boolean().nullable(),desired:z.number().int().nonnegative(),error:z.string().optional()});
 const Progress=z.object({checkedAt:z.string().datetime(),closedTrades:z.number().nonnegative(),observedTrades:z.number().nonnegative(),status:z.enum(['READY','INSUFFICIENT_HISTORY'])});
 export interface HealthPorts {queueCounts?:()=>Promise<Record<string,QueueCounts>>;queueHealth?:()=>Promise<Record<string,QueueHealth>>;marketDataEnabled?:boolean;webhookConfigured?:boolean;aiProviderConfigured?:boolean}
-const QUEUES=['wallet-events','wallet-sync','wallet-intelligence','wallet-discovery','market-data','token-resolution','ai-analysis','narrative-ingestion'];
+const QUEUES=['wallet-events','wallet-sync','wallet-intelligence','wallet-discovery','market-data','holder-refresh','token-resolution','ai-analysis','narrative-ingestion'];
 const SCAN_LIMIT=2000;
 // A warning to inspect delivery, not proof of failure: tracked wallets can be quiet.
 const WEBHOOK_RECEIPT_STALE_SECONDS=60*60;

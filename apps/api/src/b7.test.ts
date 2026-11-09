@@ -61,6 +61,7 @@ describe.skipIf(!up)('B7 API routes (needs Postgres)', () => {
   }
 
   const createdAlerts: string[] = [];
+  const historyDiagnosticKeys:string[]=[];
   const mkAlert = async (kind: string, priority: 'INFO' | 'WATCH' | 'IMPORTANT' | 'CRITICAL', userId: string | null = null, createdAt = new Date()) => {
     const a = await db.alert.create({ data: { kind, priority, title: `${kind} title`, body: 'b', userId, createdAt, dispatchedAt: new Date() } });
     createdAlerts.push(a.id);
@@ -81,6 +82,7 @@ describe.skipIf(!up)('B7 API routes (needs Postgres)', () => {
   });
 
   afterAll(async () => {
+    await db.systemSetting.deleteMany({where:{key:{in:historyDiagnosticKeys}}});
     await clearTestPro(db,[aliceId,bobId]);
     const uids = [aliceId, bobId];
     await db.notification.deleteMany({ where: { OR: [{ userId: { in: uids } }, { alertId: { in: createdAlerts } }] } });
@@ -246,6 +248,15 @@ describe.skipIf(!up)('B7 API routes (needs Postgres)', () => {
       expect((await call('GET', '/v1/overview', bob)).body.me.unreadAlerts).toBe(2);
     });
 
+    it('shows up to ten narratives while heat still uses only the strongest five',async()=>{
+      for(let i=0;i<7;i++)await db.narrative.create({data:{name:`Scope ${i} ${tag}`,slug:`scope-${i}-${tag}`,stage:'SEED',score:98-i}});
+      const expected=await db.narrative.findMany({where:{stage:{not:'DEAD'}},orderBy:[{score:'desc'},{id:'asc'}],take:10});
+      const r=await call('GET','/v1/overview');
+      expect(r.body.strip.topNarratives.map((n:{id:string})=>n.id)).toEqual(expected.map(n=>n.id));
+      expect(r.body.strip.topNarratives.length).toBeGreaterThan(5);
+      expect(r.body.bar.narrativeHeat).toBe(Math.round(expected.slice(0,5).reduce((s,n)=>s+n.score,0)/5));
+    });
+
     it('finds the rotation from falling to rising narratives, and says what it could not compare', async () => {
       const r = await call('GET', '/v1/narratives/rotation?window=24h');
       expect(r.status).toBe(200);
@@ -288,10 +299,13 @@ describe.skipIf(!up)('B7 API routes (needs Postgres)', () => {
       await db.narrativeTokenRelation.create({ data: { narrativeId: nar.id, tokenId: tokB, relation: 'SUSPICIOUS', ogScore: 10, matchScore: 80, confidence: 0.8 } }); // suspicious links are not narrative history
       const trade = (id: string, tokenId: string, side: 'BUY' | 'SELL', sol: number, ago: number, sig: string) => db.walletTrade.create({ data: { walletId: id, tokenId, side, amountSol: sol, tokenAmount: 1, signature: `${sig}${tag}`, at: new Date(base - ago) } });
       await trade(w.id, tokA, 'BUY', 2, 5000, 'sa'); await trade(w.id, tokA, 'SELL', 3.5, 3000, 'sb'); await trade(w.id, tokB, 'BUY', 1, 1000, 'sc');
+      const attemptKey=`wallet.historyAttempt.${w.id}`;historyDiagnosticKeys.push(attemptKey);
+      await db.systemSetting.create({data:{key:attemptKey,value:{version:1,status:'FAILED',mode:'RESUME',lastAttemptAt:new Date(base).toISOString(),lastSuccessAt:new Date(base-3600000).toISOString(),errorCode:'RATE_LIMITED',httpStatus:429,consecutiveFailures:1,attempts:2,pagesRead:0}}});
 
       const r = await call('GET', `/v1/wallets/${wAddr}`);
       expect(r.status).toBe(200);
       expect(r.body).toMatchObject({ address: wAddr, label: 'Alpha one', profile: { score: 92, style: 'EARLY_MOMENTUM' } });
+      expect(r.body.historyAttempt).toMatchObject({status:'FAILED',mode:'RESUME',errorCode:'RATE_LIMITED',httpStatus:429,attempts:2});
       expect(r.body.performance['30D']).toMatchObject({ winRate: 0.7, pnlSol: 12.5 }); // the newest 30D reading
       expect(r.body.performance['7D']).toMatchObject({ winRate: 0.5 });
       expect(r.body.cluster).toMatchObject({ confidence: 'MEDIUM', size: 2, members: [{ address: mate.address }] });

@@ -30,7 +30,7 @@ const screens=[
  {name:'portfolio',path:'/app/portfolio'},
  {name:'analytics',path:'/app/analytics'},
  {name:'wallet trades',path:`/app/smart-money/${ADDRESS}`},
- {name:'research flows',path:'/app/smart-money',reveal:'Token flows'},
+  {name:'research flows',path:'/app/smart-money',tab:'Token flows'},
  {name:'alerts',path:'/app/alerts'},
 ];
 for(const {width,theme} of [{width:1440,theme:'dark'},{width:390,theme:'light'}])for(const screen of screens)test(`shared token artwork: ${screen.name} ${width}`,async({page,baseURL})=>{
@@ -39,7 +39,8 @@ for(const {width,theme} of [{width:1440,theme:'dark'},{width:390,theme:'light'}]
  await page.context().addCookies([{name:'NARRA_THEME',value:theme,url:baseURL!}]);
  await page.route('https://cdn.dexscreener.com/**',route=>route.request().url()===artwork?route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36"><rect width="36" height="36" fill="#2dd4bf"/></svg>'}):route.fulfill({status:404,body:''}));
  await researchApi(page,path=>path in data?{body:data[path]}:undefined);
- await enterWorkspace(page,screen.path);
+  await enterWorkspace(page,screen.path);
+  if('tab' in screen)await page.getByRole('tab',{name:screen.tab,exact:true}).click();
  if(screen.reveal){const control=page.getByRole('button',{name:screen.reveal,exact:true});if(await control.count())await control.click();else await page.locator('summary').filter({hasText:screen.reveal}).click();}
  const good=page.locator('.token-identity').filter({has:page.locator('.token-identity-symbol',{hasText:'ROBOT'})}).first();
  await good.scrollIntoViewIfNeeded();

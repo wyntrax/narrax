@@ -12,9 +12,10 @@ import {TradeabilityQuoteSchema,TRADEABILITY_MAX_AGE_MS,type TradeabilityQuote} 
  * on a validated predictive model. Unknown critical evidence is `UNKNOWN`, never `PASS`. Only a complete `PASS` may
  * be published when enforcement is enabled.
  *
- * Optional RugCheck enrichment supplies some reported holder/LP facts. Bundle/sniper/insider supply, unique buyers,
- * and deployer history may remain unavailable. Jupiter buy quotes supply bounded price-impact evidence. Missing facts stay `UNKNOWN`: the radar must not call a
- * token safe because a field is absent, and retrieval freshness is not proof of upstream observation freshness.
+ * Optional RugCheck enrichment supplies some reported holder/LP facts and a reported insider-network holding share.
+ * Bundle and sniper supply, unique buyers, and deployer history may remain unavailable. Jupiter buy quotes supply
+ * bounded price-impact evidence. Missing facts stay `UNKNOWN`: the radar must not call a token safe because a field
+ * is absent, and retrieval freshness is not proof of upstream observation freshness.
  */
 
 export type RadarSafetyMode = 'off' | 'shadow' | 'enforce';
@@ -267,16 +268,38 @@ export function evaluateRadarSafety(i: RadarSafetyFacts, now: Date = new Date())
     checks.push(check('LP_CONTROL', 'CRITICAL', 'PASS', i.lpBurnedPct ?? (i.lpLocked ? 'locked' : null), `burned >= ${policy.minLpBurnedPct}% or locked`));
   }
 
-  if (!finite(i.bundlePct) || !finite(i.sniperPct) || !finite(i.insiderPct)) {
-    checks.push(check('BUNDLE_SNIPER_INSIDER', 'CRITICAL', 'UNKNOWN', null, `<= ${policy.maxBundleSniperInsiderPct}% combined`, 'bundle, sniper or insider supply evidence is not available'));
+  const supplyParts = [
+    ['bundle', i.bundlePct],
+    ['sniper', i.sniperPct],
+    ['insider', i.insiderPct],
+  ] as const;
+  const missingSupply = supplyParts.filter(([, value]) => !finite(value)).map(([name]) => name);
+  const knownSupply = supplyParts.reduce((sum, [, value]) => finite(value) ? sum + value : sum, 0);
+  const hasKnownSupply = supplyParts.some(([, value]) => finite(value));
+  const supplyThreshold = `<= ${policy.maxBundleSniperInsiderPct}% combined`;
+  const knownSupplyDetail = supplyParts
+    .flatMap(([name, value]) => finite(value) ? [`${name} ${value.toFixed(2)}%`] : [])
+    .join(', ');
+  if (missingSupply.length) {
+    const missing = missingSupply.length === 3
+      ? 'bundle, sniper and insider supply evidence is not available'
+      : `${missingSupply.join(' and ')} supply evidence is not available`;
+    const detail = [missing, knownSupplyDetail ? `known ${knownSupplyDetail}` : null].filter(Boolean).join('; ');
+    // A known component already over the combined cap is conclusive even when the other components are unknown.
+    if (knownSupply > policy.maxBundleSniperInsiderPct) {
+      checks.push(check('BUNDLE_SNIPER_INSIDER', 'CRITICAL', 'BLOCK', knownSupply, supplyThreshold,
+        `${detail}; known evidence already exceeds the threshold`));
+    } else {
+      checks.push(check('BUNDLE_SNIPER_INSIDER', 'CRITICAL', 'UNKNOWN', hasKnownSupply ? knownSupply : null, supplyThreshold, detail));
+    }
   } else {
-    const combined = i.bundlePct + i.sniperPct + i.insiderPct;
+    const combined = knownSupply;
     checks.push(check(
       'BUNDLE_SNIPER_INSIDER',
       'CRITICAL',
       combined > policy.maxBundleSniperInsiderPct ? 'BLOCK' : 'PASS',
       combined,
-      `<= ${policy.maxBundleSniperInsiderPct}% combined`,
+      supplyThreshold,
     ));
   }
 

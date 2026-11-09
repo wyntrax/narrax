@@ -17,13 +17,22 @@ function fixture(){
 it('returns separate stored observations with accurate age and missing states in bounded reads',async()=>{
  const f=fixture(),view=(await latestEvidenceViews(f.db,[token,token],now)).get(token.id)!;
  expect(view.market).toMatchObject({state:'FRESH',source:'dexscreener',data:{priceUsd:0.01}});
- expect(view.holders).toMatchObject({state:'STALE',data:{devHoldingPct:null}});
+  expect(view.holders).toMatchObject({state:'UNVERIFIED',data:{devHoldingPct:null}});
  expect(view.risk).toMatchObject({state:'MISSING',data:null});
  expect(view.rugcheck).toMatchObject({state:'MISSING',data:null});
  expect(view.tradeability).toMatchObject({state:'FRESH',data:{direction:'BUY',ticketUsdc:50}});
  expect(f.findTokens).toHaveBeenCalledTimes(1);expect(f.findSettings).toHaveBeenCalledTimes(1);
  expect(f.findSettings.mock.calls[0]).toBeDefined();
  expect(view).not.toHaveProperty('verdict');
+});
+it('uses provider holder observation time instead of a newer retrieval or legacy row timestamp',async()=>{
+ const f=fixture(),sourceAt=new Date(+now-24*3600000).toISOString();
+ f.row.holders[0]!.at=now;
+ f.values.set('research.holders.token',{mint:token.mint,source:'geckoterminal',sourceAt,retrievedAt:now.toISOString(),holders:5919,top10Pct:88.83,devHoldingPct:null});
+ const view=(await latestEvidenceViews(f.db,[token],now)).get(token.id)!;
+ expect(view.holders).toMatchObject({state:'STALE',at:sourceAt,retrievedAt:now.toISOString(),source:'geckoterminal',data:{holders:5919}});
+ f.values.set('research.holders.token',{...f.values.get('research.holders.token') as object,sourceAt:null});
+ expect((await latestEvidenceViews(f.db,[token],now)).get(token.id)?.holders).toMatchObject({state:'UNVERIFIED',at:null});
 });
 it('never credits mismatched, future or legacy evidence as fresh',async()=>{
  const f=fixture();

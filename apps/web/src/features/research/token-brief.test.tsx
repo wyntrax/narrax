@@ -41,6 +41,16 @@ it('requires fresh matched evidence for current indicators',()=>{
  expect(tokenMarketState({...token,observation:{...token.observation!,stale:true}},now)).toBe('stale');
  expect(tokenMarketState({...token,metrics:{...token.metrics!,at:'2026-10-20T00:00:00.000Z'}},now)).toBe('stale');
 });
+it('explains when the provider omits the 1h change despite a fresh snapshot',()=>{
+ view(<TokenBrief token={{...token,observation:{...token.observation!,priceChange1hPct:null}}} state="fresh"/>);
+ expect(screen.getByText(messages.brief.changeUnavailable)).toBeVisible();
+ expect(screen.queryByText(messages.brief.needsFresh)).toBeNull();
+});
+it('explains missing consensus when no recent tracked-wallet reading exists',()=>{
+ view(<TokenPage mint={mint}/>);
+ fireEvent.click(screen.getByText(messages.trench.historicalModels));
+ expect(screen.getByText(messages.consensusUnavailable)).toBeVisible();
+});
 it('preserves measured zero, but never divides by zero or substitutes missing evidence',()=>{
  const {rerender}=view(<TokenBrief token={token} state="fresh"/>);
  expect(screen.getByText('0%')).toBeVisible();expect(screen.getByText('0×')).toBeVisible();expect(screen.getByText(messages.brief.holdersMissing)).toBeVisible();

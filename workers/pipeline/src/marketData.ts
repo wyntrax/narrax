@@ -1,11 +1,15 @@
 import type { Prisma, PrismaClient } from '@narra/database';
-import { sanitizeUntrusted } from '@narra/shared';
+import { sanitizeUntrusted, LATEST_EVIDENCE_MAX_AGE_MS } from '@narra/shared';
 import { MarketDataError, WSOL_MINT, tokenRisk, type LaunchSource, type MarketQuoteSource, type MarketSnapshot, type TokenInfo, type TokenInfoSource, type SnapshotOmissionReason } from '@narra/market-data';
 import type { DeveloperHoldingSource } from './developerHoldings';
 import {refreshTokenMetadata,type MetadataSource} from './tokenMetadata';
 import {discoveryPriceCandidates} from './walletDiscovery';
 import { storeMarketSnapshot } from './marketSnapshot';
+import { SOL_HISTORY_PREFIX } from './walletResearchEvidence';
 import { COVERAGE_LIMITS, readSocialPriority, saveResearchDiagnostics, SOCIAL_INFO_CURSOR_KEY } from './researchDiagnostics';
+import {refreshHolderFallback,type HolderFailureReasons} from './holderFallback';
+import type {HolderRpcSource} from './holderRpc';
+import {EARLY_RULES} from '@narra/token-intel';
 
 /** Starting values. None is validated against outcomes, and each should become an admin-editable setting. */
 export const MARKET_DATA_LIMITS = {
@@ -18,10 +22,26 @@ export const MARKET_DATA_LIMITS = {
   maxEarlyRadarTokensPerRun: 100,
   /** Rotating coverage for completed wallet-discovery scans, within the same total cap. */
   maxDiscoveryTokensPerRun: 25,
+  /** Never-priced narrative candidates: newest first, small enough not to starve priced tokens. */
+  maxUnpricedTokensPerRun: 10,
+  /** Placeholder tokens with no resolved symbol: bounded retries for metadata backfill. */
+  maxUnknownTokensPerRun: 5,
+  /** Recent tracked-wallet tokens rotate independently of the general backlog. */
+  maxWalletTokensPerRun: 10,
+  /** Bounded lane for active monitors, emerging-narrative tokens, and recently refreshed tokens. */
+  maxFocusTokensPerRun: 25,
+  /** Only the strongest active narratives feed the focus lane; this keeps the set small enough to refresh often. */
+  maxFocusNarratives: 8,
+  focusNarrativeWindowMs: 24 * 3_600_000,
+  /** Do not spend a focus slot on a token that already satisfies the 15-minute price gate. */
+  focusRefreshAfterMs: 15 * 60_000,
   /** Slow-source calls per run. At the 15 s GeckoTerminal pace this covers about 4.5 min, inside the 5-minute schedule. */
   maxInfoCallsPerRun: 18,
   /** How long a token-info lookup (holders, authorities, risk) is reused. */
   infoRefreshMs: 30 * 60_000,
+  /** Two completed dead-pool reads (no matching pair or unusable liquidity) trigger this backoff. */
+  quoteFailureLimit: 2,
+  quoteQuarantineMs: 6 * 3_600_000,
   /** A token with a price row this recent stays in the refresh set. */
   activeWindowMs: 24 * 3_600_000,
   quoteBatch: 30,
@@ -32,8 +52,9 @@ export const DISCOVERY_PRICE_CURSOR_KEY = 'market.walletDiscoveryPriceCursor';
 export const GENERAL_PRICE_CURSOR_KEY = 'market.generalPriceCursor';
 export const INFO_CURSOR_KEY = 'market.infoCursor';
 export const SOCIAL_PRICE_CURSOR_KEY = 'market.socialPriceCursor';
+export const WALLET_PRICE_CURSOR_KEY = 'market.walletPriceCursor';
 
-export type PriceCoverageLane = 'outcomes' | 'discovery' | 'social' | 'launches' | 'unpriced' | 'general';
+export type PriceCoverageLane = 'outcomes' | 'discovery' | 'wallets' | 'social' | 'launches' | 'focus' | 'unpriced' | 'general';
 export interface PriceCoverageCounts {
   selected: number;
   written: number;
@@ -43,6 +64,7 @@ export interface PriceCoverageCounts {
 }
 
 export interface MarketDataDeps {
+  holderFallback?: HolderRpcSource | null;
   metadata?: MetadataSource | null;
   developerHoldings?: DeveloperHoldingSource | null;
   quotes: MarketQuoteSource;
@@ -70,6 +92,24 @@ export interface MarketDataSummary {
   infoCalls: number;
   infoUnavailable: number;
   holderRowsWritten: number;
+  holderFallbackAttempts: number;
+  holderFallbackWritten: number;
+  holderFallbackUnknown: number;
+  holderFallbackThrottled: number;
+  /** Price-lane candidates offered to the market-run fallback (the radar cohort is excluded). */
+  holderFallbackCandidates: number;
+  /** Candidates already inside the 60-minute gate, so no RPC work was needed. */
+  holderFallbackFresh: number;
+  /** Eligible candidates left unrefreshed because the per-run budget or deadline ran out. */
+  holderFallbackDeferred: number;
+  /** 1 when the wall-clock deadline, not the per-run count, stopped the work. */
+  holderFallbackDeadlineHit: number;
+  /** Tokens retried on the fallback endpoint after a provider-level primary rejection. */
+  holderFallbackFailovers: number;
+  /** ISO time the primary endpoint is skipped until, or null when it is in use. */
+  holderFallbackPrimaryCooldownUntil: string | null;
+  /** Per-reason failure counts for attempts that produced no fresh observation. */
+  holderFallbackReasons: HolderFailureReasons;
   riskRowsWritten: number;
   solUsd: number | null;
   errors: string[];
@@ -90,7 +130,7 @@ export async function refreshMarketData(
 ): Promise<MarketDataSummary> {
   const L = MARKET_DATA_LIMITS;
   const emptyCoverage = (): PriceCoverageCounts => ({ selected: 0, written: 0, unavailable: 0, failed: 0, notRequested: 0 });
-  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, priceCoverage: { outcomes: emptyCoverage(), discovery: emptyCoverage(), social: emptyCoverage(), launches: emptyCoverage(), unpriced: emptyCoverage(), general: emptyCoverage() }, priceOmissions: {}, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, riskRowsWritten: 0, solUsd: null, errors: [] };
+  const out: MarketDataSummary = { launchesSeen: 0, tokensCreated: 0, tokensConsidered: 0, launchTokensSelected: 0, generalTokensSelected: 0, socialTokensSelected: 0, socialInfoCalls: 0, tokensWithPrice: 0, tokensWithoutData: 0, priceCoverage: { outcomes: emptyCoverage(), discovery: emptyCoverage(), wallets: emptyCoverage(), social: emptyCoverage(), launches: emptyCoverage(), focus: emptyCoverage(), unpriced: emptyCoverage(), general: emptyCoverage() }, priceOmissions: {}, metricsWritten: 0, fdvUsedAsMarketCap: 0, infoCalls: 0, infoUnavailable: 0, holderRowsWritten: 0, holderFallbackAttempts:0,holderFallbackWritten:0,holderFallbackUnknown:0,holderFallbackThrottled:0,holderFallbackCandidates:0,holderFallbackFresh:0,holderFallbackDeferred:0,holderFallbackDeadlineHit:0,holderFallbackFailovers:0,holderFallbackPrimaryCooldownUntil:null,holderFallbackReasons:{RATE_LIMITED:0,UNAVAILABLE:0,INVALID_OR_INCOMPLETE:0,STALE:0,TOO_LARGE:0},riskRowsWritten: 0, solUsd: null, errors: [] };
   if(deps.metadata){try{await refreshTokenMetadata(db,deps.metadata,now);}catch(e){out.errors.push(errText('token metadata',e));}}
 
   // 1. SOL/USD, kept in one settings row so every later consumer reads the same number.
@@ -103,6 +143,11 @@ export async function refreshMarketData(
     if (solPriceUsd != null && Number.isFinite(solPriceUsd) && solPriceUsd > 0) {
       const value = { priceUsd: solPriceUsd, at: now.toISOString(), source: deps.quotes.name };
       await db.systemSetting.upsert({ where: { key: SOL_PRICE_KEY }, create: { key: SOL_PRICE_KEY, value }, update: { value } });
+      // Keep timestamped observations for delayed swaps and 30-day history backfills.
+      // A later reference price must never be applied to an earlier trade.
+      const key = `${SOL_HISTORY_PREFIX}${value.at}`;
+      await db.systemSetting.upsert({ where: { key }, create: { key, value }, update: {} });
+      await db.systemSetting.deleteMany({ where: { key: { startsWith: SOL_HISTORY_PREFIX, lt: `${SOL_HISTORY_PREFIX}${new Date(+now-35*86_400_000).toISOString()}` } } });
       out.solUsd = solPriceUsd;
     } else out.errors.push('sol price: no usable data');
   } catch (e) { out.errors.push(errText('sol price', e)); }
@@ -138,7 +183,7 @@ export async function refreshMarketData(
   // candidates bounded first-observation slots, then rotate the general backlog.
   // The internal override is used by isolated integration fixtures; production uses the fixed 150-token budget.
   const cap = opts.maxTokens ?? L.maxTokensPerRun;
-  const tokenSelect = { id: true, mint: true, symbol: true, createdOnChainAt: true, risk: { orderBy: { at: 'desc' }, take: 1, select: { at: true } } } satisfies Prisma.TokenSelect;
+  const tokenSelect = { id: true, mint: true, symbol: true, createdOnChainAt: true, marketQuoteFailures: true, marketQuarantineUntil: true, marketPriorityUntil: true, risk: { orderBy: { at: 'desc' }, take: 1, select: { at: true } } } satisfies Prisma.TokenSelect;
   const waiting = await db.earlyRadarMeasurement.findMany({ where: { status: 'PENDING' }, orderBy: [{ nextCheckAt: 'asc' }, { id: 'asc' }], take: 500, select: { outcome: { select: { tokenId: true } } } });
   const priorityIds = [...new Set(waiting.map((w) => w.outcome.tokenId))].slice(0, Math.min(L.maxEarlyRadarTokensPerRun, cap));
   if (process.env.SMART_MONEY_RESEARCH_ENABLED === 'true' && priorityIds.length < cap) {
@@ -157,6 +202,13 @@ export async function refreshMarketData(
   const discoveryById = new Map(discoveryRows.map(t => [t.id, t]));
   const discovery = discoveryIds.flatMap(id => { const token = discoveryById.get(id); return token ? [token] : []; });
   const priorIds = [...priority, ...discovery].map(t => t.id);
+  const walletBudget = Math.min(L.maxWalletTokensPerRun, Math.floor((cap-priorIds.length)/2));
+  const walletCursor = await readCursor(db,WALLET_PRICE_CURSOR_KEY);
+  const walletWhere: Prisma.TokenWhereInput = { blacklisted:false, mint:{not:WSOL_MINT}, id:{notIn:priorIds},
+    walletTrades:{some:{at:{gte:new Date(+now-L.activeWindowMs),lte:now},wallet:{active:true,researchReview:{not:'REJECTED'}}}} };
+  const wallets = walletBudget ? await db.token.findMany({where:{AND:[walletWhere,...(walletCursor?[{id:{gt:walletCursor}}]:[])]},orderBy:{id:'asc'},take:walletBudget,select:tokenSelect}) : [];
+  if (walletCursor && wallets.length<walletBudget) wallets.push(...await db.token.findMany({where:{AND:[walletWhere,{id:{lte:walletCursor}}]},orderBy:{id:'asc'},take:walletBudget-wallets.length,select:tokenSelect}));
+  priorIds.push(...wallets.map(t=>t.id));
   const socialIds = await readSocialPriority(db, now);
   const socialCursor = await readCursor(db, SOCIAL_PRICE_CURSOR_KEY);
   const sortedSocialIds = [...socialIds].sort();
@@ -174,18 +226,89 @@ export async function refreshMarketData(
   }) : [];
   out.launchTokensSelected = launches.length;
   const reservedIds = [...priorIds, ...launches.map(t => t.id)];
+  const quoteEligible: Prisma.TokenWhereInput = { OR: [{ marketQuarantineUntil: null }, { marketQuarantineUntil: { lte: now } }] };
   // A token with no price row at all is invisible to every screen, and the id-ordered cap below would take older ids
   // first, so a freshly linked candidate could age out of the set before its first reading. Give unpriced narrative
-  // candidates a first price ahead of the general set, newest token id first. Reserve room for established tokens too.
-  const unpriced = reservedIds.length >= cap ? [] : await db.token.findMany({
-    where: { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: reservedIds }, metrics: { none: {} }, narratives: { some: {} } },
-    orderBy: { id: 'desc' }, take: Math.ceil((cap - reservedIds.length) / 2), select: tokenSelect,
-  });
-  const takenIds = [...reservedIds, ...unpriced.map(t => t.id)];
+  // candidates a first price ahead of the general set, newest token id first. The budget is deliberately small: most
+  // never-priced narrative tokens have no DEX pair and would otherwise consume half of every run without a write.
+  const unpricedBudget = reservedIds.length >= cap ? 0 : Math.min(L.maxUnpricedTokensPerRun, Math.ceil((cap - reservedIds.length) / 2));
+  const unpriced = unpricedBudget ? await db.token.findMany({
+    where: { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: reservedIds }, metrics: { none: {} }, narratives: { some: {} }, AND: [quoteEligible] },
+    orderBy: { id: 'desc' }, take: unpricedBudget, select: tokenSelect,
+  }) : [];
+  const takenBeforeFocus = [...reservedIds, ...unpriced.map(t => t.id)];
+
+  // A bounded focus lane protects explicit user interest and the strongest live narratives
+  // from the general backlog. It is scheduling only: no evidence or admission rule changes.
+  const focusBudget = Math.min(L.maxFocusTokensPerRun, Math.max(0, cap - takenBeforeFocus.length));
+  const focusFreshCutoff = new Date(now.getTime() - L.focusRefreshAfterMs);
+  const focus: typeof priority = [];
+  const focusIds = new Set<string>();
+  const addFocus = (rows: typeof priority) => {
+    for (const token of rows) {
+      if (focus.length >= focusBudget) return;
+      if (focusIds.has(token.id)) continue;
+      focusIds.add(token.id);
+      focus.push(token);
+    }
+  };
+  if (focusBudget) {
+    addFocus(await db.token.findMany({
+      where: { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenBeforeFocus }, marketPriorityUntil: { gt: now }, metrics: { none: { at: { gte: focusFreshCutoff } } }, AND: [quoteEligible] },
+      orderBy: { marketPriorityUntil: 'desc' }, take: focusBudget, select: tokenSelect,
+    }));
+    if (focus.length < focusBudget) {
+      const monitors = await db.researchMonitor.findMany({
+        where: { active: true, OR: [{ mint: { not: null } }, { narrativeSlug: { not: null } }] },
+        orderBy: { updatedAt: 'desc' }, take: 500, select: { mint: true, narrativeSlug: true },
+      });
+      const watchedMints = [...new Set(monitors.map(m => m.mint).filter((m): m is string => !!m))];
+      const watchedSlugs = [...new Set(monitors.map(m => m.narrativeSlug).filter((s): s is string => !!s))];
+      if (watchedMints.length || watchedSlugs.length) {
+        addFocus(await db.token.findMany({
+          where: {
+            blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: [...takenBeforeFocus, ...focusIds] }, metrics: { none: { at: { gte: focusFreshCutoff } } },
+            AND: [quoteEligible, { OR: [
+              ...(watchedMints.length ? [{ mint: { in: watchedMints } }] : []),
+              ...(watchedSlugs.length ? [{ narratives: { some: { narrative: { slug: { in: watchedSlugs } } } } }] : []),
+            ] }],
+          },
+          orderBy: { id: 'desc' }, take: focusBudget - focus.length, select: tokenSelect,
+        }));
+      }
+    }
+    if (focus.length < focusBudget) {
+      const topNarratives = await db.narrative.findMany({
+        where: { stage: { in: ['EMERGING', 'ACCELERATING'] }, updatedAt: { gte: new Date(now.getTime() - L.focusNarrativeWindowMs) } },
+        orderBy: [{ score: 'desc' }, { velocity: 'desc' }], take: L.maxFocusNarratives, select: { id: true },
+      });
+      if (topNarratives.length) {
+        const relations = await db.narrativeTokenRelation.findMany({
+          where: {
+            narrativeId: { in: topNarratives.map(n => n.id) },
+            token: { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: [...takenBeforeFocus, ...focusIds] }, metrics: { none: { at: { gte: focusFreshCutoff } } }, AND: [quoteEligible] },
+          },
+          orderBy: [{ ogScore: 'desc' }, { confidence: 'desc' }],
+          take: Math.max(1, (focusBudget - focus.length) * 4),
+          select: { tokenId: true },
+        });
+        const ids = [...new Set(relations.map(r => r.tokenId))].slice(0, focusBudget - focus.length);
+        if (ids.length) {
+          const rows = await db.token.findMany({ where: { id: { in: ids } }, select: tokenSelect });
+          const byId = new Map(rows.map(t => [t.id, t]));
+          addFocus(ids.flatMap(id => { const t = byId.get(id); return t ? [t] : []; }));
+        }
+      }
+    }
+  }
+  const takenIds = [...takenBeforeFocus, ...focus.map(t => t.id)];
+  // Priced/active tokens rotate by id. Placeholder tokens with no resolved symbol are a separate, tiny lane:
+  // production holds tens of thousands of them and almost none has a DEX pair, so an unbounded UNKNOWN branch
+  // spends the general budget on NO_MATCHING_PAIR. Keep a few retries for metadata backfill.
   const generalWhere: Prisma.TokenWhereInput = {
-      blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenIds },
-      OR: [
-         { symbol: 'UNKNOWN' }, { mint: { in: launchMints } },
+      blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenIds }, symbol: { not: 'UNKNOWN' },
+      AND: [quoteEligible, { OR: [
+         { mint: { in: launchMints } },
          // Retry young pools even when the first quote was unavailable and the
          // next launch page no longer contains them. Age here is a pool proxy.
          { createdOnChainAt: { gte: new Date(now.getTime() - L.activeWindowMs), lte: now } },
@@ -193,20 +316,29 @@ export async function refreshMarketData(
          // Resolving a wallet token's name must not remove it from market-price collection.
          { walletTrades: { some: { at: { gte: new Date(now.getTime() - L.activeWindowMs) } } } },
         { narratives: { some: {} } }, { positions: { some: {} } },
-      ],
+      ] }],
     };
+  const unknownWhere: Prisma.TokenWhereInput = { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenIds }, symbol: 'UNKNOWN' };
   const generalCursor = await readCursor(db, GENERAL_PRICE_CURSOR_KEY);
   const remaining = cap - takenIds.length;
-  const rest = remaining <= 0 ? [] : await db.token.findMany({
+  const unknownBudget = Math.min(L.maxUnknownTokensPerRun, remaining);
+  // Newest placeholders first: the recent ones are the plausible metadata backfills. Ancient UNKNOWN tokens
+  // never rotate into this lane, so they cannot crowd out priced tokens again.
+  const unknown = unknownBudget > 0 ? await db.token.findMany({
+    where: unknownWhere, orderBy: { id: 'desc' }, take: unknownBudget, select: tokenSelect,
+  }) : [];
+  const knownRemaining = remaining - unknown.length;
+  const rest = knownRemaining <= 0 ? [] : await db.token.findMany({
     where: { AND: [generalWhere, ...(generalCursor ? [{ id: { gt: generalCursor } }] : [])] },
-    orderBy: { id: 'asc' }, take: remaining, select: tokenSelect,
+    orderBy: { id: 'asc' }, take: knownRemaining, select: tokenSelect,
   });
-  if (generalCursor && rest.length < remaining) rest.push(...await db.token.findMany({
+  if (generalCursor && rest.length < knownRemaining) rest.push(...await db.token.findMany({
     where: { AND: [generalWhere, { id: { lte: generalCursor } }] },
-    orderBy: { id: 'asc' }, take: remaining - rest.length, select: tokenSelect,
+    orderBy: { id: 'asc' }, take: knownRemaining - rest.length, select: tokenSelect,
   }));
-  out.generalTokensSelected = rest.length;
-  const tokens = [...priority, ...discovery, ...social, ...launches, ...unpriced, ...rest];
+  const generalTokens = [...unknown, ...rest];
+  out.generalTokensSelected = generalTokens.length;
+  const tokens = [...priority, ...discovery, ...wallets, ...social, ...launches, ...unpriced, ...focus, ...generalTokens];
   out.tokensConsidered = tokens.length;
 
   // 4. Prices. One batch failing does not lose the others, and a 429 stops the step.
@@ -234,7 +366,25 @@ export async function refreshMarketData(
     // provider throttling leaves this batch and all unattempted batches in place.
     for (const mint of mints.slice(i, i + L.quoteBatch)) attempted.add(mint);
   }
-  const lanes = { outcomes: priority, discovery, social, launches, unpriced, general: rest };
+  // Dead-pool backoff is scoped to the unpriced/general lanes. Priority sets
+  // (social, launches, outcomes, wallets, discovery) still get their attempt.
+  const DEAD_QUOTE_REASONS = new Set<SnapshotOmissionReason>(['NO_MATCHING_PAIR', 'INVALID_PAIR', 'LIQUIDITY_UNAVAILABLE']);
+  for (const t of [...unpriced, ...generalTokens, ...focus]) {
+    if (snaps.has(t.mint)) {
+      if (t.marketQuoteFailures !== 0 || t.marketQuarantineUntil) {
+        await db.token.update({ where: { id: t.id }, data: { marketQuoteFailures: 0, marketQuarantineUntil: null } });
+      }
+      continue;
+    }
+    if (requests.get(t.mint) !== 'completed') continue;
+    const reason = omissions.get(t.mint);
+    if (!reason || !DEAD_QUOTE_REASONS.has(reason)) continue;
+    const failures = t.marketQuoteFailures + 1;
+    const data: Prisma.TokenUpdateInput = { marketQuoteFailures: failures };
+    if (failures >= L.quoteFailureLimit) data.marketQuarantineUntil = new Date(now.getTime() + L.quoteQuarantineMs);
+    await db.token.update({ where: { id: t.id }, data });
+  }
+  const lanes = { outcomes: priority, discovery, wallets, social, launches, focus, unpriced, general: generalTokens };
   for (const lane of Object.keys(lanes) as PriceCoverageLane[]) {
     const counts = out.priceCoverage[lane];
     counts.selected = lanes[lane].length;
@@ -310,25 +460,53 @@ export async function refreshMarketData(
         } catch (e) { out.errors.push(errText('developer holdings', e)); }
       }
       const pairAgeMinutes = created ? (now.getTime() - created.getTime()) / 60_000 : null;
+      const holderAt = info?.holdersUpdatedAt === undefined ? now : info.holdersUpdatedAt;
+      const holdersFresh = holderAt != null && Number.isFinite(+holderAt) && +holderAt <= +now && +now-+holderAt <= LATEST_EVIDENCE_MAX_AGE_MS.holders;
       const risk = tokenRisk({
-        liquidityUsd: s.liquidityUsd, holders: info?.holders ?? null, top10Pct: info?.top10Pct ?? null, devHoldingPct,
+        liquidityUsd: s.liquidityUsd, holders: holdersFresh ? info?.holders ?? null : null, top10Pct: holdersFresh ? info?.top10Pct ?? null : null, devHoldingPct,
         mintAuthorityActive: info?.mintAuthorityActive ?? null, freezeAuthorityActive: info?.freezeAuthorityActive ?? null,
         isHoneypot: info?.isHoneypot ?? null, pairAgeMinutes,
       });
       if (!info) { out.infoUnavailable++; risk.flags.push('INFO_UNAVAILABLE'); }
+      if (info && !holdersFresh) risk.flags.push('HOLDER_OBSERVATION_STALE_OR_UNKNOWN');
       // A holder row needs both numbers. With either missing, nothing is written and the token stays unranked.
       if (info && info.holders != null && info.top10Pct != null) {
-        await db.tokenHolderMetric.create({ data: { tokenId: t.id, holders: info.holders, top10Pct: info.top10Pct, devHoldingPct, at: now } });
-        out.holderRowsWritten++;
+        const key=`research.holders.${t.id}`,value={mint:t.mint,source:deps.info.name,sourceAt:holderAt&&Number.isFinite(+holderAt)?holderAt.toISOString():null,retrievedAt:now.toISOString(),holders:info.holders,top10Pct:info.top10Pct,devHoldingPct};
+        const previous=(await db.systemSetting.findUnique({where:{key},select:{value:true}}))?.value as {sourceAt?:string|null}|null;
+        // A cached Gecko response cannot overwrite newer RPC provenance.
+        if(!previous?.sourceAt||(value.sourceAt&&Date.parse(value.sourceAt)>=Date.parse(previous.sourceAt))){
+          await db.systemSetting.upsert({where:{key},create:{key,value},update:{value}});
+        }
+        if (holderAt && Number.isFinite(+holderAt) && +holderAt<=+now) {
+          await db.tokenHolderMetric.create({ data: { tokenId: t.id, holders: info.holders, top10Pct: info.top10Pct, devHoldingPct, at: holderAt } });
+          out.holderRowsWritten++;
+        }
       }
       await db.tokenRiskMetric.create({ data: { tokenId: t.id, riskScore: risk.riskScore, flags: risk.flags, at: now } });
       out.riskRowsWritten++;
       await writeCursor(db, cursorKey, t.id);
     }
   }
+  // Complete on-chain holder observations for a bounded subset that can still reach an early profile.
+  // Failed/missing RPC evidence never changes the stored observation time.
+  if(deps.holderFallback){
+    // The radar cohort (social priority) is refreshed by the holder-refresh job. This run only
+    // tops up price-lane tokens outside it, so the two jobs never compete for the same RPC budget.
+    const cohort=new Set(socialIds);
+    const reachable=(t:typeof tokens[number])=>{
+      const s=snaps.get(t.mint),created=t.createdOnChainAt??s?.pairCreatedAt;
+      const age=created?(+now-+created)/60000:null;
+      return !!s&&s.marketCapUsd>=EARLY_RULES.minMarketCapUsd&&s.marketCapUsd<EARLY_RULES.maxMarketCapUsd&&age!=null&&
+        [EARLY_RULES.trencher,EARLY_RULES.holder].some(p=>s.liquidityUsd>=p.minLiquidityUsd&&s.liquidityUsd/s.marketCapUsd>=p.minLiquidityToCap&&age>=p.minAgeMinutes&&age<=p.maxAgeMinutes);
+    };
+    const candidates=tokens.filter(t=>!cohort.has(t.id)&&reachable(t));
+    Object.assign(out,await refreshHolderFallback(db,deps.holderFallback,candidates));
+  }
   // Advance only through attempted members of each rotating group.
   const lastDiscovery = discoveryIds.filter(id => attempted.has(discoveryById.get(id)?.mint ?? '')).at(-1);
   if (lastDiscovery) await writeCursor(db, DISCOVERY_PRICE_CURSOR_KEY, lastDiscovery);
+  const lastWallet = wallets.filter(t=>attempted.has(t.mint)).at(-1);
+  if (lastWallet) await writeCursor(db,WALLET_PRICE_CURSOR_KEY,lastWallet.id);
   const lastGeneral = rest.filter(t => attempted.has(t.mint)).at(-1);
   if (lastGeneral) await writeCursor(db, GENERAL_PRICE_CURSOR_KEY, lastGeneral.id);
   const lastSocial = social.filter(t => attempted.has(t.mint)).at(-1);

@@ -1,16 +1,20 @@
 'use client';
 import {TokenIdentity} from './token-identity';
-import {useTranslations} from 'next-intl';
+import {useLocale,useTranslations} from 'next-intl';
+import * as Tabs from '@radix-ui/react-tabs';
 import {useState} from 'react';
 import {Link} from '@/i18n/navigation';
-import {useResearchQuery} from './session';
+import {hasFeature,useResearch,useResearchQuery} from './session';
 import {SmartWalletsSchema,WalletDetailSchema,WalletTradesSchema} from './contracts';
 import {isSolanaAddress} from '@narra/shared';
 import {pagePath} from './api';
 import {usePagination} from './pagination';
-import {PageHeading,Section,Metrics,Facts,DataTable,Loading,ResourceError,Empty,Pager,Stamp,useFormat} from './ui';
+import {PageHeading,Section,Metrics,Facts,DataTable,Loading,ResourceError,Empty,Pager,Stamp,Locked,useFormat} from './ui';
 import './smart-money.css';
-import {QualificationBadge,WalletResearchViews} from './wallet-research';
+import {QualificationBadge,WalletFlows,EmergingWallets} from './wallet-research';
+import {InvestigationLink} from '../investigation/link';
+import {WalletLeaderboard} from './wallet-ranking';
+import {TradeAmount,TradeValuation,TradeValuationNote} from './wallet-trade-values';
 
 const short=(address:string)=>address.length>12?`${address.slice(0,4)}…${address.slice(-4)}`:address;
 // Strict: valid base58 that decodes to a 32-byte key. A look-alike string would get a Solscan link that shows nothing.
@@ -27,12 +31,22 @@ function useHold(){const t=useTranslations('workspace');return (seconds:number|n
 
 /** Tracked-wallet directory. Scores are labelled unverified model estimates, and a missing value never becomes zero. */
 export function SmartMoneyPage(){
- const t=useTranslations('workspace'),[input,setInput]=useState(''),[search,setSearch]=useState(''),[source,setSource]=useState(''),[sort,setSort]=useState<Sort>('recent');
- return <div className="sm-page"><PageHeading title={t('smartMoney')} body={t('enhance.walletBody')}/>
+  const t=useTranslations('workspace'),[input,setInput]=useState(''),[search,setSearch]=useState(''),[source,setSource]=useState(''),[sort,setSort]=useState<Sort>('recent');
+  const {access}=useResearch(),rankingsAllowed=hasFeature(access,'research.smart_money_rankings');
+ const id=useLocale()==='id',research=useTranslations('workspace.smartResearch');
+ const labels={rankings:id?'Peringkat':'Rankings',directory:id?'Direktori wallet':'Wallet directory',flows:research('flows'),emerging:research('emerging')};
+   return <div className="sm-page"><PageHeading title={t('smartMoney')} body={t('enhance.walletBody')} actions={<InvestigationLink/>}/>
+   <Tabs.Root defaultValue="rankings" className="sm-tabs">
+    <Tabs.List className="sm-tab-list" aria-label={t('smartMoney')}>{Object.entries(labels).map(([value,label])=><Tabs.Trigger key={value} className="sm-tab" value={value}>{label}{value==='rankings'&&!rankingsAllowed&&<span className="sm-chip">{access.features['research.smart_money_rankings']?.requiredTier??'PRO'}</span>}</Tabs.Trigger>)}</Tabs.List>
+    <Tabs.Content className="sm-tab-panel" value="rankings">{rankingsAllowed?<WalletLeaderboard/>:<Locked tier={access.features['research.smart_money_rankings']?.requiredTier??'PRO'}/>}</Tabs.Content>
+    <Tabs.Content className="sm-tab-panel" value="directory">
   <form className="research-search" onSubmit={e=>{e.preventDefault();setSearch(input.trim());}}><label htmlFor="wallet-search">{t('enhance.walletSearch')}</label><div><input id="wallet-search" type="search" maxLength={64} value={input} onChange={e=>setInput(e.target.value)}/><button className="research-control" type="submit">{t('searchButton')}</button>{search&&<button className="research-control" type="button" onClick={()=>{setInput('');setSearch('');}}>{t('clear')}</button>}</div></form>
   <div className="research-filters"><label>{t('trench.source')}<select value={source} onChange={e=>setSource(e.target.value)}><option value="">{t('alAll')}</option>{['MANUAL','IMPORT','DISCOVERED'].map(s=><option key={s} value={s}>{t(`enhance.sources.${s}`)}</option>)}</select></label><label>{t('smSort')}<select value={sort} onChange={e=>setSort(e.target.value as Sort)}><option value="recent">{t('smSortRecent')}</option><option value="score">{t('smSortScore')}</option></select></label></div>
   {sort==='score'&&<p className="research-note">{t('smSortNote')}</p>}
-   <WalletResearchViews/><WalletList key={`${search}:${source}:${sort}`} search={search} source={source} sort={sort}/></div>;
+     <WalletList key={`${search}:${source}:${sort}`} search={search} source={source} sort={sort}/></Tabs.Content>
+    <Tabs.Content className="sm-tab-panel" value="flows"><Section title={labels.flows}><p className="research-note">{research('help')}</p><WalletFlows/></Section></Tabs.Content>
+    <Tabs.Content className="sm-tab-panel" value="emerging"><Section title={labels.emerging}><EmergingWallets/></Section></Tabs.Content>
+   </Tabs.Root></div>;
 }
 function ProfileEvidence({profileAt,score,style,intelligence}:{profileAt:string|null|undefined;score:number|null|undefined;style:string|null|undefined;intelligence:{closedTrades:number;requiredClosedTrades:number;observedTrades:number;windowDays:number;checkedAt:string}|null|undefined}){
  const t=useTranslations('workspace'),f=useFormat();
@@ -58,10 +72,27 @@ export function SmartWalletPage({address}:{address:string}){
  if(query.isError)return <>{back}<ResourceError error={query.error} retry={()=>void query.refetch()}/></>;
  if(query.isPending)return <>{back}<Loading/></>;
   const w=query.data;
+   const openPositions=w.openPositions?[...w.openPositions.positions].sort((a,b)=>Number(b.remainingCostSol)-Number(a.remainingCostSol)).slice(0,10):[];
+   const totalOpenPositions=w.openPositions?.totalPositions??openPositions.length;
    const profileNote=<div className="research-notice" role="status">{!w.profile&&<><strong>{t(w.intelligence?'enhance.insufficientHistory':'enhance.awaitingProfile')}</strong><p>{t('enhance.profileRequirement')}</p>{w.intelligence&&<p>{t('enhance.profileProgress',{closed:w.intelligence.closedTrades,required:w.intelligence.requiredClosedTrades,observed:w.intelligence.observedTrades,days:w.intelligence.windowDays,at:f.date(w.intelligence.checkedAt)})}</p>}</>}{w.intelligence?.observedBuys!=null&&<p>{t('enhance.tradeSample',{buys:w.intelligence.observedBuys,sells:w.intelligence.observedSells??0,unmatched:w.intelligence.unmatchedSells??0})}</p>}{w.history&&<p>{t('enhance.historyRepair',{scanned:w.history.scanned,accepted:w.history.accepted,at:f.date(w.history.checkedAt)})}{w.history.capped&&` ${t('enhance.historyCapped')}`}</p>}<button className="research-control" disabled={query.isFetching} onClick={()=>void query.refetch()}>{t('refresh')}</button></div>;
    return <>{back}<PageHeading title={w.label??short(w.address)} body={t('enhance.walletDetailBody')} actions={validAddress(w.address)?<a className="research-control" href={`https://solscan.io/account/${encodeURIComponent(w.address)}`} target="_blank" rel="noopener noreferrer">Solscan ↗</a>:<small>{t('enhance.invalidAddress')}</small>}/><p className="token-address"><code>{w.address}</code></p><Facts items={[{label:t('trench.source'),value:w.source},{label:t('enhance.trackedSince'),value:f.date(w.trackedSince)},{label:t('enhance.profileStatus'),value:w.profile?t('enhance.profileRecorded'):t(w.intelligence?'enhance.insufficientHistory':'enhance.awaitingProfile')}]}/>
     <QualificationBadge value={w.qualification}/>{profileNote}
    {w.profile&&<Section title={t('smRecordedProfile')} action={<span className="sm-badge">{t('trench.unverified')}</span>}><p className="research-note">{t('trench.walletEvidence')}</p><Metrics items={[{label:t('score'),value:f.number(w.profile.score)},{label:t('enhance.leaderScore'),value:f.number(w.profile.leaderScore)},{label:t('smStyle'),value:w.profile.style},{label:t('smMedianHold'),value:hold(w.profile.medianHoldSeconds)}]}/><Facts items={[{label:t('smBestPattern'),value:w.profile.bestPattern??t('unknown')},{label:t('smWeakPattern'),value:w.profile.weakPattern??t('unknown')}]}/><Stamp at={w.profile.updatedAt}/></Section>}
+   <Section title={t('enhance.openPositions')}>
+    <p className="research-note">{t('enhance.openPositionsScope')}</p>
+    {w.openPositions&&<p className="research-note">{t('enhance.openPositionsTop')}</p>}
+    {w.openPositions?.capped&&<p className="research-note">{t('enhance.openPositionsCapped')}</p>}
+    {w.openPositions&&totalOpenPositions>openPositions.length&&<p className="research-note">{t('enhance.openPositionsMore',{shown:openPositions.length,total:totalOpenPositions})}</p>}
+    {w.openPositions&&w.openPositions.positions.some(p=>p.token&&(p.token.symbol==='UNKNOWN'||p.token.name==='Unknown'))&&<p className="research-note">{t('enhance.openPositionsUnresolved')}</p>}
+    {w.openPositions==null?<p>{t('enhance.openPositionsUnavailable')}</p>:!openPositions.length?<Empty body={t('enhance.noOpenPositions')}/>:<DataTable caption={t('enhance.openPositions')} headers={[t('enhance.openToken'),t('enhance.openQuantity'),t('enhance.openRemainingCost'),t('enhance.openOpened'),t('enhance.openLastSwap'),t('enhance.openPrice')]} rows={openPositions.map(position=>{const unresolved=!!position.token&&(position.token.symbol==='UNKNOWN'||position.token.name==='Unknown');return {key:position.entryTradeId,cells:[
+      position.token?<Link key="token" href={`/app/tokens/${encodeURIComponent(position.token.mint)}`}><TokenIdentity symbol={unresolved?short(position.token.mint):position.token.symbol} name={unresolved?t('enhance.unresolvedToken'):position.token.name} imageUrl={position.token.imageUrl}/>{position.partiallySold&&<small>{t('enhance.partiallySold')}</small>}</Link>:<span key="token"><code>{short(position.tokenId)}</code>{position.partiallySold&&<small>{t('enhance.partiallySold')}</small>}</span>,
+      <span key="quantity">{position.quantity}</span>,
+      <TradeAmount key="cost" value={Number(position.remainingCostSol)}/>,
+      f.date(position.openedAt),
+      f.date(position.lastTradeAt),
+      position.priceUsd==null?t('unknown'):<span key="price">{f.usd(position.priceUsd)}<small>{f.date(position.priceAt)}{position.priceStale&&` · ${t('lastObserved')}`}</small></span>,
+    ]}})}/>}
+   </Section>
    <Section title={t('enhance.transactions')}><p className="research-note">{t('enhance.walletEvidence')}</p><div className="research-filters"><label>{t('enhance.tradeSide')}<select value={side} onChange={e=>setSide(e.target.value)}><option value="">{t('alAll')}</option><option value="BUY">{t('enhance.buy')}</option><option value="SELL">{t('enhance.sell')}</option></select></label></div><WalletTrades key={`${address}:${side}`} address={address} side={side}/></Section>
   <Section title={t('enhance.narrativeActivity')}><p className="research-note">{t('enhance.scanCoverage',{count:w.narrativeHistory.scannedTrades,days:w.narrativeHistory.lookbackDays})}{w.narrativeHistory.scanCapped&&` · ${t('anTruncated')}`}</p>{w.narrativeHistory.items.length?<DataTable caption={t('enhance.narrativeActivity')} headers={[t('name'),t('enhance.buy'),t('enhance.sell'),t('enhance.lastActivity')]} rows={w.narrativeHistory.items.map(n=>({key:n.slug,cells:[<Link key="n" href={`/app/narratives/${encodeURIComponent(n.slug)}`}>{n.name}</Link>,n.buys,n.sells,f.date(n.lastAt)]}))}/>:<Empty body={t('enhance.noNarrativeTrades')}/>}</Section>
    <details className="research-history"><summary>{t('trench.historicalModels')}</summary><p className="research-notice">{t('trench.walletEvidence')}</p>{w.profile?<><Metrics items={[{label:t('score'),value:f.number(w.profile.score)},{label:t('smStyle'),value:w.profile.style},{label:t('enhance.leaderScore'),value:f.number(w.profile.leaderScore)}]}/><Stamp at={w.profile.updatedAt}/></>:<p>{t('enhance.profileRequirement')}</p>}{Object.entries(w.performance).map(([window,m])=><Section key={window} title={window}><Metrics items={[{label:t('smWinRate'),value:f.percent(m.winRate)},{label:t('enhance.pnlSol'),value:f.number(m.pnlSol,2)},{label:t('smTrades'),value:f.number(m.closedTrades,0)},{label:t('smAvgRoi'),value:f.percent(m.avgRoi)}]}/><Stamp at={m.computedAt}/></Section>)}</details>
@@ -69,5 +100,5 @@ export function SmartWalletPage({address}:{address:string}){
 }
 function WalletTrades({address,side}:{address:string;side:string}){
  const t=useTranslations('workspace'),f=useFormat(),paging=usePagination(),query=useResearchQuery(pagePath(`wallets/${encodeURIComponent(address)}/trades`,side?{side}:{},paging.cursor),WalletTradesSchema,true,60000);
-   return <>{query.isError?<ResourceError error={query.error} retry={()=>void query.refetch()}/>:query.isPending?<Loading/>:query.data.items.length?<DataTable caption={t('enhance.transactions')} headers={[t('enhance.recordedAt'),t('token'),t('enhance.tradeSide'),t('enhance.amountSol'),'USD',t('trench.marketCap'),t('enhance.transaction')]} rows={query.data.items.map(trade=>({key:trade.id,cells:[f.date(trade.at),<Link key="token" href={`/app/tokens/${encodeURIComponent(trade.token.mint)}`}><TokenIdentity symbol={trade.token.symbol==='UNKNOWN'?trade.token.name&&trade.token.name!=='Unknown'?trade.token.name:short(trade.token.mint):trade.token.symbol} name={trade.token.name&&trade.token.name!=='Unknown'?trade.token.name:undefined} imageUrl={trade.token.imageUrl}/></Link>,t(trade.side==='BUY'?'enhance.buy':'enhance.sell'),f.number(trade.amountSol,4),f.number(trade.amountUsd,2),<span key="cap">{f.number(trade.marketCapUsd,2)}<small>{trade.evidence?.market?`${trade.evidence.market.source} · ${f.date(trade.evidence.market.at)}`:t('unknown')}</small></span>,/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(trade.signature)?<a key="tx" href={`https://solscan.io/tx/${encodeURIComponent(trade.signature)}`} target="_blank" rel="noopener noreferrer">{short(trade.signature)} ↗</a>:t('enhance.noSignature')]}))}/>:<Empty body={t('enhance.noTransactions')}/>}<Pager page={paging.page} previous={paging.previous} next={()=>paging.next(query.data?.nextCursor??null)} canNext={!query.isFetching&&!query.isError&&!!query.data?.nextCursor}/></>;
+   return <><TradeValuationNote/>{query.isError?<ResourceError error={query.error} retry={()=>void query.refetch()}/>:query.isPending?<Loading/>:query.data.items.length?<DataTable caption={t('enhance.transactions')} headers={[t('enhance.recordedAt'),t('token'),t('enhance.tradeSide'),t('enhance.amountSol'),'USD',t('trench.marketCap'),t('enhance.transaction')]} rows={query.data.items.map(trade=>({key:trade.id,cells:[f.date(trade.at),<Link key="token" href={`/app/tokens/${encodeURIComponent(trade.token.mint)}`}><TokenIdentity symbol={trade.token.symbol==='UNKNOWN'?trade.token.name&&trade.token.name!=='Unknown'?trade.token.name:short(trade.token.mint):trade.token.symbol} name={trade.token.name&&trade.token.name!=='Unknown'?trade.token.name:undefined} imageUrl={trade.token.imageUrl}/></Link>,t(trade.side==='BUY'?'enhance.buy':'enhance.sell'),<TradeAmount key="sol" value={trade.amountSol}/>,<TradeValuation key="usd" value={trade.amountUsd} kind="usd" observation={trade.evidence?.sol}/>,<TradeValuation key="cap" value={trade.marketCapUsd} kind="cap" observation={trade.evidence?.market} fdv={trade.evidence?.market?.marketCapIsFdv} reasons={trade.evidence?.reasons}/>,/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(trade.signature)?<a key="tx" href={`https://solscan.io/tx/${encodeURIComponent(trade.signature)}`} target="_blank" rel="noopener noreferrer">{short(trade.signature)} ↗</a>:t('enhance.noSignature')]}))}/>:<Empty body={t('enhance.noTransactions')}/>}<Pager page={paging.page} previous={paging.previous} next={()=>paging.next(query.data?.nextCursor??null)} canNext={!query.isFetching&&!query.isError&&!!query.data?.nextCursor}/></>;
 }

@@ -5,6 +5,7 @@ import type { PrismaClient } from '@narra/database';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { IdCursor, Limit, likeEscape } from './paging';
 import { canReadFeature, requireFeature } from './entitlements/access';
+import { computeWalletOpenPositions, type PerformanceTrade } from '@narra/worker-pipeline';
 
 const n = (v: { toString(): string } | null | undefined) => (v == null ? null : Number(v.toString()));
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
@@ -13,7 +14,7 @@ const LAMPORTS = 1_000_000_000;
 const DAY = 86_400_000;
 
 /** Starting values, not tuned. */
-const WALLET_DETAIL = { recentTrades: 20, narrativeLookbackDays: 90, narrativeTradeScan: 500, clusterMembers: 20, relationships: 20 } as const;
+const WALLET_DETAIL = { recentTrades: 20, narrativeLookbackDays: 90, narrativeTradeScan: 500, clusterMembers: 20, relationships: 20, openPositionsDisplay: 10 } as const;
 
 /** Tracked-wallet detail and global search. Both read shared market data. Search also looks at the caller's own trades by signature. */
 export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps, 'db' | 'verifier' | 'now'>): void {
@@ -39,12 +40,14 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     });
     if (!w) return reply.code(404).send({ error: 'NOT_FOUND' });
 
-    const [metricRows, trades, scan, intelligence, history] = await Promise.all([
+    const [metricRows, trades, scan, intelligence, history, historyAttempt, positionTrades] = await Promise.all([
       db.walletMetric.findMany({ where: { walletId: w.id }, orderBy: { computedAt: 'desc' }, take: 40 }),
       db.walletTrade.findMany({ where: { walletId: w.id }, orderBy: [{ at: 'desc' }, { id: 'desc' }], take: WALLET_DETAIL.recentTrades, include: { token: { select: { mint: true, symbol: true, name:true } } } }),
       db.walletTrade.findMany({ where: { walletId: w.id, at: { gte: new Date(now().getTime() - WALLET_DETAIL.narrativeLookbackDays * DAY) } }, orderBy: { at: 'desc' }, take: WALLET_DETAIL.narrativeTradeScan, select: { tokenId: true, side: true, amountSol: true, at: true } }),
       db.systemSetting.findUnique({ where: { key: `wallet.intelligence.${w.id}` } }),
       db.systemSetting.findUnique({ where: { key: `wallet.history.${w.id}` } }),
+      db.systemSetting.findUnique({ where: { key: `wallet.historyAttempt.${w.id}` } }),
+      db.walletTrade.findMany({ where: { walletId: w.id, at: { gte: new Date(now().getTime() - 30 * DAY), lte: now() } }, orderBy: [{ at: 'asc' }, { id: 'asc' }], take: 10_001, select: { id: true, tokenId: true, side: true, amountSol: true, tokenAmount: true, marketCapUsd: true, evidence: true, at: true } }),
     ]);
 
     // Newest reading per window.
@@ -73,11 +76,40 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
 
     const f = w.funding;
     const images=await marketTokenImages(db,trades.map(t=>({id:t.tokenId,mint:t.token.mint})));
+    const observedAt = now();
+    const open = computeWalletOpenPositions(positionTrades.slice(0, 10_000) as PerformanceTrade[], observedAt, positionTrades.length > 10_000);
+    // The detail page shows only the largest observed inventory lots. Remaining swap cost is the
+    // recorded SOL exposure; missing/unsupported swaps are already excluded by the accounting.
+    const rankedOpenPositions = [...open.positions]
+      .sort((a, b) => Number(b.remainingCostSol) - Number(a.remainingCostSol) || a.entryTradeId.localeCompare(b.entryTradeId))
+      .slice(0, WALLET_DETAIL.openPositionsDisplay);
+    const openTokenIds = [...new Set(rankedOpenPositions.map((p) => p.tokenId))];
+    const openTokenRows = openTokenIds.length ? await db.token.findMany({
+      where: { id: { in: openTokenIds } },
+      select: { id: true, mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1, select: { priceUsd: true, at: true } } },
+    }) : [];
+    const openImages = await marketTokenImages(db, openTokenRows.map((t) => ({ id: t.id, mint: t.mint })));
+    const openById = new Map(openTokenRows.map((t) => [t.id, t]));
+    const openPositions = {
+      ...open,
+      totalPositions: open.positions.length,
+      positions: rankedOpenPositions.map((p) => {
+        const t = openById.get(p.tokenId), m = t?.metrics[0], priceAt = m?.at ?? null;
+        return {
+          ...p,
+          token: t ? { mint: t.mint, symbol: t.symbol, name: t.name, imageUrl: openImages.get(t.id) ?? null } : null,
+          priceUsd: n(m?.priceUsd),
+          priceAt,
+          priceStale: !priceAt || +priceAt > +observedAt || +observedAt - +priceAt > 15 * 60_000,
+        };
+      }),
+    };
     return {
       address: w.address, label: w.label, source: w.source, trackedSince: w.createdAt,
       researchReview: w.researchReview, qualification: (await walletQualifications(db,[w],now())).get(w.id),
       intelligence: intelligence?.value ?? null,
       history: history?.value ?? null,
+      historyAttempt: historyAttempt?.value ?? null,
       profile: w.profile ? { score: w.profile.score, leaderScore: w.profile.leaderScore, style: w.profile.style, medianHoldSeconds: w.profile.medianHoldSeconds, strongestNarrative: w.profile.strongestNarrative, bestPattern: w.profile.bestPattern, weakPattern: w.profile.weakPattern, typicalEntryMarketCapUsd: { min: n(w.profile.typicalEntryMcMin), max: n(w.profile.typicalEntryMcMax) }, updatedAt: w.profile.updatedAt } : null,
       performance,
       // Cluster and relationship links are inferred from timing and funding, so confidence always comes with them.
@@ -88,6 +120,7 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
       ],
       funding: f ? { status: f.status, funder: f.funder, fundedAt: f.fundedAt, amountSol: f.lamports != null ? Number(f.lamports) / LAMPORTS : null, checkedAt: f.checkedAt } : null,
       recentTrades: trades.map((t) => ({ id: t.id, at: t.at, side: t.side, amountSol: n(t.amountSol), marketCapUsd: n(t.marketCapUsd), signature: t.signature, token: {...t.token,imageUrl:images.get(t.tokenId)??null} })),
+      openPositions,
       narrativeHistory: { lookbackDays: WALLET_DETAIL.narrativeLookbackDays, scannedTrades: scan.length, scanCapped: scan.length === WALLET_DETAIL.narrativeTradeScan, items: [...hist.values()].sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime()).map((h) => ({ ...h, netSol: Math.round(h.netSol * 1e6) / 1e6 })) },
     };
   });

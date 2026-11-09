@@ -1,4 +1,5 @@
 # Security checks that are slower or noisier than CI, so they run weekly and when dependencies, workflows or Docker files change.
+# Critical advisories and secret findings fail; high transitive advisories are reported and tracked.
 # They are not part of the "CI passed" gate. A scheduled failure is the signal to look.
 name: Security
 
@@ -37,12 +38,13 @@ jobs:
         id: audit
         continue-on-error: true
         run: npm audit --omit=dev --audit-level=high
+      # High advisories in wallet-SDK transitive dependencies currently have no non-breaking fix.
+      # Keep them visible as warnings; a critical advisory blocks the workflow.
       - name: Report
         if: steps.audit.outcome == 'failure'
         run: echo "::warning::npm audit found high or critical advisories in production dependencies. See the log above."
-      - name: Fail the scheduled run so someone looks
-        if: steps.audit.outcome == 'failure' && github.event_name == 'schedule'
-        run: exit 1
+      - name: Fail on critical advisories
+        run: npm audit --omit=dev --audit-level=critical
 
   secrets:
     name: Secret scan (gitleaks)

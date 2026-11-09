@@ -15,10 +15,21 @@ describe('research data boundaries',()=>{
   expect(result.metrics?.priceUsd).toBe(0);expect(result.metrics?.marketCapUsd).toBeNull();expect(result).not.toHaveProperty('secret');
   expect(()=>TokenSchema.parse({...result,metrics:{...result.metrics,priceUsd:'0'}})).toThrow();
  });
- it('accepts server-filtered overview for NONE without inventing shared research',()=>{
+  it('accepts server-filtered overview for NONE without inventing shared research',()=>{
   const value=OverviewSchema.parse({at:'2026-10-12T12:00:00Z',bar:null,locked:{overview:true,narratives:true,rotation:true,opportunities:true},strip:{topNarratives:[],hottestOpportunity:null},rotation:null,brief:{generated:'rules',points:[]},me:{openPositions:2,pendingConfirmations:0,unreadAlerts:0}});
   expect(value.bar).toBeNull();expect(value.me.openPositions).toBe(2);
- });
+  });
+  it('accepts provenance-backed holder responses without inventing smart-wallet counts or concentration',()=>{
+   const value={mint:'H5n1Csm8SSN9V4DXdWheVWqZNS8pA813FhyWsdJ6pump',symbol:'TOKEN',name:'Token',blacklisted:false,createdOnChainAt:null,metrics:null,holders:{holders:123,top10Pct:null,devHoldingPct:null,at:'2026-10-26T12:00:00Z'},risk:null,consensus:null,narratives:[]};
+   const parsed=TokenSchema.parse(value);
+   expect(parsed.holders?.holders).toBe(123);
+   expect(parsed.holders?.top10Pct).toBeNull();
+   expect(parsed.holders?.smartWalletHolders).toBeUndefined();
+   expect(TokenSchema.parse({...value,holders:{...value.holders,smartWalletHolders:null}}).holders?.smartWalletHolders).toBeNull();
+   expect(TokenSchema.parse({...value,holders:{...value.holders,top10Pct:0,smartWalletHolders:0}}).holders).toMatchObject({top10Pct:0,smartWalletHolders:0});
+   expect(()=>TokenSchema.parse({...value,holders:{...value.holders,holders:'123'}})).toThrow();
+   expect(()=>TokenSchema.parse({...value,holders:{...value.holders,at:'not-a-date'}})).toThrow();
+  });
  it('validates the real structured bull/bear/risk shapes',()=>{
   const value={opportunityId:'o',analyzedAt:'2026-10-12T12:00:00Z',model:'test',bull:{arguments:['evidence'],strength:.6,keyUncertainties:['limited sample']},bear:null,risk:{risks:[{code:'LOW_LIQUIDITY',description:'Thin market',severity:'HIGH'}],maxLossScenario:'Unknown'},decision:{action:'WATCH',confidence:.5,summary:'Wait for evidence'},guardrails:[]};
   expect(AnalysisSchema.parse(value).risk?.risks[0]?.severity).toBe('HIGH');
@@ -42,7 +53,7 @@ describe('smart money, alerts, analytics, settings and chat contracts',()=>{
   expect(AlertsSchema.safeParse({items:[],nextCursor:null,unreadCount:-1}).success).toBe(false);
  });
  it('accepts an analytics summary that says its evidence is thin',()=>{
-  expect(SummarySchema.safeParse({range:{days:30},costPct:2,decisions:{read:5,independent:3,pending:1,final:2,unknown:0,truncated:false},labels:{WIN:1,LOSS:1,FLAT:0},returns:described,medianLeadTimeSeconds:null,byConfidence:[{label:'0.6 to 0.7',described}],caveats:['Past results do not predict future results.']}).success).toBe(true);
+  expect(SummarySchema.safeParse({range:{days:30},costPct:2,decisions:{total:6,awaitingMeasurement:1,read:5,independent:3,pending:1,final:2,known:2,unknown:0,unknownRate:0,truncated:false},labels:{WIN:1,LOSS:1,FLAT:0},returns:described,medianLeadTimeSeconds:null,byConfidence:[{label:'0.6 to 0.7',described}],caveats:['Past results do not predict future results.']}).success).toBe(true);
   expect(SummarySchema.safeParse({range:{days:30},costPct:2,returns:described}).success).toBe(false);
  });
  it('accepts outcomes with unmeasured fields as null',()=>{

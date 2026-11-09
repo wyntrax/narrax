@@ -3,15 +3,26 @@ import type { FastifyInstance } from 'fastify';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { makeRequireAdmin } from './admin';
 import { walletQualifications } from '@narra/worker-pipeline';
-import { sanitizeUntrusted } from '@narra/shared';
+import { InvestigationDiscovery, TOKEN_DISCOVERY_KEY_PREFIX, sanitizeUntrusted } from '@narra/shared';
 import { RESEARCH_QUALIFICATION } from '@narra/smart-money';
 import { marketTokenImages } from './marketEvidence';
+import { walletRanking } from './walletRanking';
+import { WalletEntryBand } from '@narra/shared';
 
 export function registerWalletResearchRoutes(app: FastifyInstance, deps: Pick<AccountDeps, 'db' | 'verifier' | 'now'>) {
   const { db } = deps, clock = deps.now ?? (() => new Date());
   const opts = { preHandler: makeAuthenticate(deps), config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
   const admin = { ...opts, preHandler: makeRequireAdmin(deps) };
   const paging = z.object({ limit: z.coerce.number().int().min(1).max(100).default(25), cursor: z.string().max(128).optional(), side: z.enum(['BUY','SELL']).optional() });
+
+  app.get('/v1/smart-money/rankings', opts, async (req, reply) => {
+    const query = z.object({ band: WalletEntryBand.default('SMALL_CAP'), limit: z.coerce.number().int().min(1).max(100).default(50),
+      status: z.enum(['ALL','REVIEW_READY','OBSERVING']).default('ALL'),
+      minMedianPositionSol: z.coerce.number().finite().min(0).max(1000).default(0.01),
+    }).strict().safeParse(req.query);
+    if (!query.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
+    return walletRanking(db,clock(),query.data.band,query.data.limit,query.data.status,query.data.minMedianPositionSol);
+  });
 
   app.get('/v1/smart-money/flows', opts, async (req, reply) => {
     const q = paging.safeParse(req.query);
@@ -38,9 +49,17 @@ export function registerWalletResearchRoutes(app: FastifyInstance, deps: Pick<Ac
   });
 
   app.get('/v1/admin/wallet-research/health', admin, async () => {
-    const settings = await db.systemSetting.findMany({ where: { key: { in: ['wallet.discovery.health', 'wallet.research.flowHealth'] } } });
+    const now = clock();
+    const [settings, scans, active, discovered, approved] = await Promise.all([
+      db.systemSetting.findMany({ where: { key: { in: ['wallet.discovery.health', 'wallet.research.flowHealth'] } } }),
+      db.systemSetting.findMany({ where: { key: { startsWith: TOKEN_DISCOVERY_KEY_PREFIX } }, orderBy: [{ updatedAt: 'desc' }, { key: 'asc' }], take: 10, select: { key: true, value: true, updatedAt: true } }),
+      db.trackedWallet.count({ where: { active: true } }), db.trackedWallet.count({ where: { source: 'DISCOVERED' } }), db.trackedWallet.count({ where: { researchReview: 'APPROVED' } }),
+    ]);
     const byKey = new Map(settings.map(s => [s.key,s.value]));
-    return { checkedAt: clock(), enabled: process.env.SMART_MONEY_RESEARCH_ENABLED === 'true', rules: RESEARCH_QUALIFICATION, discovery: byKey.get('wallet.discovery.health') ?? null, flow: byKey.get('wallet.research.flowHealth') ?? null };
+    return { checkedAt: now, enabled: process.env.SMART_MONEY_RESEARCH_ENABLED === 'true', rules: RESEARCH_QUALIFICATION,
+      wallets: { active, discovered, approved },
+      discovery: byKey.get('wallet.discovery.health') ?? null, flow: byKey.get('wallet.research.flowHealth') ?? null,
+      tokenScans: scans.flatMap(row => { const parsed = InvestigationDiscovery.safeParse(row.value); return parsed.success ? [{ tokenId: row.key.slice(TOKEN_DISCOVERY_KEY_PREFIX.length), updatedAt: row.updatedAt, ...parsed.data }] : []; }) };
   });
 
   app.post('/v1/admin/wallets/:address/research-review', admin, async (req, reply) => {

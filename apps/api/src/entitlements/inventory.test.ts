@@ -6,10 +6,14 @@ it('every literal HTTP registration is deliberately classified; generated accoun
   const mixed = new Set(['GET /v1/tokens', 'GET /v1/opportunities', 'GET /v1/opportunities/:id/analysis', 'GET /v1/wallets/:address', 'GET /v1/wallets/:address/trades', 'GET /v1/stream']);
   // This route applies research.tokens explicitly inside the authenticated handler.
   mixed.add('GET /v1/tokens/:mint/history');
+  // Authenticated on-demand quote; applies research.tokens explicitly inside the handler.
+  mixed.add('POST /v1/tokens/:mint/refresh');
   const newRoutes = new Set(['GET /v1/me/entitlements', 'POST /v1/me/membership/refresh', 'POST /v1/me/early-access/join', 'DELETE /v1/me/early-access', 'GET /v1/admin/entitlements/settings', 'PUT /v1/admin/entitlements/settings', 'GET /v1/admin/users/:userId/entitlements', 'POST /v1/admin/users/:userId/entitlements/grants', 'POST /v1/admin/users/:userId/entitlements/grants/:id/revoke', 'DELETE /v1/admin/users/:userId/linked-wallets/:id', 'GET /v1/admin/early-access/stats', 'POST /v1/integrations/wyntrax/events']);
   newRoutes.add('GET /v1/early-access/status');
   // Authenticated four-number teaser, explicitly tier-independent; all detailed research stays gated.
   newRoutes.add('GET /v1/market-preview');
+  // Unauthenticated aggregate landing snapshot; no narrative/wallet identities or detailed research.
+  newRoutes.add('GET /v1/public-research-snapshot');
   // Own-account paper-only routes: authentication/ownership/governor, never research-tier authority.
   for(const route of ['GET /v1/paper-trades/account','POST /v1/paper-trades/preview','POST /v1/paper-trades/confirm'])newRoutes.add(route);
   // Public, unauthenticated, no per-user data: the $Wyntrax tier amounts and the early-access window.

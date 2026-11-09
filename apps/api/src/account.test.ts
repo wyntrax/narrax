@@ -92,8 +92,11 @@ describe.skipIf(!up)('account routes (needs Postgres)', () => {
     const res = await app.inject({ method: 'POST', url: '/v1/me/membership/refresh', headers: { authorization: `Bearer ${await sign(alice)}` } });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ ok: true });
-    expect(requested).toEqual([alice]);
+    const user = await db.user.findUniqueOrThrow({ where: { privyUserId: alice }, select: { id: true } });
+    expect(requested).toEqual([user.id]);
     expect((await app.inject({ method: 'POST', url: '/v1/me/membership/refresh' })).statusCode).toBe(401);
+    expect(requested).toEqual([user.id]);
+    await app.close();
   });
 
   it('saves risk presets and refuses custom limits beyond the system limits', async () => {

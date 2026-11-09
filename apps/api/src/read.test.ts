@@ -24,6 +24,8 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
   const bob = `did:privy:rb-${tag}`;
   let aliceId = '';
   let bobId = '';
+  let walletId = '';
+  let walletAddress = '';
   const artwork='https://cdn.dexscreener.com/cms/images/read-artwork.png';
   const artworkKeys:string[]=[];
 
@@ -71,8 +73,9 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
       const o = await order(`o${i}`, new Date(Date.now() - i * 60_000));
       await db.trade.create({ data: { userId: aliceId, orderId: o.id, side: 'BUY', mode: 'AI_AUTO', reason: 'x', expectedPriceUsd: 0.01, actualPriceUsd: 0.0101, slippageBps: 10, signature: `s${i}${tag}`, executedAt: new Date(Date.now() - i * 60_000) } });
     }
-    const w = await db.trackedWallet.create({ data: { address: M('WAL'), profile: { create: { score: 94, leaderScore: 91, style: 'EARLY_MOMENTUM' } }, metrics: { create: { window: '30D', winRate: 0.78, pnlSol: 482, closedTrades: 40, avgRoi: 0.42, medianRoi: 0.3, maxDrawdown: 0.1 } } } });
-    void w;
+    walletAddress = M('WAL').replace(/[0OIl]/g, '1');
+    const w = await db.trackedWallet.create({ data: { address: walletAddress, profile: { create: { score: 94, leaderScore: 91, style: 'EARLY_MOMENTUM' } }, metrics: { create: { window: '30D', winRate: 0.78, pnlSol: 482, closedTrades: 40, avgRoi: 0.42, medianRoi: 0.3, maxDrawdown: 0.1 } } } });
+    walletId = w.id;
   });
   // Remove this file's rows so shared, size-limited lists do not fill up across runs.
   afterAll(async () => {
@@ -80,9 +83,10 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     await db.systemSetting.deleteMany({where:{key:{in:artworkKeys}}});
     // Users first: their positions, orders and trades would otherwise block deleting the tokens.
     await db.user.deleteMany({ where: { id: { in: [aliceId, bobId] } } });
-    await db.token.deleteMany({ where: { symbol: { in: [`ROBOT${tag}`, `QCAT${tag}`] } } });
+    await db.walletTrade.deleteMany({ where: { walletId } });
+    await db.token.deleteMany({ where: { symbol: { in: [`ROBOT${tag}`, `QCAT${tag}`, `IMGF${tag}`] } } });
     await db.narrative.deleteMany({ where: { slug: { endsWith: tag } } });
-    await db.trackedWallet.deleteMany({ where: { address: M('WAL') } });
+    await db.trackedWallet.deleteMany({ where: { address: walletAddress } });
     await app.close();
     await db.$disconnect();
   });
@@ -186,6 +190,50 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     expect((await get('/v1/tokens?q=')).status).toBe(400);
   });
 
+  it('uses stored token metadata artwork on detail when DexScreener omitted it', async () => {
+    const t = await db.token.create({ data: { mint: M('IMGF'), symbol: `IMGF${tag}`, name: 'Image fallback token', metrics: { create: { priceUsd: 1, marketCapUsd: 100_000, liquidityUsd: 50_000, volume24hUsd: 1_000 } } } });
+    const key = `research.tokenMetadata.${t.id}`;
+    artworkKeys.push(key);
+    const imageUrl = 'https://cdn.helius-rpc.com/cdn-cgi/image//example.png';
+    await db.systemSetting.create({ data: { key, value: { source: 'helius-das', mint: t.mint, imageUrl } } });
+    const response = await get(`/v1/tokens/${t.mint}`);
+    expect(response.status).toBe(200);
+    expect(response.body.imageUrl).toBe(imageUrl);
+  });
+
+  it('shows observed open positions with cost and stored artwork on wallet detail', async () => {
+    const token = await db.token.findUniqueOrThrow({ where: { mint: M('ROBOT') } });
+    const at = new Date();
+    const buyAt = new Date(at.getTime() - 120_000), sellAt = new Date(at.getTime() - 60_000);
+    const evidence = (eventAt: Date) => ({ eventAt: eventAt.toISOString(), market: { at: eventAt.toISOString(), source: 'dexscreener', marketCapIsFdv: false } });
+    await db.walletTrade.create({ data: { walletId, tokenId: token.id, side: 'BUY', amountSol: 10, tokenAmount: 100, marketCapUsd: 85_000, signature: `wallet-open-buy-${tag}`, evidence: evidence(buyAt), at: buyAt } });
+    await db.walletTrade.create({ data: { walletId, tokenId: token.id, side: 'SELL', amountSol: 9, tokenAmount: 50, marketCapUsd: 85_000, signature: `wallet-open-sell-${tag}`, evidence: evidence(sellAt), at: sellAt } });
+    const response = await get(`/v1/wallets/${walletAddress}`);
+    expect(response.status).toBe(200);
+    expect(response.body.openPositions).toMatchObject({ version: 1, observedTrades: 2, capped: false, totalPositions: 1 });
+    expect(response.body.openPositions.positions[0]).toMatchObject({
+      quantity: '50', remainingCostSol: '5', investedSol: '10', entrySol: '10', partiallySold: true,
+      token: { symbol: `ROBOT${tag}`, imageUrl: artwork }, priceUsd: 0.01, priceStale: false,
+    });
+  });
+
+  it('returns provenance-backed holder detail that passes the web contract for fresh and stale counts', async () => {
+    const { TokenSchema } = await import('../../web/src/features/research/contracts');
+    const token = await db.token.findUniqueOrThrow({ where: { mint: M('ROBOT') } });
+    const key = `research.holders.${token.id}`;
+    try {
+      for (const age of [0, 2 * 60 * 60 * 1000]) {
+        const observedAt = Date.now(), retrievedAt = new Date(observedAt).toISOString(), sourceAt = new Date(observedAt - age).toISOString();
+        await db.systemSetting.upsert({ where: { key }, create: { key, value: { mint: token.mint, source: 'geckoterminal', sourceAt, retrievedAt, holders: 123, top10Pct: null, devHoldingPct: null } }, update: { value: { mint: token.mint, source: 'geckoterminal', sourceAt, retrievedAt, holders: 123, top10Pct: null, devHoldingPct: null } } });
+        const response = await get(`/v1/tokens/${token.mint}`);
+        expect(response.status).toBe(200);
+        expect(response.body.latestEvidence.holders.state).toBe(age ? 'STALE' : 'FRESH');
+        expect(response.body.holders).toEqual({ holders: 123, top10Pct: null, devHoldingPct: null, at: sourceAt });
+        expect(TokenSchema.parse(response.body).holders?.smartWalletHolders).toBeUndefined();
+      }
+    } finally { await db.systemSetting.deleteMany({ where: { key } }); }
+  });
+
   it('returns only proven price history and validates its time window', async () => {
     const t = await db.token.findUniqueOrThrow({ where: { mint: M('ROBOT') }, include: { metrics: true } });
     const metric = t.metrics[0]!;
@@ -202,7 +250,7 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
   });
 
   it('lists scored smart-money wallets with their 30D metrics', async () => {
-    const w = (await get('/v1/smart-money/wallets?limit=100')).body.items.find((x: { address: string }) => x.address === M('WAL'));
+    const w = (await get('/v1/smart-money/wallets?limit=100')).body.items.find((x: { address: string }) => x.address === walletAddress);
     expect(w).toMatchObject({ score: 94, leaderScore: 91, style: 'EARLY_MOMENTUM', winRate: 0.78, pnl30dSol: 482, closedTrades: 40, avgRoi: 0.42, cluster: null });
   });
 

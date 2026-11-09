@@ -1,6 +1,7 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 import type {ReactNode} from 'react';
 import {fireEvent,render,screen,waitFor,within} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
 import {NextIntlClientProvider} from 'next-intl';
 import en from '../../../messages/research/en.json';
@@ -54,6 +55,16 @@ describe('admin dashboard',()=>{
     fireEvent.change(document.querySelector('#admin-reason')!,{target:{value:'Open early access'}});
     expect(save).toBeEnabled();
     expect(within(settings).queryByText(en.adminHintReason)).toBeNull();
+  });
+  it('separates admin areas into tabs and mounts only the selected panel', async () => {
+    mount(true);
+    const access = await screen.findByRole('tab', {name: en.adminTabAccess});
+    expect(access).toHaveAttribute('aria-selected', 'true');
+    await userEvent.click(screen.getByRole('tab', {name: en.adminTabResearch}));
+    expect(await screen.findByText(en.smartResearch.adminTitle)).toBeInTheDocument();
+    expect(screen.queryByText(en.adminSettings)).toBeNull();
+    await userEvent.click(screen.getByRole('tab', {name: en.adminTabRuntime}));
+    expect(await screen.findByText(en.runtime.title)).toBeInTheDocument();
   });
   it('shows a signed-in non-admin only the notice and their own ids, and makes no admin request',async()=>{
     session.me.data={isAdmin:false,admin:{configured:true,privyUserId:'did:privy:stranger',email:null}};

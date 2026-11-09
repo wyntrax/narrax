@@ -14,13 +14,16 @@ export const GECKO_MIN_INTERVAL_MS = 15_000;
 
 const InfoBody = z.object({
   data: z.object({
+    id: z.string(),
     attributes: z.object({
+      address: z.string(),
       name: z.string().nullish(),
       symbol: z.string().nullish(),
       websites: z.array(z.string()).nullish(),
       twitter_handle: z.string().nullish(),
       holders: z.object({
         count: z.number().nullish(),
+        last_updated: z.string().nullish(),
         distribution_percentage: z.object({ top_10: z.union([z.string(), z.number()]).nullish() }).nullish(),
       }).nullish(),
       mint_authority: z.string().nullish(),
@@ -81,6 +84,7 @@ export class GeckoTerminalSource implements TokenInfoSource, LaunchSource {
     const parsed = InfoBody.safeParse(body);
     if (!parsed.success) throw new MarketDataError('shape', 'token info had an unexpected shape');
     const a = parsed.data.data.attributes;
+    if (a.address !== mint || parsed.data.data.id !== `solana_${mint}`) throw new MarketDataError('shape', 'token info mint mismatch');
     const count = a.holders?.count;
     const top10 = toNumber(a.holders?.distribution_percentage?.top_10);
     return {
@@ -89,6 +93,7 @@ export class GeckoTerminalSource implements TokenInfoSource, LaunchSource {
       symbol: a.symbol ?? null,
       // Zero holders or an out-of-range percentage means "no usable data", not a measurement.
       holders: typeof count === 'number' && Number.isInteger(count) && count > 0 ? count : null,
+      holdersUpdatedAt: a.holders?.last_updated && Number.isFinite(Date.parse(a.holders.last_updated)) ? new Date(a.holders.last_updated) : null,
       top10Pct: top10 != null && top10 >= 0 && top10 <= 100 ? top10 : null,
       mintAuthorityActive: parseAuthority(a.mint_authority),
       freezeAuthorityActive: parseAuthority(a.freeze_authority),

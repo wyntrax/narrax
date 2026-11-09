@@ -4,6 +4,7 @@ import type { RadarSafetyEvidence, RadarSafetySource } from './radarSafetyEviden
 import type { TradeabilityEvidence, TradeabilitySource } from './tradeabilityEvidence';
 import { socialOpportunityEvidence } from './socialOpportunity';
 import { saveResearchDiagnostics } from './researchDiagnostics';
+import {holderGrowthBaseline} from './holderHistory';
 import {
   EARLY_RULES, MATCH_THRESHOLD, attentionPriceDivergence, evaluateEarlyBoth, matchScore, meetsFloors, opportunityScore, resolveCandidates, words,
   type Candidate, isRadarEvidenceCandidate, radarEvidenceIssue, recordRadarEvidenceSkip, type RadarEvidenceSkips,
@@ -145,9 +146,9 @@ export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?
       // opportunities, orders or decisions, so the trading path and its floors are unchanged.
       // marketCapUsd was computed above, before the evidence check, so the skip report and the lane agree on the ceiling.
       if (!evidenceIssue && marketCapUsd != null && marketCapUsd < EARLY_RULES.maxMarketCapUsd) {
-        const thenRow = await db.tokenHolderMetric.findFirst({ where: { tokenId: t.id, at: { lte: new Date(now.getTime() - 3 * HOUR) } }, orderBy: { at: 'desc' }, select: { holders: true } });
+        const holdersThen = await holderGrowthBaseline(db,t.id,h.id,new Date(now.getTime()-3*HOUR));
         const earlyInput = (devHoldingPct: number | null) => evaluateEarlyBoth({
-          marketCapUsd, liquidityUsd, volume24hUsd: num(m.volume24hUsd) ?? NaN, holders: h.holders, holdersThen: thenRow?.holders ?? null,
+          marketCapUsd, liquidityUsd, volume24hUsd: num(m.volume24hUsd) ?? NaN, holders: h.holders, holdersThen,
           top10Pct: h.top10Pct, devHoldingPct, smartWalletHolders: h.smartWalletHolders, tokenAgeMinutes: t.createdOnChainAt ? (now.getTime() - t.createdOnChainAt.getTime()) / 60_000 : null,
           relation: r.relation, ogScore: r.ogScore, narrativeScore: n.score, narrativeStage: n.stage, narrativeManipulationRisk: n.metrics[0]?.manipulationRisk ?? null,
           divergence: divergence.label, priceGrowth1hPct: growth1h, riskFlags: t.risk[0]?.flags ?? [],

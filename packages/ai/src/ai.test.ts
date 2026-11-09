@@ -47,6 +47,12 @@ describe('pipeline flow', () => {
     expect(l.calls[1]!.req.reasoningLevel).toBe('medium');
     expect(l.calls[0]!.req.reasoningLevel).toBeUndefined();
   });
+  it('passes the analysis session id to every model call', async () => {
+    const l = llm(happy());
+    await analyzeOpportunity({ llm: l.provider, config: cfg }, { facts: facts(), untrusted: [], sessionId: 'opportunity-1' });
+    expect(l.calls).toHaveLength(5);
+    expect(l.calls.every(({ req }) => req.sessionId === 'opportunity-1')).toBe(true);
+  });
   it('stops after the cheap screen for IGNORE and WATCH and never calls the reasoning model', async () => {
     for (const [c, action] of [['IGNORE', 'IGNORE'], ['WATCH', 'WATCH']] as const) {
       const l = llm(happy({ fast: FAST(c, 20) }));
@@ -176,7 +182,7 @@ describe('helpers', () => {
 });
 
 describe('OpenAiCompatibleProvider', () => {
-  const req: LlmRequest = { model: 'm', system: 's', user: 'u', temperature: 0.2, maxTokens: 500, reasoningLevel: 'high' };
+  const req: LlmRequest = { model: 'm', system: 's', user: 'u', temperature: 0.2, maxTokens: 500, reasoningLevel: 'high', sessionId: 'conversation-1' };
   const ok = { choices: [{ message: { content: '{"a":1}' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } };
   it('sends a chat-completions request and reads text and usage', async () => {
     let seen: { url?: string; init?: RequestInit } = {};
@@ -188,6 +194,14 @@ describe('OpenAiCompatibleProvider', () => {
     expect(body).toMatchObject({ model: 'm', max_tokens: 500, reasoning_effort: 'high', response_format: { type: 'json_object' } });
     expect(body.messages.map((m: { role: string }) => m.role)).toEqual(['system', 'user']);
     expect((seen.init!.headers as Record<string, string>).authorization).toBe('Bearer secret-key');
+    expect((seen.init!.headers as Record<string, string>)['x-opencode-session']).toBe('conversation-1');
+    expect((seen.init!.headers as Record<string, string>)['user-agent']).toBe('narrax-ai/1.0');
+  });
+  it('falls back to a stable session id when the request has none', async () => {
+    let seen: RequestInit = {};
+    const f = (async (_url: string, init: RequestInit) => { seen = init; return new Response(JSON.stringify(ok)); }) as unknown as typeof fetch;
+    await new OpenAiCompatibleProvider({ apiKey: 'secret-key', baseUrl: 'http://x/v1', fetch: f }).complete({ ...req, sessionId: undefined });
+    expect((seen.headers as Record<string, string>)['x-opencode-session']).toBe('narrax-ai');
   });
   it('fails on HTTP errors, bad shapes and timeouts without leaking the key', async () => {
     const mk = (f: typeof fetch, t?: number) => new OpenAiCompatibleProvider({ apiKey: 'secret-key', fetch: f, timeoutMs: t });
@@ -197,5 +211,6 @@ describe('OpenAiCompatibleProvider', () => {
     await expect(mk((async () => new Response(JSON.stringify({ nope: 1 }))) as unknown as typeof fetch).complete(req)).rejects.toThrow('unexpected shape');
     const hang = ((_u: string, init: RequestInit) => new Promise((_r, rej) => init.signal?.addEventListener('abort', () => rej(new Error('x'))))) as unknown as typeof fetch;
     await expect(mk(hang, 20).complete(req)).rejects.toThrow(LlmError);
+    await expect(mk(hang, 1000).complete({ ...req, timeoutMs: 20 })).rejects.toThrow(LlmError);
   });
 });

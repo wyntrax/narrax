@@ -7,6 +7,7 @@ import id from '../../../messages/id.json';
 import {fetchRequirements} from '@/lib/requirements';
 import type {Requirements} from '@/lib/schemas';
 import {TierCards} from './tier-cards';
+import {proCopy} from '@/features/pro-research/copy';
 vi.mock('@/i18n/navigation',()=>({Link:({href,children}:{href:string;children:ReactNode})=><a href={href}>{children}</a>}));
 vi.mock('./reveal',()=>({Reveal:({children}:{children:ReactNode})=><div>{children}</div>}));
 afterEach(cleanup);
@@ -22,7 +23,12 @@ it.each(['en','id'] as const)('renders fetched admin amounts and separates free 
  const number=new Intl.NumberFormat(locale),copy=locale==='en'?en:id;
  const early=result.container.querySelector('[data-tier="EARLY_ACCESS"]')!;
  expect(early).toHaveTextContent(copy.tierCards.earlyRequirement);
- expect(early).not.toHaveTextContent('$CUSTOM');expect(within(early as HTMLElement).getByRole('link')).toHaveAttribute('href','/early-access');
+  expect(early).not.toHaveTextContent('$CUSTOM');expect(within(early as HTMLElement).getByRole('link')).toHaveAttribute('href','/early-access');
+  for(const label of [proCopy[locale].rankings,proCopy[locale].investigation]){
+   expect(early).not.toHaveTextContent(label);
+   expect(result.container.querySelector('[data-tier="MEMBER"]')).not.toHaveTextContent(label);
+   expect(result.container.querySelector('[data-tier="PRO"]')).toHaveTextContent(label);
+  }
   expect(result.container.querySelector('[data-tier="ELITE"]')).toBeNull();
   for(const tier of ['MEMBER','PRO'] as const){const card=result.container.querySelector(`[data-tier="${tier}"]`)!;
   expect(card).toHaveTextContent(`${number.format(requirements.tiers[tier])} $CUSTOM`);expect(within(card as HTMLElement).getByRole('link')).toHaveAttribute('href','/app');

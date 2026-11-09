@@ -7,7 +7,7 @@ const MINT = 'FRxQFfRZZpr6aXWsVAhYQ1n3rUPHD89QbNqQFmqNpump';
 const OTHER = '7thgKgtK1rp1UtLpWUZEuu9vakedTMoZzuyps6RGpump';
 const report = (over: Partial<RugCheckReport> = {}): RugCheckReport => ({
   mint: MINT, detectedAt: null, creator: 'creator', devHoldingPct: 3, top10ExLpPct: 25,
-  lpLockedPct: 100, lpLocked: true, rugged: false, riskFlags: [], totalHolders: 500, ...over,
+  lpLockedPct: 100, lpLocked: true, insiderPct: 4, rugged: false, riskFlags: [], totalHolders: 500, ...over,
 });
 const fakeDb = () => {
   const rows = new Map<string, unknown>();
@@ -31,7 +31,7 @@ describe('radar safety evidence source', () => {
       source: { async getReport(mint) { calls++; return report({ mint }); } },
     })!;
     source.begin();
-    expect(await source.get(MINT, new Date('2026-10-22T10:00:00Z'))).toMatchObject({ devHoldingPct: 3, top10ExLpPct: 25, lpLocked: true, source: 'rugcheck' });
+    expect(await source.get(MINT, new Date('2026-10-22T10:00:00Z'))).toMatchObject({ devHoldingPct: 3, top10ExLpPct: 25, lpLocked: true, insiderPct: 4, source: 'rugcheck' });
     expect(await source.get(MINT, new Date('2026-10-22T10:01:00Z'))).toMatchObject({ top10ExLpPct: 25 });
     expect(await source.get(OTHER, new Date('2026-10-22T10:01:00Z'))).toBeNull();
     expect(calls).toBe(1);
@@ -54,6 +54,22 @@ describe('radar safety evidence source', () => {
     source.begin();
     expect(await source.get(MINT, new Date('2026-10-22T10:00:00Z'))).toMatchObject({ devHoldingPct: 3, top10ExLpPct: 25, lpLocked: true });
     expect(calls).toBe(1);
+  });
+
+  it('keeps a fresh legacy cache entry and treats the new insider field as unknown', async () => {
+    const { db, rows } = fakeDb();
+    const now = new Date('2026-10-22T10:00:00Z');
+    rows.set(`${RADAR_SAFETY_EVIDENCE_PREFIX}${MINT}`, {
+      mint: MINT, source: 'rugcheck', sourceAt: new Date(+now - 60_000).toISOString(),
+      devHoldingPct: 3, top10ExLpPct: 25, lpBurnedPct: null, lpLocked: true, riskFlags: [],
+    });
+    let calls = 0;
+    const source = makeRadarSafetySource(db, {
+      enabled: true, cacheTtlMs: 60_000,
+      source: { async getReport() { calls++; return report(); } },
+    })!;
+    expect(await source.get(MINT, now)).toMatchObject({ top10ExLpPct: 25, insiderPct: null });
+    expect(calls).toBe(0);
   });
 
   it('returns null on failure or malformed cache instead of guessing', async () => {

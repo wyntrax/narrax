@@ -135,7 +135,7 @@ describe.skipIf(!up)('token resolution on a real Postgres', () => {
       begin() {},
       async get(mint: string) {
         calls.push(mint);
-        return { mint, source: 'rugcheck' as const, sourceAt: NOW.toISOString(), devHoldingPct: 2, top10ExLpPct: 18, lpBurnedPct: null, lpLocked: true, riskFlags: [] };
+        return { mint, source: 'rugcheck' as const, sourceAt: NOW.toISOString(), devHoldingPct: 2, top10ExLpPct: 18, lpBurnedPct: null, lpLocked: true, insiderPct: 4, riskFlags: [] };
       },
     };
     const tradeability = {

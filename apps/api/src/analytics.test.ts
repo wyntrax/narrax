@@ -71,7 +71,7 @@ describe.skipIf(!up)('analytics endpoints (needs Postgres)', () => {
 
   it('validates input', async () => {
     await uid(alice);
-    for (const p of ['/v1/analytics/decisions/summary?days=0', '/v1/analytics/decisions/summary?days=9999', '/v1/analytics/decisions/summary?action=NUKE', '/v1/analytics/decisions/summary?costPct=-1', '/v1/analytics/decisions/outcomes?limit=1000', '/v1/analytics/decisions/outcomes?cursor=%%%', '/v1/analytics/decisions/outcomes?cursor=' + Buffer.from('["nope","x"]').toString('base64url'), '/v1/analytics/me/equity?simulated=maybe']) {
+    for (const p of ['/v1/analytics/decisions/summary?days=0', '/v1/analytics/decisions/summary?days=9999', '/v1/analytics/decisions/summary?action=NUKE', '/v1/analytics/decisions/summary?costPct=-1', '/v1/analytics/signals?action=NUKE', '/v1/analytics/decisions/outcomes?action=NUKE', '/v1/analytics/decisions/outcomes?days=0', '/v1/analytics/decisions/outcomes?days=366', '/v1/analytics/decisions/outcomes?limit=1000', '/v1/analytics/decisions/outcomes?cursor=%%%', '/v1/analytics/decisions/outcomes?cursor=' + Buffer.from('["nope","x"]').toString('base64url'), '/v1/analytics/me/equity?simulated=maybe']) {
       expect((await http(p, alice)).status, p).toBe(400);
     }
   });
@@ -115,6 +115,55 @@ describe.skipIf(!up)('analytics endpoints (needs Postgres)', () => {
     expect(sig.body.byReasonCode.find((b: { label: string }) => b.label === 'NARRATIVE').described.n).toBe(20);
     // A different action is a different set.
     expect((await http('/v1/analytics/decisions/summary?days=120&action=WATCH', alice)).body.decisions.independent).toBe(0);
+  });
+
+  it('keeps action/window scope across summary, signals and cursor pages, and exposes unmeasured decisions without inventing returns', async () => {
+    const ids: string[] = [];
+    const make = async (token: string, hours: number, ret: number | null, action = 'WATCH', final = true) => {
+      const d = await seed({ token, at: new Date(+NOW - hours * HOUR), ret, action, final }); ids.push(d.id); return d;
+    };
+    try {
+      const known = await make('SCOPEDKNOWN', 72, 20);
+      const horizon = await make('SCOPEDHORIZON', 48, null);
+      const entry = await make('SCOPEDENTRY', 30, null);
+      await db.decisionOutcome.update({ where: { decisionId: entry.id }, data: { unknownReason: 'NO_ENTRY_PRICE', entryPriceUsd: null } });
+      const pending = await make('SCOPEDPENDING', 2, null, 'WATCH', false);
+      await db.decisionOutcome.update({ where: { decisionId: pending.id }, data: { unknownReason: 'NOT_YET' } });
+      const unmeasured = await make('SCOPEDUNMEASURED', 1, null);
+      await db.decisionOutcome.delete({ where: { decisionId: unmeasured.id } });
+      await make('SCOPEDOLD', 8 * 24, 900);
+      await make('SCOPEDFUTURE', -1, 900);
+      await make('SCOPEDBUY', 24, 900, 'BUY');
+      await make('SCOPEDSELL', 24, -20, 'SELL');
+      const ignored = await make('SCOPEDIGNORE', 24, 12, 'IGNORE');
+      const privateDecision = await make('SCOPEDPRIVATE', 24, 900);
+      await db.agentDecision.update({ where: { id: privateDecision.id }, data: { userId: await uid(bob) } });
+      const summary = await http('/v1/analytics/decisions/summary?days=7&action=WATCH&costPct=5', alice);
+      expect(summary.status).toBe(200);
+      expect(summary.body).toMatchObject({ action: 'WATCH', costPct: 0, decisions: { total: 5, awaitingMeasurement: 1, read: 4, independent: 4, final: 3, known: 1, pending: 1, unknown: 2 }, returns: { n: 1, mean: 20, distinctTokens: 1 } });
+      expect(summary.body.decisions.unknownRate).toBeCloseTo(2 / 3);
+      const signals = await http('/v1/analytics/signals?days=7&action=WATCH&costPct=5', alice);
+      expect(signals.body).toMatchObject({ action: 'WATCH', costPct: 0, byReasonCode: [{ label: 'SMART_MONEY', described: { n: 1, mean: 20 } }] });
+      const sell = await http('/v1/analytics/decisions/summary?days=7&action=SELL', alice);
+      expect(sell.body).toMatchObject({ costPct: 0, returns: { n: 1, mean: -20 } }); // price movement, not short/sell P&L
+      expect((await http('/v1/analytics/decisions/summary?days=7&action=IGNORE', alice)).body).toMatchObject({ costPct: 0, decisions: { total: 1, known: 1 }, returns: { mean: 12 } });
+      expect((await http('/v1/analytics/signals?days=7&action=IGNORE', alice)).body.byReasonCode[0].described.mean).toBe(12);
+      expect((await http('/v1/analytics/decisions/outcomes?days=7&action=IGNORE', alice)).body.items.map((r: { decisionId: string }) => r.decisionId)).toEqual([ignored.id]);
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      for (let i = 0; i < 4; i++) {
+        const page = await http(`/v1/analytics/decisions/outcomes?days=7&action=WATCH&limit=1${cursor ? `&cursor=${cursor}` : ''}`, alice);
+        expect(page.status).toBe(200);
+        expect(page.body.items).toHaveLength(1);
+        expect(page.body.items[0].action).toBe('WATCH');
+        seen.push(page.body.items[0].decisionId);
+        cursor = page.body.nextCursor;
+      }
+      expect(cursor).toBeNull();
+      expect(seen).toEqual([pending.id, entry.id, horizon.id, known.id]);
+      const completed = await http('/v1/analytics/decisions/outcomes?days=7&action=WATCH&final=true', alice);
+      expect(completed.body.items.map((r: { unknownReason: string | null }) => r.unknownReason)).toEqual(['NO_ENTRY_PRICE', 'NO_HORIZON_PRICE', null]);
+    } finally { await db.agentDecision.deleteMany({ where: { id: { in: ids } } }); }
   });
 
   it('pages through outcomes with a cursor, newest first, with no gaps or repeats, and a symbol sent as plain text', async () => {

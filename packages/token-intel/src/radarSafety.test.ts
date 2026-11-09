@@ -86,6 +86,24 @@ describe('radar safety gate', () => {
     }
   });
 
+  it('blocks when known supply evidence alone exceeds the combined cap, even if the rest is unknown', () => {
+    const r = evaluateRadarSafety({ ...base, bundlePct: null, sniperPct: null, insiderPct: 21 }, NOW);
+    expect(r.status).toBe('BLOCK');
+    expect(r.blockers).toContain('BUNDLE_SNIPER_INSIDER');
+    expect(r.checks.find((c) => c.code === 'BUNDLE_SNIPER_INSIDER')).toMatchObject({ status: 'BLOCK', value: 21 });
+    expect(r.checks.find((c) => c.code === 'BUNDLE_SNIPER_INSIDER')?.detail).toContain('known insider 21.00%');
+  });
+
+  it('keeps known partial supply evidence explicit without treating it as a pass', () => {
+    const r = evaluateRadarSafety({ ...base, bundlePct: null, sniperPct: null, insiderPct: 17.18 }, NOW);
+    expect(r.status).toBe('UNKNOWN');
+    expect(r.unknowns).toContain('BUNDLE_SNIPER_INSIDER');
+    expect(r.checks.find((c) => c.code === 'BUNDLE_SNIPER_INSIDER')).toMatchObject({ status: 'UNKNOWN', value: 17.18 });
+    expect(r.checks.find((c) => c.code === 'BUNDLE_SNIPER_INSIDER')?.detail).toBe(
+      'bundle and sniper supply evidence is not available; known insider 17.18%',
+    );
+  });
+
   it('uses the profile-specific dev cap', () => {
     expect(evaluateRadarSafety({ ...base, profile: 'holder', devHoldingPct: 6 }, NOW).blockers).toContain('DEV_HOLDING');
     expect(evaluateRadarSafety({ ...base, profile: 'trencher', devHoldingPct: 6 }, NOW).blockers).not.toContain('DEV_HOLDING');

@@ -10,6 +10,7 @@ export const FEATURE_TIERS = {
   'research.analysis': 'EARLY_ACCESS', 'research.wallet_detail': 'EARLY_ACCESS', 'research.decision_analytics': 'EARLY_ACCESS',
   'research.advanced_analytics': 'EARLY_ACCESS', 'research.chat': 'EARLY_ACCESS',
   'research.personal_radar': 'PRO', 'research.thesis_tracker': 'PRO', 'research.personal_briefing': 'PRO',
+  'research.smart_money_rankings': 'PRO', 'research.smart_money_investigation': 'PRO',
 } as const satisfies Record<string, AccessTier>;
 export type FeatureKey = keyof typeof FEATURE_TIERS;
 export const RESEARCH_PAGE_LIMITS: Record<AccessTier, number> = { NONE: 0, EARLY_ACCESS: 20, MEMBER: 40, PRO: 70, ELITE: 70 };
@@ -52,7 +53,7 @@ export function resolveEntitlements(s: EntitlementSnapshot, now: Date) {
     const seen = new Set<string>();
     for (const m of s.memberships) {
       const id = entitlementId(m);
-      if (seen.has(id) || m.status !== 'ACTIVE' || !['MEMBER', 'PRO', 'ELITE'].includes(m.key) || !m.validUntil || !future(m.validUntil, now) || m.chain !== 'solana' || !links.has(key(m))) continue;
+      if (seen.has(id) || m.status !== 'ACTIVE' || !['EARLY_ACCESS', 'MEMBER', 'PRO', 'ELITE'].includes(m.key) || !m.validUntil || !future(m.validUntil, now) || m.chain !== 'solana' || !links.has(key(m))) continue;
       seen.add(id);
       sources.push({ source: 'WYNTRAX', id, tier: activeTier(m.key as AccessTier), validUntil: m.validUntil });
     }
@@ -63,9 +64,9 @@ export function resolveEntitlements(s: EntitlementSnapshot, now: Date) {
     researchPageLimit: RESEARCH_PAGE_LIMITS[effectiveTier],
     features: Object.fromEntries(Object.entries(FEATURE_TIERS).map(([feature, requiredTier]) => [feature, { requiredTier, allowed: featureAllowed(effectiveTier, feature) }])) };
 }
-/** Seats count users with active, unexpired EARLY_ACCESS-tier grants, regardless of source or paid tier. */
+/** Public seats count active, unexpired self-service grants. Admin overrides never consume a public seat. */
 export function usedSeats(grants: readonly LocalGrant[], now: Date): number {
-  return new Set(grants.filter(g => ['EARLY_ACCESS', 'ADMIN'].includes(g.source) && g.tier === 'EARLY_ACCESS' && g.status === 'ACTIVE' && (g.validUntil === null || future(g.validUntil, now))).map(g => g.userId)).size;
+  return new Set(grants.filter(g => g.source === 'EARLY_ACCESS' && g.tier === 'EARLY_ACCESS' && g.status === 'ACTIVE' && (g.validUntil === null || future(g.validUntil, now))).map(g => g.userId)).size;
 }
 /** `closesAt` and `now` are optional so older callers keep working; when both are given, a window that has ended refuses new seats. */
 export function earlyAccessClosed(closesAt: Date | null | undefined, now: Date | undefined): boolean {

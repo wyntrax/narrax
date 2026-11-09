@@ -37,6 +37,14 @@ const Market = z.object({
   }).nullish(),
 });
 const Risk = z.object({ name: z.string(), level: z.string().nullish(), value: z.string().nullish() });
+const InsiderNetwork = z.object({
+  id: z.string(),
+  size: z.number().int().nonnegative().nullish(),
+  type: z.string().nullish(),
+  tokenAmount: RawNumber.nullish(),
+  currentHolding: RawNumber.nullish(),
+  activeAccounts: z.number().int().nonnegative().nullish(),
+});
 const Report = z.object({
   mint: z.string(),
   creator: z.string().nullish(),
@@ -48,6 +56,7 @@ const Report = z.object({
   totalHolders: z.number().int().nonnegative().nullish(),
   rugged: z.boolean().nullish(),
   risks: z.array(Risk).nullish(),
+  insiderNetworks: z.unknown().nullish(),
   detectedAt: z.string().nullish(),
 });
 
@@ -62,6 +71,11 @@ export interface RugCheckReport {
   /** Locked/burned share of the largest fungible LP position, 0-100. */
   lpLockedPct: number | null;
   lpLocked: boolean | null;
+  /**
+   * Current holdings of RugCheck's linked insider networks, as a share of reported supply.
+   * This is provider-defined evidence, not proof of intent and not a bundle or sniper measurement.
+   */
+  insiderPct: number | null;
   rugged: boolean | null;
   riskFlags: string[];
   totalHolders: number | null;
@@ -81,6 +95,22 @@ const rawBigInt = (value: unknown): bigint | null => {
 const pctOf = (part: bigint | null, whole: bigint | null): number | null => {
   if (part == null || whole == null || whole <= 0n || part < 0n || part > whole) return null;
   return Number(part * 1_000_000n / whole) / 10_000;
+};
+
+/** Parse the optional insider-network list without letting a shape change erase the report's other facts. */
+const insiderPctOf = (raw: unknown, supply: bigint | null): number | null => {
+  if (supply == null || supply <= 0n) return null;
+  const parsed = z.array(InsiderNetwork).safeParse(raw);
+  if (!parsed.success) return null;
+  // RugCheck identifies linked networks rather than a single official insider list. Deduplicate by network id,
+  // require every reported holding to be parseable, and fail closed when the sum exceeds reported supply.
+  const holdings = new Map<string, bigint>();
+  for (const network of parsed.data) {
+    const holding = rawBigInt(network.currentHolding);
+    if (holding == null) return null;
+    holdings.set(network.id, holding);
+  }
+  return pctOf([...holdings.values()].reduce((sum, holding) => sum + holding, 0n), supply);
 };
 
 /** Deterministic mapping from a report body. Exported so the mapping can be tested without HTTP. */
@@ -130,6 +160,7 @@ export function parseRugCheckReport(body: unknown): RugCheckReport {
   const supply = rawBigInt(r.token?.supply);
   const creatorBalance = rawBigInt(r.creatorBalance);
   const devHoldingPct = r.creator && supply != null ? pctOf(creatorBalance, supply) : null;
+  const insiderPct = insiderPctOf(r.insiderNetworks, supply);
   const riskNames = (r.risks ?? []).map((x) => x.name.trim().toLowerCase());
   const riskFlags = [
     ...(r.rugged === true ? ['RUGGED'] : []),
@@ -146,6 +177,7 @@ export function parseRugCheckReport(body: unknown): RugCheckReport {
     top10ExLpPct,
     lpLockedPct,
     lpLocked: lpLockedPct == null ? null : lpLockedPct >= RUGCHECK_MIN_LP_LOCKED_PCT,
+    insiderPct,
     rugged: r.rugged ?? null,
     riskFlags,
     totalHolders: r.totalHolders != null && Number.isInteger(r.totalHolders) && r.totalHolders >= 0 ? r.totalHolders : null,

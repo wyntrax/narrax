@@ -1,6 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import {empty,linked,active,status,challenge,link,ADDRESS} from '../src/test/fixtures';
+import {empty,linked,active,status,challenge,link,ADDRESS,publicResearchSnapshot,wyntraxEarly} from '../src/test/fixtures';
 import type {Entitlements,PublicStatus} from '../src/lib/schemas';
 import bs58 from 'bs58';
 const BASE_URL=process.env.E2E_BASE_URL??'http://localhost:4010';
@@ -12,7 +12,8 @@ async function mockApi(page:Page,options:{status?:PublicStatus;failure?:boolean;
   const req=route.request(),path=new URL(req.url()).pathname;const origin=req.headers().origin??BASE_URL,headers={'access-control-allow-origin':origin,'access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,POST,DELETE,OPTIONS'};
   const reply=(json:unknown,statusCode=200)=>route.fulfill({status:statusCode,headers,contentType:'application/json',body:JSON.stringify(json)});
    if(req.method()==='OPTIONS')return reply({});
-   if(path==='/v1/public-config')return reply({privyAppId:null});
+    if(path==='/v1/public-config')return reply({privyAppId:null});
+    if(path==='/v1/public-research-snapshot')return reply(publicResearchSnapshot);
   if(path==='/v1/early-access/status')return reply(options.status??status);
   expect(req.headers().authorization).toBe('Bearer fixture-public-test-token');
   if(path==='/v1/me/entitlements'){
@@ -30,7 +31,7 @@ async function mockApi(page:Page,options:{status?:PublicStatus;failure?:boolean;
   if(path.endsWith('/linked-wallets/fixture-link')){snapshot=empty;return reply({ok:true});}
   return reply({error:'NOT_FOUND'},404);
  });
- return {writes,get checks(){return checks;},get verifyCount(){return verifyCount;}};
+  return {writes,setSnapshot:(value:Entitlements)=>{snapshot=value;},get checks(){return checks;},get verifyCount(){return verifyCount;}};
 }
 async function signIn(page:Page){await page.getByRole('button',{name:'Continue',exact:true}).click();await expect(page.getByRole('heading',{name:'Make it your wallet.'})).toBeVisible();}
 async function connect(page:Page){await page.getByRole('button',{name:'Connect external wallet'}).click();await page.getByRole('button',{name:/Phantom \(test fixture\)/}).click();}
@@ -49,6 +50,24 @@ async function completeCommunity(page:Page){
  await expect(page.getByRole('button',{name:'Join early access',exact:true})).toBeEnabled();
 }
 async function shot(page:Page,name:string){await page.screenshot({path:`test-results/screenshots/${name}.png`,fullPage:true});}
+for(const width of [1280,390])test(`Wyntrax early access with local signup closed at ${width}px`,async({page})=>{
+ await page.setViewportSize({width,height:900});const api=await mockApi(page,{status:{...status,enabled:false}});
+ await page.goto('/early-access');await page.getByRole('button',{name:'Continue',exact:true}).click();
+ await expect(page.locator('[data-access-state="disabled"]')).toBeVisible();
+ await connect(page);await page.getByRole('button',{name:'Sign this message'}).click();
+ await expect(page.locator('.linked-wallets')).toBeVisible();
+ await expect(page.getByRole('button',{name:'Join early access',exact:true})).toHaveCount(0);
+ api.setSnapshot(wyntraxEarly);
+ await expect(page.locator('[data-access-state="active"]')).toBeVisible();
+ await expect(page.getByRole('link',{name:/Open Narrax/})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Leave early access'})).toHaveCount(0);
+ expect(api.writes.some(w=>w.endsWith('/join'))).toBe(false);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ api.setSnapshot({...wyntraxEarly,effectiveTier:'NONE',sources:[],nextExpiry:null,memberships:wyntraxEarly.memberships.map(m=>({...m,status:'REVOKED',eligible:false,reasonCode:'REVOKED',validUntil:null}))});
+ await page.getByRole('button',{name:'Refresh access',exact:true}).click();
+ await expect(page.locator('[data-access-state="disabled"]')).toBeVisible();
+ await expect(page.getByRole('link',{name:/Open Narrax/})).toHaveCount(0);
+});
 test('verified-wallet state holds the three community steps without account linking or a server check',async({page})=>{
  const api=await mockApi(page);await page.goto('/early-access');await signIn(page);await connect(page);await page.getByRole('button',{name:'Sign this message'}).click();
  await expect(page.getByRole('heading',{name:'Wallet verified. You’re ready.'})).toBeVisible();
@@ -78,6 +97,23 @@ test('verified-wallet state holds the three community steps without account link
 test('signed-out → sign-in → external wallet → exact-message proof → join → leave → unlink',async({page})=>{
  const api=await mockApi(page);await page.goto('/early-access');await expect(page.getByRole('heading',{name:'Your research starts here.'})).toBeVisible();await shot(page,'signed-out');await signIn(page);await shot(page,'no-wallet');await connect(page);await expect(page.getByRole('heading',{name:'Read before you sign.'})).toBeVisible();await shot(page,'challenge');await page.getByRole('button',{name:'Sign this message'}).click();await expect(page.getByRole('heading',{name:'Wallet verified. You’re ready.'})).toBeVisible();await shot(page,'linked');await completeCommunity(page);await page.getByRole('button',{name:'Join early access',exact:true}).click();await expect(page.getByRole('heading',{name:'You’re in.'})).toBeVisible();await shot(page,'active');expect(api.verifyCount).toBe(1);expect(api.writes.filter(x=>x.endsWith('/join'))).toHaveLength(1);
  await page.getByRole('button',{name:'Leave early access',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();await page.getByRole('button',{name:'Confirm',exact:true}).click();await expect(page.getByRole('heading',{name:'Wallet verified. You’re ready.'})).toBeVisible();await page.getByRole('button',{name:'Unlink',exact:true}).click();await page.getByRole('button',{name:'Confirm',exact:true}).click();await expect(page.getByRole('heading',{name:'Make it your wallet.'})).toBeVisible();
+});
+for(const width of [1280,390])test(`wallet selection stays clickable without hidden card scrolling at ${width}px`,async({page})=>{
+ const api=await mockApi(page);await page.setViewportSize({width,height:720});await page.goto('/early-access');await signIn(page);
+ await page.getByRole('button',{name:'Connect external wallet'}).click();
+ const card=page.locator('.access-card'),wallet=page.getByRole('button',{name:/Phantom \(test fixture\)/});
+ await expect(wallet).toBeVisible();
+ // The card's decorative glow extends beyond its bounds. Focusing/scrolling a
+ // descendant must scroll the page, never a hidden internal card viewport.
+ await wallet.scrollIntoViewIfNeeded();
+ // Reproduce the programmatic offset from the CI trace deterministically.
+ // A clipped decoration must not create an internally scrollable card.
+ await card.evaluate(el=>{el.scrollTop=100;});
+ await wallet.focus();
+ await expect.poll(()=>card.evaluate(el=>el.scrollTop)).toBe(0);
+ await wallet.click();
+ await expect(page.getByRole('heading',{name:'Read before you sign.'})).toBeVisible();
+ expect(api.writes.filter(w=>w.endsWith('/challenge'))).toHaveLength(1);
 });
 for(const [name,value,title] of [
  ['disabled',{enabled:false,seatsLeft:null,inviteRequired:false},'Early access is not open yet.'],

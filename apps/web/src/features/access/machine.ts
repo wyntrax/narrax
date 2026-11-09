@@ -7,7 +7,7 @@ export const TRANSITIONS: Record<Event['type'], readonly StateName[]> = {
  SIGN_OUT:STATES, PUBLIC:STATES, CHECK:STATES, FAIL:STATES,
  LOADED:['checking','unlinking','leaving'], CONNECT:['noWallet','linked','active','disabled','full','inviteOnly','error'],
  CHALLENGE:['connecting'], SIGN:['challenge'], SIGNED:['signing'], VERIFIED:['verifying'],
- JOIN:['linked'], JOINED:['joining'], SYNC:['linked','active'],
+  JOIN:['linked'], JOINED:['joining'], SYNC:['linked','active','disabled','full','inviteOnly'],
  UNLINK:['linked','active','disabled','full','inviteOnly','error'], LEAVE:['active','linked','disabled','full','inviteOnly','error']
 };
 export function resolvedName(data:Entitlements, status?:PublicStatus):StateName {
@@ -32,7 +32,7 @@ export function transition(state:AccessState,event:Event):AccessState {
  case 'VERIFIED':return {...state,name:event.data.effectiveTier!=='NONE'?'active':resolvedName(event.data,state.status),data:event.data,challenge:undefined};
  case 'JOIN':return {...state,name:'joining'};
  case 'JOINED':return {...state,name:resolvedName(event.data,state.status),data:event.data};
- // A post-sign-in refresh may discover paid access while the wallet is verified. It opens the app without a manual step.
+  // A post-sign-in refresh may discover membership access while the wallet is verified.
  case 'SYNC':return {...state,data:event.data,name:event.data.effectiveTier!=='NONE'?'active':state.name};
  case 'UNLINK':return {...state,name:'unlinking',challenge:undefined};
  case 'LEAVE':return {...state,name:'leaving'};

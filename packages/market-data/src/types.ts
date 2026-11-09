@@ -36,6 +36,9 @@ export interface TokenInfo {
   name: string | null;
   symbol: string | null;
   holders: number | null;
+  /** Cached providers must supply their observation time, or null if unavailable.
+   * Omitted only by sources whose response is itself a direct observation. */
+  holdersUpdatedAt?: Date | null;
   /** Percent of supply (0 to 100) held by the ten largest accounts. May include pool and exchange accounts. */
   top10Pct: number | null;
   mintAuthorityActive: boolean | null;

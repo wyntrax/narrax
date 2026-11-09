@@ -9,6 +9,7 @@ export function routeFeature(path:string):FeatureKey|undefined{
    case 'personal-radar':return 'research.personal_radar';
    case 'theses':return 'research.thesis_tracker';
    case 'briefing':return 'research.personal_briefing';
+   case 'investigation':return 'research.smart_money_investigation';
   case 'radar':case 'narratives':return 'research.narratives';
   case 'tokens':return 'research.tokens';
   case 'opportunities':return 'research.opportunities';

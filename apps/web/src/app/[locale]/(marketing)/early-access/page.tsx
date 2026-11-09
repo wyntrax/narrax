@@ -1,17 +1,20 @@
 import {getLocale,getTranslations} from 'next-intl/server';
+import {redirect} from 'next/navigation';
 import {AuthBoundary} from '@/components/auth/boundary';
 import {AccessFlow} from '@/features/access/controller';
 import {BrandMark} from '@/components/brand-mark';
 import {ShieldCheck,ArrowLeft} from 'lucide-react';
 import {Link} from '@/i18n/navigation';
-import {HOLDING_TIERS} from '@narra/shared';
+import {HOLDING_TIERS,WyntraxMembershipUrl} from '@narra/shared';
 import {fetchRequirements} from '@/lib/requirements';
 import {PoweredBy} from '@/components/powered-by';
 import {TokenAvatar} from '@/features/research/token-identity';
-import './access-design.css';
+import '@/features/access/access-design.css';
 
 export default async function EarlyAccess(){
  const t=await getTranslations('access'),c=await getTranslations('common'),l=await getTranslations('landing'),v=await getTranslations('visual'),locale=await getLocale(),requirements=await fetchRequirements();
+ const configured=WyntraxMembershipUrl.safeParse(requirements?.wyntraxUrl??null);
+ if(configured.success&&configured.data)redirect(configured.data);
  return <main id="main" className="access-page container">
   <div className="access-atmosphere" aria-hidden="true"/>
   <div className="access-layout">

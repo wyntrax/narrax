@@ -10,7 +10,7 @@ export const EntitlementsSchema = z.object({
   nextExpiry: DateTime.nullable(), researchPageLimit: z.number().int().nonnegative(),
   features: z.record(Feature).refine(v => Object.keys(FEATURE_TIERS).every(k => k in v)), rollout: z.object({enforced: z.boolean(), shadow_log: z.boolean()}),
   links: z.array(LinkSchema), grants: z.array(GrantSchema.extend({eligible: z.boolean(), reasonCode: z.enum(['ACTIVE','EXPIRED','REVOKED','DISABLED','WALLET_REQUIRED'])})),
-  memberships: z.array(z.object({membershipId: z.string(), chain: z.literal('solana'), address: z.string(), key: z.enum(['NONE','MEMBER','PRO','ELITE']), seq: z.string().regex(/^\d+$/), status: z.enum(['ACTIVE','EXPIRED','REVOKED']), validUntil: DateTime.nullable(), eligible: z.boolean(), reasonCode: z.enum(['ACTIVE','EXPIRED','REVOKED'])}))
+  memberships: z.array(z.object({membershipId: z.string(), chain: z.literal('solana'), address: z.string(), key: z.enum(['NONE','EARLY_ACCESS','MEMBER','PRO','ELITE']), seq: z.string().regex(/^\d+$/), status: z.enum(['ACTIVE','EXPIRED','REVOKED']), validUntil: DateTime.nullable(), eligible: z.boolean(), reasonCode: z.enum(['ACTIVE','EXPIRED','REVOKED'])}))
 });
 export type Entitlements = z.infer<typeof EntitlementsSchema>;
 export const StatusSchema = z.object({enabled: z.boolean(), seatsLeft: z.number().int().nonnegative().nullable(), inviteRequired: z.boolean()}).strict();
@@ -21,6 +21,7 @@ export const RequirementsSchema = z.object({
   tokenImageUrl: z.string().nullish(),
   tokenMint: z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/).nullable().default(null),
   tiers: z.object({MEMBER: z.number().positive(), PRO: z.number().positive()}),
+  wyntraxUrl: z.string().url().nullable().default(null),
   earlyAccess: z.object({closesAt: DateTime.nullable(), accessDays: z.number().int().positive().nullable()}),
   featureTiers: z.record(Tier).optional(),
 });

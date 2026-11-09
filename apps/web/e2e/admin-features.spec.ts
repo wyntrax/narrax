@@ -26,10 +26,14 @@ for(const width of [1440,390])for(const theme of ['dark','light'])test(`admin fe
  });
  const enter=async(path:string)=>{await page.goto(`${origin}/en/app/${path}`);await page.getByRole('button',{name:'Continue',exact:true}).click();};
  await enter('agent');await expect(page.getByText('Research access required')).toBeVisible();await expect(page.getByLabel('Your question')).toHaveCount(0);
-  await enter('admin');await expect(page.getByRole('heading',{name:'Feature access by tier'})).toBeVisible();
-  await expect(page.getByRole('heading',{name:'Integrations & credentials'})).toBeVisible();
+ await enter('admin');
+ await page.getByRole('tab',{name:'Tiers & features'}).click();
+ await expect(page.getByRole('heading',{name:'Feature access by tier'})).toBeVisible();
+ await page.getByRole('tab',{name:'Runtime'}).click();
+ await expect(page.getByRole('heading',{name:'Integrations & credentials'})).toBeVisible();
  await expect(page.locator('section[aria-labelledby="admin-features"] select')).toHaveCount(Object.keys(FEATURE_TIERS).length);
  await expect(page.locator('option[value="ELITE"]')).toHaveCount(0);await expect(page.locator('#tier-ELITE')).toHaveCount(0);
+  await page.getByRole('tab',{name:'Research'}).click();
   await expect(page.getByRole('heading',{name:'Wallet webhook'})).toBeVisible();
   const panel=page.locator('section[aria-labelledby="research-coverage-title"]');
   await expect(panel.getByRole('heading',{name:'Research coverage & discovery'})).toBeVisible();
@@ -42,7 +46,11 @@ for(const width of [1440,390])for(const theme of ['dark','light'])test(`admin fe
   return boxes.slice(1).every((box,i)=>box.top-boxes[i]!.bottom>=20);
  });expect(spacing).toBe(true);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
- expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
+ for(const tab of ['Early access','Tiers & features','Research','Runtime']){
+  await page.getByRole('tab',{name:tab}).click();
+  expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
+ }
+ await page.getByRole('tab',{name:'Tiers & features'}).click();
  await page.locator('#feature-research\\.chat').selectOption('MEMBER');await page.locator('#feature-reason').fill('Member Agent access');
  await page.getByRole('button',{name:'Save feature access'}).click();await expect.poll(()=>writes.length).toBe(1);
  expect(writes[0]).toMatchObject({reason:'Member Agent access',settings:{'entitlements.features':{'research.chat':{requiredTier:'MEMBER'}}}});
