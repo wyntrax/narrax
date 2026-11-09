@@ -17,6 +17,7 @@ for(const width of [1440,390])for(const screen of ['opportunities','token','heal
    '/v1/me':{isAdmin:true},'/v1/me/entitlements':{...access,admin:true},
    '/v1/admin/data-health':health,'/v1/admin/entitlements/settings':{items:[]},'/v1/admin/early-access/stats':{occupied:0,available:0,cap:0,active:0,expired:0,revoked:0},'/v1/admin/early-access/grants':{items:[]},
    '/v1/admin/runtime-settings':{privyAppId:{value:'fixture-app',source:'environment'},privyVerificationKey:{value:'',source:'environment'},corsOrigins:{value:[baseURL!],source:'environment',extra:[],environment:[baseURL!]}},
+   '/v1/admin/integrations':{telegram:{enabled:{value:false,source:'default'},chatId:{value:null,source:'default'},botToken:{configured:false,source:'default'},maxAgeMin:{value:15,source:'default'},maxPerRun:{value:10,source:'default'},sendDelayMs:{value:1200,source:'default'}},treg:{enabled:{value:false,source:'default'},token:{configured:false,source:'default'},org:{value:null,source:'default'}},invalid:[]},
   };return path in overrides?{body:overrides[path]}:undefined;
  });
  await enterWorkspace(page,screen==='health'?'/app/admin':screen==='token'?`/app/tokens/${ADDRESS}`:'/app/opportunities');

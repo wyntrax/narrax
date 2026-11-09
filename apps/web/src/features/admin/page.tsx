@@ -14,6 +14,7 @@ import {RuntimeCard} from './runtime-card';
 import {DataHealthCard} from './data-health-card';
 import {FeaturesCard} from './features-card';
 import {WalletResearchCard} from './wallet-research-card';
+import {IntegrationsCard} from './integrations-card';
 
 const ERROR_KEYS = {
   FORBIDDEN: 'adminErrForbidden', EARLY_ACCESS_DISABLED: 'adminErrDisabled', EARLY_ACCESS_FULL: 'adminErrFull', VERIFIED_WALLET_REQUIRED: 'adminErrWallet',
@@ -68,6 +69,7 @@ export function AdminPage() {
     <TiersCard api={api} initial={toTierForm(settings.data.items)}/>
     <FeaturesCard api={api} items={settings.data.items}/>
     <GrantsCard api={api}/>
+    <IntegrationsCard api={api} queryKey={key('integrations')}/>
     <RuntimeCard api={api} queryKey={key('runtime')}/>
   </div>;
 }

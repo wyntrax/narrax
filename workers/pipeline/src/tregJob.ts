@@ -3,13 +3,20 @@ import type { PrismaClient } from '@narra/database';
 import { createTregClient, TregNarrativeProvider, TregError, type TregConfig } from '@narra/narrative';
 import { ingestNarratives } from './narrativeIngestion';
 
-export async function runTregJob(db: PrismaClient, config: TregConfig, job: Job) {
+export interface TregCredentials {
+  token: string;
+  org?: string;
+}
+
+export async function runTregJob(db: PrismaClient, config: TregConfig, job: Job, credentials: TregCredentials = {
+  token: process.env.TREG_TOKEN ?? '', org: process.env.TREG_ORG,
+}) {
   // Scheduler jobs may be created before they run. Persist observation time for redelivery.
   const observedAt = typeof job.data.observedAt === 'number' && Number.isFinite(job.data.observedAt)
     ? job.data.observedAt : Date.now();
   if (job.data.observedAt !== observedAt) await job.updateData({ ...job.data, observedAt });
   const now = new Date(observedAt);
-  const call = createTregClient({ token: process.env.TREG_TOKEN!, org: process.env.TREG_ORG, maxCostUsd: config.maxCostUsd,
+  const call = createTregClient({ token: credentials.token, org: credentials.org, maxCostUsd: config.maxCostUsd,
     onReceipt: async receipt => {
       console.log(JSON.stringify({ msg: 'narrative_source_call', ...receipt }));
       await db.auditLog.create({ data: { action: 'NARRATIVE_SOURCE_CALL', detail: { ...receipt, jobId: job.id ?? null } } });

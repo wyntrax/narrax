@@ -17,6 +17,8 @@ it('every literal HTTP registration is deliberately classified; generated accoun
   for (const route of ['GET /v1/public-config', 'GET /v1/admin/runtime-settings', 'POST /v1/admin/runtime-settings/check-privy', 'GET /v1/admin/users/lookup', 'GET /v1/admin/early-access/grants']) newRoutes.add(route);
   // Admin-only research review and its diagnostics; operator approval never grants research eligibility.
   for (const route of ['GET /v1/admin/wallet-research/health', 'POST /v1/admin/wallets/:address/research-review']) newRoutes.add(route);
+  // Admin-only integration credentials (Telegram token alerts, Treg ingestion). Every route is behind makeRequireAdmin.
+  for (const route of ['GET /v1/admin/integrations', 'PUT /v1/admin/integrations', 'POST /v1/admin/integrations/telegram/test']) newRoutes.add(route);
   // Manual user-signed swaps: own-data config/history/status are authentication-only; research, balances,
   // preview and submit require research.tokens and are still blocked by evidence and wallet checks.
   for (const route of ['GET /v1/manual-trades/config', 'GET /v1/manual-trades/balances', 'POST /v1/manual-trades/research', 'POST /v1/manual-trades/preview', 'POST /v1/manual-trades/submit', 'GET /v1/manual-trades', 'GET /v1/manual-trades/:id']) newRoutes.add(route);

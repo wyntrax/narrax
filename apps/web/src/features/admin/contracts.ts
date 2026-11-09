@@ -28,6 +28,18 @@ export type DataHealth=z.infer<typeof DataHealthSchema>;
 export const MeSchema = z.object({isAdmin: z.boolean().optional(), admin: z.object({configured: z.boolean(), privyUserId: z.string(), email: z.string().nullable()}).optional()});
 
 export const SettingsSchema = z.object({items: z.array(z.object({key: z.string(), value: z.unknown()}))});
+const SettingSource=z.enum(['database','environment','default']);
+const SourcedText=z.object({value:z.string().nullable(),source:SettingSource});
+const SourcedFlag=z.object({value:z.boolean(),source:SettingSource});
+const SourcedCount=z.object({value:z.number().int(),source:SettingSource});
+const SecretStatus=z.object({configured:z.boolean(),source:SettingSource});
+export const IntegrationsSchema=z.object({
+  telegram:z.object({enabled:SourcedFlag,chatId:SourcedText,botToken:SecretStatus,maxAgeMin:SourcedCount,maxPerRun:SourcedCount,sendDelayMs:SourcedCount}),
+  treg:z.object({enabled:SourcedFlag,token:SecretStatus,org:SourcedText}),
+  invalid:z.array(z.string()),
+});
+export type Integrations=z.infer<typeof IntegrationsSchema>;
+export const TelegramTestSchema=z.object({ok:z.literal(true),messageId:z.string().optional()});
 const Source = z.enum(['database','environment']);
 export const RuntimeSettingsSchema = z.object({
   privyAppId: z.object({value:z.string(),source:Source}),
