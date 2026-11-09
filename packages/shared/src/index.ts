@@ -6,6 +6,7 @@ export * from './alerts';
 export * from './env';
 export * from './entitlements';
 export * from './runtime-settings';
+export * from './integration-settings';
 export * from './access-config';
 export * from './solana-address';
 export * from './manual-trade';

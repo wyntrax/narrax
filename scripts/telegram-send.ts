@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { createPrisma } from '@narra/database';
-import { deliverEarlyRadarTelegram, telegramConfigFromEnv, TelegramBotApiTransport, TELEGRAM_LIMITS } from '../workers/pipeline/src/telegram';
+import { deliverEarlyRadarTelegram, telegramConfigFromSettings, TelegramBotApiTransport, TELEGRAM_LIMITS } from '../workers/pipeline/src/telegram';
 
 const usage = `Early Radar Telegram delivery.
 
@@ -16,7 +16,7 @@ Options:
   --help                      Show this help
 
 Reads global Early Radar alerts only. It never sends a user-owned alert, creates a call, order or position.
-Requires DATABASE_URL. --send also requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.`;
+Requires DATABASE_URL. --send also requires the bot token and chat id from the admin page or TELEGRAM_* variables.`;
 
 const positive = (name: string, raw: string | undefined, fallback: number): number => {
   if (raw == null) return fallback;
@@ -43,20 +43,19 @@ async function main() {
   }
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required');
 
-  const config = telegramConfigFromEnv();
   const send = values.send === true && values['dry-run'] !== true;
-  if (send && process.env.TELEGRAM_ENABLED?.trim().toLowerCase() === 'false') throw new Error('TELEGRAM_ENABLED=false disables Telegram delivery');
-  const chatId = values['chat-id']?.trim() || config?.chatId || (send ? undefined : 'dry-run');
-  if (!chatId) throw new Error('TELEGRAM_CHAT_ID is required (or pass --chat-id)');
-  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
-  if (send && !token) throw new Error('TELEGRAM_BOT_TOKEN is required for --send');
-
-  const limit = Math.max(1, Math.min(Math.floor(positive('--limit', values.limit, config?.limit ?? TELEGRAM_LIMITS.maxPerRun)), 20));
-  const maxAgeMs = positive('--max-age-min', values['max-age-min'], (config?.maxAgeMs ?? TELEGRAM_LIMITS.maxAgeMs) / 60_000) * 60_000;
-  const transport = send ? new TelegramBotApiTransport(token!, process.env.TELEGRAM_API_BASE, 10_000) : undefined;
-
   const db = createPrisma();
   try {
+    const config = await telegramConfigFromSettings(db);
+    const chatId = values['chat-id']?.trim() || config?.chatId || (send ? undefined : 'dry-run');
+    if (!chatId) throw new Error('Set the group chat on the admin page, or in TELEGRAM_CHAT_ID (or pass --chat-id)');
+    const token = config?.token;
+    if (send && !token) throw new Error('Set the bot token on the admin page or in TELEGRAM_BOT_TOKEN for --send');
+
+    const limit = Math.max(1, Math.min(Math.floor(positive('--limit', values.limit, config?.limit ?? TELEGRAM_LIMITS.maxPerRun)), 20));
+    const maxAgeMs = positive('--max-age-min', values['max-age-min'], (config?.maxAgeMs ?? TELEGRAM_LIMITS.maxAgeMs) / 60_000) * 60_000;
+    const transport = send ? new TelegramBotApiTransport(token!, process.env.TELEGRAM_API_BASE, 10_000) : undefined;
+
     const summary = await deliverEarlyRadarTelegram(db, {
       chatId,
       transport,

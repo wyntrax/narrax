@@ -11,7 +11,6 @@ import {combinedMetadataSource,heliusMetadataSource,jupiterMetadataSource} from 
 import { createPrisma } from '@narra/database';
 import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, TokenDiscoveryJobSchema, WyntraxHoldingsJobSchema, WyntraxMembershipEventSchema, createQueues, createRedis } from '@narra/queue';
 import { HeliusWebhooks, JupiterClient, SolanaRpc } from '@narra/solana';
-import { readTregConfig } from '@narra/narrative';
 import { runTregJob } from './tregJob';
 import { trackEarlyRadarOutcomes } from './earlyRadarTracking';
 import { DexScreenerSource, GeckoTerminalSource } from '@narra/market-data';
@@ -21,7 +20,8 @@ import { assertEnv } from '@narra/shared';
 import { makeDeveloperHoldingSource } from './developerHoldings';
 import { makeRadarSafetySource } from './radarSafetyEvidence';
 import { makeTradeabilitySource } from './tradeabilityEvidence';
-import { deliverEarlyRadarTelegram, telegramConfigFromEnv, TelegramBotApiTransport } from './telegram';
+import { deliverEarlyRadarTelegram, telegramConfigFromSettings, TelegramBotApiTransport } from './telegram';
+import { tregConfigFromSettings } from './integrationSettings';
 import {makeHolderRpcSource} from './holderRpc';
 import {makeFailoverHolderSource,holderRpcEndpoints} from './holderRpcFailover';
 import {refreshRadarHolders} from './holderFallback';
@@ -32,7 +32,6 @@ import { acquireWorkerLock, WORKER_LOCK_KEY } from './workerLock';
 
 // First, before any connection is opened: stop with a clear list of what is wrong. Messages never contain a value.
 assertEnv('worker');
-const tregConfig = readTregConfig(process.env);
 
 const WORKER_LOCK_TTL_MS = 90_000;
 
@@ -67,7 +66,15 @@ async function main(): Promise<void> {
   // Real wallets are only touched when an RPC is configured. Without one, SEMI_AUTO and AUTO users are skipped by the fan-out
   // and their jobs fail closed; PAPER and SHADOW users use the paper ledger and need no RPC.
   const realChain: ChainPorts | null = process.env.HELIUS_RPC_URL ? chain : null;
-  if (!tregConfig) console.log('no narrative providers configured: set TREG_NARRATIVE_ENABLED and Treg configuration to enable social ingestion');
+
+  // Integrations are admin-managed (with the environment as fallback) and read again on every job. The startup read
+  // still fails fast on an invalid environment configuration, exactly as the env-only reader did.
+  const startupTreg = await tregConfigFromSettings(db);
+  if (!startupTreg) console.log('narrative ingestion off: enable Treg on the admin page or set TREG_NARRATIVE_ENABLED and TREG_TOKEN');
+  else console.log(`narrative ingestion on: ${startupTreg.config.platforms.join(', ')} · ${startupTreg.config.topics.length} topics`);
+  const startupTelegram = await telegramConfigFromSettings(db);
+  if (!startupTelegram) console.log('telegram delivery off: set the bot token and group chat on the admin page or in TELEGRAM_*');
+  else console.log(`telegram delivery on: chat ${startupTelegram.chatId}`);
 
   // Holder enumeration has its own endpoint chain, independent of the shared keys when
   // HOLDER_RPC_URL is set: the holder primary, then its fallback. A 429 or unreachable
@@ -99,12 +106,8 @@ async function main(): Promise<void> {
   if (tradeability) console.log('radar tradeability evidence on: jupiter, $50 USDC quote');
   if (radarSafety) console.log(`radar safety evidence on: rugcheck, max ${process.env.RADAR_SAFETY_EVIDENCE_MAX_PER_RUN ?? '3'} lookups per run`);
 
-  // Telegram is a delivery layer for global research alerts only. It is off unless both values are set.
+  // Telegram is a delivery layer for global research alerts only. It is off unless the admin page (or env) enables it.
   // The worker never reads user-owned alerts and cannot place orders or touch a position.
-  const telegramConfig = telegramConfigFromEnv();
-  const telegramTransport = telegramConfig ? new TelegramBotApiTransport(telegramConfig.token, telegramConfig.botApiBase) : null;
-  if (!telegramConfig) console.log('telegram delivery off: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID');
-  else console.log('telegram delivery on');
 
   // Wallet jobs. History scans need an RPC URL. Webhook sync needs the Helius API key, the public webhook URL and the shared secret.
   // Each job does nothing when its inputs are missing, and none of them can trade.
@@ -132,7 +135,7 @@ async function main(): Promise<void> {
   const scheduled = (async () => {
     await queues.scheduleWalletIntelligence();
     await queues.scheduleAiAnalysis();
-    await queues.scheduleNarrativeIngestion(tregConfig?.intervalMs);
+    await queues.scheduleNarrativeIngestion(startupTreg?.config.intervalMs);
     await queues.scheduleTokenResolution();
     await queues.scheduleMarketData();
     await queues.scheduleHolderRefresh();
@@ -146,7 +149,8 @@ async function main(): Promise<void> {
     await queues.scheduleOutcomeTracking();
     await queues.scheduleNotificationDispatch();
     await queues.scheduleRealtimePublish();
-    if (telegramConfig) await queues.scheduleTelegramDelivery();
+    // Always scheduled. The job checks the current admin settings and does nothing when delivery is off.
+    await queues.scheduleTelegramDelivery();
     if (historyRpc) await queues.scheduleWyntraxHoldings();
   })();
   scheduled.then(() => console.log('schedules registered'), (e) => { console.error('could not register schedules:', e instanceof Error ? e.message : e); process.exit(1); });
@@ -199,8 +203,15 @@ async function main(): Promise<void> {
       return JSON.stringify(summary);
     }, { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.narrativeIngestion, async (job) => {
-      if (!tregConfig) return 'disabled';
-      return runTregJob(db, tregConfig, job);
+      let integration: Awaited<ReturnType<typeof tregConfigFromSettings>>;
+      try {
+        integration = await tregConfigFromSettings(db);
+      } catch (error) {
+        // A stored-but-invalid credential fails closed and is visible in the queue result without leaking a value.
+        return JSON.stringify({ skipped: 'invalid', code: error instanceof Error ? error.message : 'INVALID_TREG_CONFIG' });
+      }
+      if (!integration) return 'disabled';
+      return runTregJob(db, integration.config, job, { token: integration.token, ...(integration.org ? { org: integration.org } : {}) });
     }, { connection, concurrency: 1 }),
     // Fan-out only creates jobs. It cannot trade, and neither can the jobs: with no Executor they end as a paper fill, a pending confirmation, a log row, a dry run or execution_disabled.
     new Worker(QUEUE_NAMES.entryFanOut, async () => {
@@ -216,10 +227,12 @@ async function main(): Promise<void> {
     new Worker(QUEUE_NAMES.realtimePublish, async () => JSON.stringify(await publishNewEvents(db, connection)), { connection, concurrency: 1 }),
     // Global Early Radar alerts to Telegram. Read-only delivery: no alert, order or position is written here.
     new Worker(QUEUE_NAMES.telegramDelivery, async () => {
-      if (!telegramConfig || !telegramTransport) return 'telegram disabled';
+      const config = await telegramConfigFromSettings(db).catch(() => null);
+      if (!config) return 'telegram disabled';
+      const transport = new TelegramBotApiTransport(config.token, config.botApiBase);
       const summary = await deliverEarlyRadarTelegram(db, {
-        chatId: telegramConfig.chatId, transport: telegramTransport, dryRun: false,
-        maxAgeMs: telegramConfig.maxAgeMs, limit: telegramConfig.limit, delayMs: telegramConfig.delayMs,
+        chatId: config.chatId, transport, dryRun: false,
+        maxAgeMs: config.maxAgeMs, limit: config.limit, delayMs: config.delayMs,
       });
       if (summary.lastError || summary.sent || summary.failed || summary.stopped) {
         console.log(JSON.stringify({
@@ -229,7 +242,7 @@ async function main(): Promise<void> {
         }));
       }
       if(process.env.TELEGRAM_HEALTH_NOTICES!=='false'&&!summary.sent&&!summary.failed&&!summary.stopped){
-        const health=await deliverTelegramFeedHealth(db,{chatId:telegramConfig.chatId,transport:telegramTransport,dryRun:false});
+        const health=await deliverTelegramFeedHealth(db,{chatId:config.chatId,transport,dryRun:false});
         if(health.sent||health.reason==='SEND_FAILED')console.log(JSON.stringify({msg:'telegram_feed_health',...health}));
       }
       return JSON.stringify(summary);

@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@narra/database';
+import { effectiveIntegrations } from '@narra/shared';
 
 /**
  * Read-only Telegram delivery for the research alerts. It reads global Early Radar alerts that the pipeline already
@@ -114,6 +115,28 @@ export function telegramConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Tel
     limit: Math.max(1, Math.min(Math.floor(numberOr(env.TELEGRAM_MAX_PER_RUN, TELEGRAM_LIMITS.maxPerRun)), 20)),
     delayMs: numberOr(env.TELEGRAM_SEND_DELAY_MS, TELEGRAM_LIMITS.sendDelayMs, true),
   };
+}
+
+/**
+ * Reads the admin-managed Telegram settings and falls back to the environment for anything not saved.
+ * The worker calls this on every delivery run, so a chat or token change applies without a restart.
+ */
+export async function telegramConfigFromSettings(
+  db: Pick<PrismaClient, 'systemSetting'>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<TelegramDeliveryConfig | null> {
+  const rows = await db.systemSetting.findMany({ where: { key: { startsWith: 'integrations.telegram.' } }, select: { key: true, value: true } });
+  const settings = effectiveIntegrations(rows, env).telegram;
+  if (!settings.enabled.value || !settings.botToken.value || !settings.chatId.value) return null;
+  return telegramConfigFromEnv({
+    ...env,
+    TELEGRAM_ENABLED: 'true',
+    TELEGRAM_BOT_TOKEN: settings.botToken.value,
+    TELEGRAM_CHAT_ID: settings.chatId.value,
+    TELEGRAM_MAX_AGE_MIN: String(settings.maxAgeMin.value),
+    TELEGRAM_MAX_PER_RUN: String(settings.maxPerRun.value),
+    TELEGRAM_SEND_DELAY_MS: String(settings.sendDelayMs.value),
+  });
 }
 
 /** Stable, filesystem-safe key. Chat IDs are normally numeric; public @channel names are sanitized. */

@@ -2,7 +2,7 @@ import {createTransport} from '@/lib/api';
 import {z} from 'zod';
 import {ResearchWalletsSchema,CandidatesSchema,ResearchHealthSchema} from '@/features/research/wallet-research-contracts';
 import {GrantSchema, OkSchema} from '@/lib/schemas';
-import {GrantListSchema, LookupSchema, SettingsSchema, StatsSchema, RuntimeSettingsSchema,DataHealthSchema} from './contracts';
+import {GrantListSchema, LookupSchema, SettingsSchema, StatsSchema, RuntimeSettingsSchema,DataHealthSchema,IntegrationsSchema,TelegramTestSchema} from './contracts';
 
 /** Admin calls. The API rejects anyone who is not an admin with 403, so nothing here is a security boundary. */
 export function createAdminApi(getToken: () => Promise<string | null>, base = process.env.NEXT_PUBLIC_API_URL ?? '', fetcher: typeof fetch = fetch, getIdentityToken?: () => Promise<string | null>) {
@@ -20,6 +20,11 @@ export function createAdminApi(getToken: () => Promise<string | null>, base = pr
     lookup: (q: string) => request(`/v1/admin/users/lookup?${new URLSearchParams({q})}`, LookupSchema),
     save: (settings: Record<string, unknown>, reason: string, overridePrivyCheck = false) => request('/v1/admin/entitlements/settings', OkSchema, 'PUT', {settings, reason, overridePrivyCheck}),
     runtime: () => request('/v1/admin/runtime-settings', RuntimeSettingsSchema),
+    integrations: () => request('/v1/admin/integrations', IntegrationsSchema),
+    saveIntegrations: (settings: Record<string, unknown>, reason: string) => request('/v1/admin/integrations', IntegrationsSchema, 'PUT', {settings, reason}),
+    testTelegram: (chatId?: string, botToken?: string) => request('/v1/admin/integrations/telegram/test', TelegramTestSchema, 'POST', {
+      ...(chatId ? {chatId} : {}), ...(botToken ? {botToken} : {}),
+    }),
     dataHealth:()=>request('/v1/admin/data-health',DataHealthSchema),
     checkPrivy: (appId: string, verificationKey: string) => request('/v1/admin/runtime-settings/check-privy', OkSchema, 'POST', {appId, verificationKey}),
     grant: (userId: string, validUntil: string, reason: string) => request(`${user(userId)}/grants`, GrantSchema, 'POST', {tier: 'EARLY_ACCESS', validUntil, reason}),
