@@ -29,10 +29,10 @@ for(const width of [1440,390])for(const theme of ['dark','light'])test(`admin fe
  await enter('admin');
  await page.getByRole('tab',{name:'Tiers & features'}).click();
  await expect(page.getByRole('heading',{name:'Feature access by tier'})).toBeVisible();
- await page.getByRole('tab',{name:'Runtime'}).click();
- await expect(page.getByRole('heading',{name:'Integrations & credentials'})).toBeVisible();
  await expect(page.locator('section[aria-labelledby="admin-features"] select')).toHaveCount(Object.keys(FEATURE_TIERS).length);
  await expect(page.locator('option[value="ELITE"]')).toHaveCount(0);await expect(page.locator('#tier-ELITE')).toHaveCount(0);
+ await page.getByRole('tab',{name:'Runtime'}).click();
+ await expect(page.getByRole('heading',{name:'Integrations & credentials'})).toBeVisible();
   await page.getByRole('tab',{name:'Research'}).click();
   await expect(page.getByRole('heading',{name:'Wallet webhook'})).toBeVisible();
   const panel=page.locator('section[aria-labelledby="research-coverage-title"]');
