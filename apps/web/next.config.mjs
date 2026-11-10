@@ -4,6 +4,16 @@ if (process.env.NODE_ENV === 'production' && Object.hasOwn(process.env, 'NARRA_W
   throw new Error('NARRA_WEB_TEST_AUTH is forbidden in production; unset it before building or starting.');
 }
 const testAuth = process.env.NARRA_WEB_TEST_AUTH === '1';
+// Production canonical origin. Used only to send www.<domain> to the apex; local http builds stay untouched.
+const publicSite = (() => {
+  const value = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.hostname.startsWith('www.')) return null;
+    return {origin: url.origin, hostname: url.hostname};
+  } catch { return null; }
+})();
 /** @type {import('next').NextConfig} */
 const config = {
   transpilePackages: ['@narra/shared'],
@@ -24,7 +34,18 @@ const config = {
   },
   async headers() { return [{source: '/:path*', headers: [
     {key: 'X-Content-Type-Options', value: 'nosniff'}, {key: 'X-Frame-Options', value: 'DENY'},
-    {key: 'Referrer-Policy', value: 'no-referrer'}, {key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()'}
-  ]}]; }
+    {key: 'Referrer-Policy', value: 'no-referrer'}, {key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()'},
+    // Match the API. No preload: that is a separate, hard-to-reverse commitment.
+    {key: 'Strict-Transport-Security', value: 'max-age=15552000; includeSubDomains'}
+  ]}]; },
+  async redirects() {
+    if (!publicSite) return [];
+    return [{
+      source: '/:path*',
+      has: [{type: 'host', value: `www.${publicSite.hostname}`}],
+      destination: `${publicSite.origin}/:path*`,
+      permanent: true,
+    }];
+  }
 };
 export default createNextIntlPlugin('./src/i18n/request.ts')(config);
