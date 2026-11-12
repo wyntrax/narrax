@@ -11,20 +11,20 @@ export interface HealthPorts {queueCounts?:()=>Promise<Record<string,QueueCounts
 // Every queue, not only the ones that had a worker bug. A queue that is missing from
 // this table is invisible, so derive it from the single queue-name registry.
 const QUEUES=Object.values(QUEUE_NAMES);
-// Expected maximum silence before a scheduled queue is considered stale. Only queues
-// whose completed jobs are retained longer than the threshold are listed: a threshold
-// beyond the retention window could never fire, and one inside it would flag normal
-// job age. Event-driven and high-frequency queues are covered by the consumer count,
-// backlog and the webhook receipt instead. A null timestamp is never stale on its own.
+// Expected maximum silence before a scheduled queue is considered stale. Completed jobs
+// are retained for one hour, so every threshold must be below that or it could never
+// fire. Queues that run less often than the retention window, or whose completions use
+// the short retention, are excluded: a null timestamp cannot prove they are stuck.
+// Event-driven and high-frequency queues are covered by the consumer count, backlog and
+// the webhook receipt instead.
 const QUEUE_STALE_AFTER_SECONDS:Record<string,number>={
  'wallet-intelligence':45*60,
  'ai-analysis':15*60,
- 'narrative-ingestion':90*60,
  'token-resolution':30*60,
  'market-data':20*60,
  'wallet-sync':30*60,
  'position-monitor':20*60,
- 'wallet-funding':90*60,
+ 'wallet-funding':45*60,
  'wallet-discovery':45*60,
  'entry-fan-out':10*60,
  'exit-fan-out':10*60,
