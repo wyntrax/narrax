@@ -64,6 +64,11 @@ export function createHeliusRuntime(
       const promise = readHeliusSettings(db, env).then(value => {
         if (version === current) cache = { value, until: now() + ttlMs, version: current };
         return value;
+      }).catch(error => {
+        // A short database outage must not take webhook authentication, balances or
+        // manual swaps down. Keep the last good snapshot; the next read retries.
+        if (cache) return cache.value;
+        throw error;
       }).finally(() => { if (pending?.promise === promise) pending = undefined; });
       pending = { promise, version: current };
     }

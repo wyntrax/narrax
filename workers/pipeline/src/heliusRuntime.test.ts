@@ -41,3 +41,17 @@ it('rebuilds the RPC pool when the URL list changes without a restart',async()=>
  expect(await (await runtime.rpc(1000))!.getBalanceLamports('wallet')).toBe(42n);
  expect(urls).toEqual(['https://one.example/?api-key=1','https://two.example/?api-key=2']);
 });
+
+it('keeps the last good settings through a short database outage',async()=>{
+ const findMany=vi.fn(async()=>[{key:'integrations.helius.rpc_urls',value:['https://one.example/?api-key=1']}] as {key:string;value:unknown}[]);
+ const db={systemSetting:{findMany}} as unknown as Pick<PrismaClient,'systemSetting'>;
+ let now=0;
+ const runtime=createHeliusRuntime(db,{},{ttlMs:100,now:()=>now});
+ expect((await runtime.read()).ready.rpc).toBe(true);
+ findMany.mockRejectedValueOnce(new Error('database unavailable'));
+ now=101;
+ expect((await runtime.read()).rpcUrls.value).toEqual(['https://one.example/?api-key=1']);
+ findMany.mockRejectedValueOnce(new Error('database unavailable'));
+ runtime.invalidate();
+ await expect(runtime.read()).rejects.toThrow('database unavailable');
+});
