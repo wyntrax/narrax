@@ -56,23 +56,31 @@ export function verifySignedSwap(unsigned:string,signed:string,wallet:string):st
  }catch{return fail('INVALID_SIGNATURE');}
 }
 
-export function makeManualSwapEngine(apiKey:string,rpcUrl:string,enabled=false):ManualSwapEngine{
+export function makeManualSwapEngine(apiKey:string,rpc: string | (() => Promise<string>),enabled=false):ManualSwapEngine{
  // Timeouts and no automatic 429 replay. Provider keys are server-only.
  const boundedFetch:typeof fetch=(url,init)=>fetch(url,{...init,signal:AbortSignal.timeout(8000)});
- const chain=new Connection(rpcUrl,{commitment:'confirmed',disableRetryOnRateLimit:true,fetch:boundedFetch}),rpc=new SolanaRpc({url:rpcUrl,timeoutMs:8000});
- async function mainnet(){if(await chain.getGenesisHash()!==MAINNET)fail('WRONG_NETWORK');}
- async function token(mint:string,side?:'BUY'|'SELL'){
+ const resolve=typeof rpc==='function'?rpc:async()=>rpc;
+ // The admin page can rotate the RPC URL without a restart. Each public call resolves
+ // the current URL once and builds a bounded client from it.
+ async function context(){
+  const url=(await resolve()).trim();
+  if(!url)fail('RPC_UNAVAILABLE');
+  return {chain:new Connection(url,{commitment:'confirmed',disableRetryOnRateLimit:true,fetch:boundedFetch}),rpc:new SolanaRpc({url,timeoutMs:8000})};
+ }
+ async function mainnet(chain:Connection){if(await chain.getGenesisHash()!==MAINNET)fail('WRONG_NETWORK');}
+ async function token(rpc:SolanaRpc,mint:string,side?:'BUY'|'SELL'){
   const info=await rpc.getMintInfo(mint);
   if(info.program!==TOKEN_PROGRAM||info.hasExtensions||info.decimals<0||info.decimals>9)fail('UNSUPPORTED_TOKEN');
   if(side==='BUY'&&info.freezeAuthority)fail('FREEZE_AUTHORITY');
   return info;
  }
- async function tables(tx:VersionedTransaction):Promise<AddressLookupTableAccount[]>{
+ async function tables(chain:Connection,tx:VersionedTransaction):Promise<AddressLookupTableAccount[]>{
   if(tx.message.addressTableLookups.length>DEFAULT_TX_LIMITS.maxLookupTables)fail('UNSUPPORTED_ROUTE');
   return Promise.all(tx.message.addressTableLookups.map(async l=>{const t=(await chain.getAddressLookupTable(l.accountKey)).value;if(!t||!t.isActive())return fail('UNSUPPORTED_ROUTE');return t;}));
  }
- async function inspect(transaction:string,wallet:string,side:'BUY'|'SELL',q:TradeQuoteData){
-  const tx=VersionedTransaction.deserialize(Buffer.from(transaction,'base64')),alts=await tables(tx);
+ async function inspect(ctx:{chain:Connection;rpc:SolanaRpc},transaction:string,wallet:string,side:'BUY'|'SELL',q:TradeQuoteData){
+  const {chain,rpc}=ctx;
+  const tx=VersionedTransaction.deserialize(Buffer.from(transaction,'base64')),alts=await tables(chain,tx);
   const message=tx.message;
   const keys=message.getAccountKeys({addressLookupTableAccounts:alts});
   const resolved=keys.accountKeysFromLookups;
@@ -93,9 +101,9 @@ export function makeManualSwapEngine(apiKey:string,rpcUrl:string,enabled=false):
  }
  return {
   enabled,
-  async balances(wallet,mint){await mainnet();const info=await token(mint);const [sol,units]=await Promise.all([rpc.getBalanceLamports(wallet),rpc.getTokenBaseUnits(wallet,mint)]);return {sol:String(sol),token:String(units),decimals:info.decimals};},
+  async balances(wallet,mint){const ctx=await context();await mainnet(ctx.chain);const info=await token(ctx.rpc,mint);const [sol,units]=await Promise.all([ctx.rpc.getBalanceLamports(wallet),ctx.rpc.getTokenBaseUnits(wallet,mint)]);return {sol:String(sol),token:String(units),decimals:info.decimals};},
   async prepare(input){
-   await mainnet();const info=await token(input.mint,input.side),buy=input.side==='BUY';
+   const ctx=await context();await mainnet(ctx.chain);const info=await token(ctx.rpc,input.mint,input.side),buy=input.side==='BUY';
    const amount=tradeBaseUnits(input.amount,buy?9:info.decimals);
    const query=new URLSearchParams({inputMint:buy?WSOL_MINT:input.mint,outputMint:buy?input.mint:WSOL_MINT,amount:String(amount),taker:input.wallet,slippageBps:String(input.slippageBps),transactionVersion:'0',maxAccounts:'48'});
    const res=await boundedFetch(`https://api.jup.ag/swap/v2/build?${query}`,{headers:{'x-api-key':apiKey}});
@@ -109,17 +117,17 @@ export function makeManualSwapEngine(apiKey:string,rpcUrl:string,enabled=false):
    const swap=instruction(b.swapInstruction);verifyRoute(swap,input.wallet,q);
    const names=Object.keys(b.addressesByLookupTableAddress??{});if(names.length>4)fail('UNSUPPORTED_ROUTE');
    // Fetch real ALTs. The builder's claimed address lists are not trusted.
-   const alts=await Promise.all(names.map(async key=>{const a=(await chain.getAddressLookupTable(new PublicKey(key))).value;if(!a||!a.isActive())return fail('UNSUPPORTED_ROUTE');return a;}));
+   const alts=await Promise.all(names.map(async key=>{const a=(await ctx.chain.getAddressLookupTable(new PublicKey(key))).value;if(!a||!a.isActive())return fail('UNSUPPORTED_ROUTE');return a;}));
    const budget=b.computeBudgetInstructions.map(instruction),hasLimit=budget.some(i=>i.data[0]===2);
    const msg=new TransactionMessage({payerKey:new PublicKey(input.wallet),recentBlockhash:bs58.encode(Uint8Array.from(b.blockhashWithMetadata.blockhash)),instructions:[...(hasLimit?[]:[ComputeBudgetProgram.setComputeUnitLimit({units:DEFAULT_TX_LIMITS.maxComputeUnits})]),...budget,...b.setupInstructions.map(instruction),swap,...(b.cleanupInstruction?[instruction(b.cleanupInstruction)]:[]),...b.otherInstructions.map(instruction)]}).compileToV0Message(alts);
    const tx=new VersionedTransaction(msg),transaction=Buffer.from(tx.serialize()).toString('base64');
-   const result=await inspect(transaction,input.wallet,input.side,q);
-   const fee=(await chain.getFeeForMessage(msg,'confirmed')).value;if(fee===null||fee>Number(DEFAULT_TX_LIMITS.maxOverheadLamports))fail('QUOTE_UNAVAILABLE');
+   const result=await inspect(ctx,transaction,input.wallet,input.side,q);
+   const fee=(await ctx.chain.getFeeForMessage(msg,'confirmed')).value;if(fee===null||fee>Number(DEFAULT_TX_LIMITS.maxOverheadLamports))fail('QUOTE_UNAVAILABLE');
    q.networkFeeLamports=String(fee);q.priorityFeeLamports=result.priority;
    return {transaction,quote:q,lastValidBlockHeight:b.blockhashWithMetadata.lastValidBlockHeight};
   },
-  async recheck(transaction,wallet,side,q){await mainnet();await token(side==='BUY'?q.outputMint:q.inputMint,side);await inspect(transaction,wallet,side,q);},
-  async send(signed){await mainnet();return chain.sendRawTransaction(Buffer.from(signed,'base64'),{skipPreflight:false,maxRetries:0,preflightCommitment:'confirmed'});},
-  async status(signature){await mainnet();const s=(await chain.getSignatureStatuses([signature],{searchTransactionHistory:true})).value[0];return !s?'SUBMITTED':s.err?'FAILED':s.confirmationStatus==='confirmed'||s.confirmationStatus==='finalized'?'CONFIRMED':'SUBMITTED';},
+  async recheck(transaction,wallet,side,q){const ctx=await context();await mainnet(ctx.chain);await token(ctx.rpc,side==='BUY'?q.outputMint:q.inputMint,side);await inspect(ctx,transaction,wallet,side,q);},
+  async send(signed){const ctx=await context();await mainnet(ctx.chain);return ctx.chain.sendRawTransaction(Buffer.from(signed,'base64'),{skipPreflight:false,maxRetries:0,preflightCommitment:'confirmed'});},
+  async status(signature){const ctx=await context();await mainnet(ctx.chain);const s=(await ctx.chain.getSignatureStatuses([signature],{searchTransactionHistory:true})).value[0];return !s?'SUBMITTED':s.err?'FAILED':s.confirmationStatus==='confirmed'||s.confirmationStatus==='finalized'?'CONFIRMED':'SUBMITTED';},
  };
 }

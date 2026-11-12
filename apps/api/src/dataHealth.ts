@@ -7,7 +7,7 @@ import {marketEvidence,marketTokenImage,observation} from './marketEvidence';
 const Receipt=z.object({at:z.string().datetime(),items:z.number().int().positive(),parsed:z.number().int().nonnegative(),queued:z.number().int().nonnegative(),skipped:z.number().int().nonnegative()});
 const Sync=z.object({at:z.string().datetime(),action:z.string(),webhookActive:z.boolean().nullable(),desired:z.number().int().nonnegative(),error:z.string().optional()});
 const Progress=z.object({checkedAt:z.string().datetime(),closedTrades:z.number().nonnegative(),observedTrades:z.number().nonnegative(),status:z.enum(['READY','INSUFFICIENT_HISTORY'])});
-export interface HealthPorts {queueCounts?:()=>Promise<Record<string,QueueCounts>>;queueHealth?:()=>Promise<Record<string,QueueHealth>>;marketDataEnabled?:boolean;webhookConfigured?:boolean;aiProviderConfigured?:boolean}
+export interface HealthPorts {queueCounts?:()=>Promise<Record<string,QueueCounts>>;queueHealth?:()=>Promise<Record<string,QueueHealth>>;marketDataEnabled?:boolean;/** A boolean, or a live reader after an admin credential change. */webhookConfigured?:boolean|(()=>Promise<boolean>);aiProviderConfigured?:boolean}
 // Every queue, not only the ones that had a worker bug. A queue that is missing from
 // this table is invisible, so derive it from the single queue-name registry.
 const QUEUES=Object.values(QUEUE_NAMES);
@@ -45,6 +45,7 @@ export async function dataHealth(db:PrismaClient,ports:HealthPorts,now:Date){
  // narrative links and the recent social handoff. The oldest 2,000 rows included dead
  // or unsupported tokens and made coverage look broken when collection was healthy.
  const socialIds=await readSocialPriority(db,now);
+ const webhookConfigured=typeof ports.webhookConfigured==='function'?await ports.webhookConfigured():ports.webhookConfigured;
  const marketScope:Prisma.TokenWhereInput={blacklisted:false,OR:[{narratives:{some:{narrative:{stage:{not:'DEAD'}}}}},{id:{in:socialIds}}]};
  const [settings,wallets,walletCount,profileCount,lastTrade,trades30d,tokenCount,tokens,unknownNames,candidateCount,belowThreshold,expiredCount,cfg,aiOn,used]=await Promise.all([
   db.systemSetting.findMany({where:{key:{in:['health.walletWebhook.receipt','wallets.syncStatus']}}}),
@@ -86,7 +87,7 @@ export async function dataHealth(db:PrismaClient,ports:HealthPorts,now:Date){
  const staleNames:string[]=[];
  const queues=QUEUES.map(name=>{
   const count=counts?.[name]??null,run=runs?.[name]??null;
-  const enabled=name==='wallet-events'?ports.webhookConfigured!==false:name==='market-data'?ports.marketDataEnabled!==false:name==='ai-analysis'?aiOn&&ports.aiProviderConfigured!==false:name==='wallet-sync'?ports.webhookConfigured!==false:true;
+  const enabled=name==='wallet-events'?webhookConfigured!==false:name==='market-data'?ports.marketDataEnabled!==false:name==='ai-analysis'?aiOn&&ports.aiProviderConfigured!==false:name==='wallet-sync'?webhookConfigured!==false:true;
    // Retained failed jobs are history. Only a failure inside this window describes current health.
    const failedMs=run?.lastFailedAt?Date.parse(run.lastFailedAt):NaN,recentFailure=Number.isFinite(failedMs)&&failedMs<=+now&&+now-failedMs<=60*60_000;
    // A scheduled queue must complete within its expected interval. wallet-events is
@@ -109,7 +110,7 @@ export async function dataHealth(db:PrismaClient,ports:HealthPorts,now:Date){
  if(queues.some(q=>q.lastRun?.providerFailures))issues.push('AI_PROVIDER_FAILURES');
  if(queues.some(q=>q.name==='ai-analysis'&&q.lastRun?.skipped))issues.push('AI_RUN_SKIPPED');
  if(queues.some(q=>q.lastRun?.rateLimited))issues.push('PROVIDER_RATE_LIMIT');
- if(ports.webhookConfigured===false)issues.push('WEBHOOK_NOT_CONFIGURED');
+ if(webhookConfigured===false)issues.push('WEBHOOK_NOT_CONFIGURED');
  else if(!validSync||elapsed(validSync.at,now)!>30*60)issues.push('WEBHOOK_SYNC_UNKNOWN');
  else if(validSync.webhookActive===false||validSync.error)issues.push('WEBHOOK_SYNC_PROBLEM');
  if(!validReceipt)issues.push('NO_DELIVERY_EVIDENCE');

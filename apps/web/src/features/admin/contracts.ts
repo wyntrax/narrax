@@ -39,12 +39,13 @@ export const IntegrationsSchema=z.object({
   invalid:z.array(z.string()),
 });
 export type Integrations=z.infer<typeof IntegrationsSchema>;
+const SecretPool=z.object({configured:Count,source:SettingSource});
 export const HeliusSchema=z.object({
-  rpcUrl:SecretStatus,
-  rpcFallbackUrl:SecretStatus,
+  rpcUrls:SecretPool,
+  rpcFallbackUrls:SecretPool,
   apiKey:SecretStatus,
-  holderRpcUrl:SecretStatus,
-  holderRpcFallbackUrl:SecretStatus,
+  holderRpcUrls:SecretPool,
+  holderRpcFallbackUrls:SecretPool,
   webhookUrl:SourcedText,
   webhookSecret:SecretStatus,
   ready:z.object({rpc:z.boolean(),holder:z.boolean(),webhook:z.boolean()}),
@@ -52,7 +53,12 @@ export const HeliusSchema=z.object({
 });
 export type Helius=z.infer<typeof HeliusSchema>;
 const EndpointTest=z.object({ok:z.boolean(),code:z.string(),status:z.number().int().optional(),latencyMs:z.number().nonnegative()});
-export const HeliusTestSchema=z.object({primary:EndpointTest.optional(),fallback:EndpointTest.optional(),holder:EndpointTest.optional(),holderFallback:EndpointTest.optional()});
+export const HeliusTestSchema=z.object({
+  rpc:z.array(EndpointTest).optional(),
+  rpcFallback:z.array(EndpointTest).optional(),
+  holder:z.array(EndpointTest).optional(),
+  holderFallback:z.array(EndpointTest).optional(),
+});
 export type HeliusTest=z.infer<typeof HeliusTestSchema>;
 export const TelegramTestSchema=z.object({ok:z.literal(true),messageId:z.string().optional()});
 const Source = z.enum(['database','environment']);

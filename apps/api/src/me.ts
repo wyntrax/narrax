@@ -13,6 +13,8 @@ const MAX_WALLETS_PER_BALANCE_CALL = 10;
 
 export interface BalanceSource {
   getBalanceLamports(address: string): Promise<bigint>;
+  /** Whether an RPC is configured right now, after an admin change. Defaults to present. */
+  configured?(): Promise<boolean>;
 }
 
 export interface MeDeps extends Pick<AccountDeps, 'db' | 'verifier' | 'now'> {
@@ -50,8 +52,9 @@ export function registerMeRoutes(app: FastifyInstance, deps: MeDeps): void {
     const wallets = await db.wallet.findMany({ where: { userId: req.userId! }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: MAX_WALLETS_PER_BALANCE_CALL, select: { address: true, kind: true } });
     const source = deps.balances;
     const at = (deps.now ?? (() => new Date()))();
+    const available = source?.configured ? await source.configured() : !!source;
     const items = await Promise.all(wallets.map(async (w) => {
-      if (!source) return { address: w.address, kind: w.kind, balanceSol: null, status: 'UNKNOWN' as const };
+      if (!source || !available) return { address: w.address, kind: w.kind, balanceSol: null, status: 'UNKNOWN' as const };
       try {
         const lamports = await source.getBalanceLamports(w.address);
         return { address: w.address, kind: w.kind, balanceSol: Number(lamports) / LAMPORTS, status: 'OK' as const };
@@ -59,7 +62,7 @@ export function registerMeRoutes(app: FastifyInstance, deps: MeDeps): void {
         return { address: w.address, kind: w.kind, balanceSol: null, status: 'UNKNOWN' as const };
       }
     }));
-    return { at, items, available: !!source };
+    return { at, items, available };
   });
 
   // Audit export of the user's own trades, paper and real, as CSV or JSON. Capped, and says so when it was.

@@ -1,6 +1,7 @@
 import {z} from 'zod';
 import type {PrismaClient} from '@narra/database';
 import {sanitizeUntrusted,isSolanaAddress,tokenImageUrl} from '@narra/shared';
+import {providerFailure,RPC_POOL_LIMITS} from './rpcPool';
 
 const Asset=z.object({id:z.string(),content:z.object({metadata:z.object({name:z.string().optional(),symbol:z.string().optional()}),links:z.object({image:z.string().optional()}).optional(),files:z.array(z.object({cdn_uri:z.string().optional(),uri:z.string().optional()})).optional()}).optional(),token_info:z.object({symbol:z.string().optional()}).optional()});
 const Envelope=z.object({result:z.array(Asset.nullable()).optional(),error:z.unknown().optional()});
@@ -42,6 +43,24 @@ export function jupiterMetadataSource(fetchImpl:typeof fetch=fetch,baseUrl=proce
    for(const token of parsed.data){if(!chunk.includes(token.id))continue;const name=sanitizeUntrusted(token.name??'',64).trim(),symbol=sanitizeUntrusted(token.symbol??'',32).trim(),imageUrl=tokenImageUrl(token.icon);if(name||symbol||imageUrl)out.set(token.id,{name,symbol,...(imageUrl?{imageUrl}:{})});}
   }
   return out;
+ }};
+}
+
+/** Rotate DAS calls across the configured RPC keys so one exhausted key does not stop
+ * metadata for the whole market run. A data error is not hidden by another key. */
+export function pooledHeliusMetadataSource(urls:readonly string[],fetchImpl:typeof fetch=fetch,opts:{now?:()=>number}={}):MetadataSource|null{
+ const sources=urls.map(url=>heliusMetadataSource(url,fetchImpl)),now=opts.now??Date.now;
+ if(!sources.length)return null;
+ const cooldownUntil=sources.map(()=>0);let cursor=0;
+ return {name:'helius-das-pool',async get(mints){
+  let lastError:unknown;
+  for(let offset=0;offset<sources.length;offset++){
+   const index=(cursor+offset)%sources.length;
+   if(cooldownUntil[index]!>now())continue;
+   try{const out=await sources[index]!.get(mints);cursor=(index+1)%sources.length;return out;}
+   catch(error){if(!providerFailure(error))throw error;lastError=error;cooldownUntil[index]=now()+RPC_POOL_LIMITS.cooldownMs;}
+  }
+  throw lastError??new Error('Token metadata request failed');
  }};
 }
 

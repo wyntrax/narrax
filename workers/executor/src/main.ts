@@ -9,7 +9,7 @@ import { Worker } from 'bullmq';
 import { createPrisma } from '@narra/database';
 import { ExecutionJobSchema, QUEUE_NAMES, createRedis } from '@narra/queue';
 import { JupiterClient, SolanaRpc } from '@narra/solana';
-import { makeChainPorts, makeExecutionStore, readHeliusSettings, runExecution, type ChainPorts, type ExecutionDeps } from '@narra/worker-pipeline';
+import { makeChainPorts, makeExecutionStore, createHeliusRuntime, runExecution, type ChainPorts, type ExecutionDeps } from '@narra/worker-pipeline';
 import { ConfigError, loadExecutorConfig } from './config';
 import { makeDryRunner } from './dryRun';
 import { assertEnv } from '@narra/shared';
@@ -24,35 +24,37 @@ async function start() {
 
   const connection = createRedis();
   const db = createPrisma();
-  // Admin-managed Helius credentials, with the environment as fallback. Read once:
-  // an edit on the admin page requires restarting this worker.
-  const helius = await readHeliusSettings(db);
-  if (helius.invalid.length) console.warn(`ignoring invalid stored Helius settings: ${helius.invalid.join(', ')}`);
+  // Admin-managed Helius settings, re-read every few seconds. No restart is needed
+  // after a save; each execution job builds clients from the current pool.
+  const helius = createHeliusRuntime(db);
+  const startup = await helius.read();
+  if (startup.invalid.length) console.warn(`ignoring invalid stored Helius settings: ${startup.invalid.join(', ')}`);
   const jupiter = new JupiterClient({ apiKey: process.env.JUPITER_API_KEY });
   const notWired = (name: string) => async (): Promise<never> => { throw new Error(`${name} needs a Helius RPC URL`); };
-  const rpc = helius.rpcUrl.value ? new SolanaRpc({ url: helius.rpcUrl.value, timeoutMs: 8000 }) : null;
-  // Without an RPC URL the ports throw, so real-wallet jobs fail closed instead of guessing balances.
-  const chain: ChainPorts = rpc
+  const chainFor = async (rpc: Awaited<ReturnType<typeof helius.rpc>>): Promise<ChainPorts> => rpc
     ? makeChainPorts({ db, rpc, jupiter })
     : { getSolBalance: notWired('getSolBalance'), getPortfolioValueSol: notWired('getPortfolioValueSol'), getTokenBaseUnits: notWired('getTokenBaseUnits') };
-
-  const execDeps: ExecutionDeps = {
-    jupiter,
-    ...makeExecutionStore(db, chain),
-    // No `executor`: there is nothing that can sign. The dry runner is the furthest an order can go.
-    ...(rpc ? { dryRunner: makeDryRunner({ db, jupiter, rpc, config }) } : {}),
-  };
   const summarize = (o: { status: string; result: { route: string; sizeSol: number }; dryRun?: { outcome: string } }) => ({ status: o.status, route: o.result.route, sizeSol: o.result.sizeSol, ...(o.dryRun ? { dryRun: o.dryRun.outcome } : {}) });
 
   // Concurrency 1: two orders for the same user must never race on balance or exposure checks, and the confirm endpoint queues here too.
-  const worker = new Worker(QUEUE_NAMES.execution, async (j) => JSON.stringify(summarize(await runExecution(db, ExecutionJobSchema.parse(j.data), execDeps))), { connection, concurrency: 1 });
+  const worker = new Worker(QUEUE_NAMES.execution, async (j) => {
+    const rpc = await helius.rpc(8_000);
+    const chain = await chainFor(rpc);
+    const execDeps: ExecutionDeps = {
+      jupiter,
+      ...makeExecutionStore(db, chain),
+      // No `executor`: there is nothing that can sign. The dry runner is the furthest an order can go.
+      ...(rpc ? { dryRunner: makeDryRunner({ db, jupiter, rpc, config }) } : {}),
+    };
+    return JSON.stringify(summarize(await runExecution(db, ExecutionJobSchema.parse(j.data), execDeps)));
+  }, { connection, concurrency: 1 });
   worker.on('failed', (job, err) => console.error(JSON.stringify({ msg: 'job_failed', queue: worker.name, id: job?.id, err: err.message })));
 
   const shutdown = async () => { await worker.close(); connection.disconnect(); await db.$disconnect(); process.exit(0); };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
-  console.log(JSON.stringify({ msg: 'executor started', mode: config.mode, canSign: false, allowlisted: config.allowlist.size, hardCapSol: config.hardCapSol, dailyCapSol: config.dailyCapSol, rpc: !!rpc }));
-  if (!rpc) console.log('no Helius RPC URL: dry runs are off, real-wallet orders fail closed');
+  console.log(JSON.stringify({ msg: 'executor started', mode: config.mode, canSign: false, allowlisted: config.allowlist.size, hardCapSol: config.hardCapSol, dailyCapSol: config.dailyCapSol, rpc: startup.ready.rpc }));
+  if (!startup.ready.rpc) console.log('no Helius RPC URL: dry runs are off, real-wallet orders fail closed');
   if (!config.allowlist.size) console.log('EXECUTOR_ALLOWLIST_USER_IDS is empty: no order will be dry-run');
 }
 

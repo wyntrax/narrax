@@ -13,6 +13,8 @@ export * from './marketData';
 export * from './walletSync';
 export * from './walletFunding';
 export * from './rpcFailover';
+export * from './rpcPool';
+export * from './heliusRuntime';
 export * from './walletDiscovery';
 export * from './tokenWalletDiscovery';
 export * from './positionMonitor';
