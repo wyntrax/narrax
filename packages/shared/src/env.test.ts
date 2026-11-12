@@ -16,6 +16,12 @@ describe('checkEnv', () => {
     const invalid=checkEnv({...base,HELIUS_RPC_URL:primary,HELIUS_RPC_FALLBACK_URL:'ftp://secondary-secret'},'worker');
     expect(invalid.errors).toEqual(['HELIUS_RPC_FALLBACK_URL must be a http:// or https:// URL.']);
     expect(JSON.stringify(invalid)).not.toContain('secondary-secret');
+    // Admin-managed Helius settings may supply the primary later, so the environment
+    // cross-check is advisory and the missing-primary warning is suppressed.
+    const runtime=checkEnv({...base,HELIUS_RPC_FALLBACK_URL:fallback},'worker',{runtimeHelius:true});
+    expect(runtime.errors).toEqual([]);
+    expect(runtime.warnings.join('\n')).not.toMatch(/HELIUS_RPC_URL is not set/);
+    expect(checkEnv({...api,HELIUS_WEBHOOK_URL:'https://api.example.com/webhooks/helius'},'api',{runtimeHelius:true}).warnings.join('\n')).not.toMatch(/HELIUS_API_KEY/);
   });
   it('accepts the minimum for the API and for the worker', () => {
     expect(checkEnv(api, 'api').errors).toEqual([]);

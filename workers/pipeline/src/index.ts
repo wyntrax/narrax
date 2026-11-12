@@ -27,6 +27,7 @@ export * from './realtimePublisher';
 export * from './systemConfig';
 export * from './telegram';
 export * from './integrationSettings';
+export * from './heliusSettings';
 export * from './socialTokens';
 export * from './walletResearch';
 export { researchCoverage, renderResearchCoverage } from './researchCoverage';

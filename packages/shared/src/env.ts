@@ -14,7 +14,7 @@ type Env = Record<string, string | undefined>;
  * contain a value: a malformed DATABASE_URL or key would otherwise be printed into logs. An empty value counts as unset,
  * because .env.example ships with empty entries.
  */
-export function checkEnv(env: Env, role: EnvRole, options: { runtimeAuth?: boolean } = {}): EnvReport {
+export function checkEnv(env: Env, role: EnvRole, options: { runtimeAuth?: boolean; /** Helius credentials may come from admin settings, so environment cross-checks are advisory. */ runtimeHelius?: boolean } = {}): EnvReport {
   const errors: string[] = [], warnings: string[] = [];
   const get = (k: string) => { const v = env[k]; return v === undefined || v.trim() === '' ? undefined : v.trim(); };
   const prod = get('NODE_ENV') === 'production';
@@ -41,14 +41,16 @@ export function checkEnv(env: Env, role: EnvRole, options: { runtimeAuth?: boole
   if (!get('JUPITER_API_KEY')) warnings.push('JUPITER_API_KEY is not set: swap quotes may be rate-limited or refused, which means no paper fills.');
 
   if (role === 'executor') {
-    if (!get('HELIUS_RPC_URL')) warnings.push('HELIUS_RPC_URL is not set: the executor cannot read balances or simulate, so real-wallet orders fail closed and no dry run is recorded.');
+    if (!get('HELIUS_RPC_URL') && !options.runtimeHelius) warnings.push('HELIUS_RPC_URL is not set: the executor cannot read balances or simulate, so real-wallet orders fail closed and no dry run is recorded.');
     if (!get('EXECUTOR_ALLOWLIST_USER_IDS')) warnings.push('EXECUTOR_ALLOWLIST_USER_IDS is empty: no order will be dry-run (paper fills, shadow logs and confirmations still work).');
   }
   if (role === 'worker') {
     const fallback = needUrl('HELIUS_RPC_FALLBACK_URL', ['http:', 'https:'], false, 'http:// or https://');
-    if (fallback && !rpc) errors.push('HELIUS_RPC_FALLBACK_URL requires HELIUS_RPC_URL.');
-    if (fallback && rpc && fallback.href === rpc.href) errors.push('HELIUS_RPC_FALLBACK_URL must differ from HELIUS_RPC_URL.');
-    if (!get('HELIUS_RPC_URL')) warnings.push('HELIUS_RPC_URL is not set: SEMI_AUTO and AUTO users are skipped, because their balances cannot be read.');
+    if (!options.runtimeHelius) {
+      if (fallback && !rpc) errors.push('HELIUS_RPC_FALLBACK_URL requires HELIUS_RPC_URL.');
+      if (fallback && rpc && fallback.href === rpc.href) errors.push('HELIUS_RPC_FALLBACK_URL must differ from HELIUS_RPC_URL.');
+      if (!get('HELIUS_RPC_URL')) warnings.push('HELIUS_RPC_URL is not set: SEMI_AUTO and AUTO users are skipped, because their balances cannot be read.');
+    }
     if (market === 'false') warnings.push('MARKET_DATA_ENABLED is false: no new prices are stored, so paper fills, the monitor and snapshots will go stale.');
   }
 
@@ -80,7 +82,7 @@ export function checkEnv(env: Env, role: EnvRole, options: { runtimeAuth?: boole
       const u = parse(hook);
       if (!u || !['http:', 'https:'].includes(u.protocol)) errors.push('HELIUS_WEBHOOK_URL must be an http:// or https:// URL.');
       else if (prod && u.protocol !== 'https:') warnings.push('HELIUS_WEBHOOK_URL is not https.');
-      if (!secret || !get('HELIUS_API_KEY')) warnings.push('HELIUS_WEBHOOK_URL is set but HELIUS_API_KEY or HELIUS_WEBHOOK_SECRET is missing: tracked-wallet webhook sync stays off.');
+      if (!options.runtimeHelius && (!secret || !get('HELIUS_API_KEY'))) warnings.push('HELIUS_WEBHOOK_URL is set but HELIUS_API_KEY or HELIUS_WEBHOOK_SECRET is missing: tracked-wallet webhook sync stays off.');
     }
     if (secret && secret.length < 16) warnings.push('HELIUS_WEBHOOK_SECRET is shorter than 16 characters. Use a long random value.');
   }
@@ -88,7 +90,7 @@ export function checkEnv(env: Env, role: EnvRole, options: { runtimeAuth?: boole
 }
 
 /** Runs the checks, prints warnings, and exits with code 1 on any error. Call it first, before any connection is opened. */
-export function assertEnv(role: EnvRole, env: Env = process.env, out: Pick<Console, 'error' | 'warn'> = console, exit: (code: number) => never = (c) => process.exit(c), options: { runtimeAuth?: boolean } = {}): void {
+export function assertEnv(role: EnvRole, env: Env = process.env, out: Pick<Console, 'error' | 'warn'> = console, exit: (code: number) => never = (c) => process.exit(c), options: { runtimeAuth?: boolean; runtimeHelius?: boolean } = {}): void {
   const { errors, warnings } = checkEnv(env, role, options);
   for (const w of warnings) out.warn(`env warning: ${w}`);
   if (errors.length) {
