@@ -22,6 +22,7 @@ it('expires cached quote and market labels on screen without promoting other sta
  const value=latestEvidenceFixture();
  render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}><LatestObservedEvidence value={value} compact/></NextIntlClientProvider>);
  expect(screen.getByText(/2\/5 recent observations · Buy quote: Recent/)).toBeVisible();
+ expect(screen.queryByText(/not safe or approved for trading/)).toBeNull();
  act(()=>vi.advanceTimersByTime(15000));
  expect(screen.getByText(/1\/5 recent observations · Buy quote: Stale/)).toBeVisible();
  act(()=>vi.advanceTimersByTime(5*60000));

@@ -25,7 +25,7 @@ export function SafetyEvidence({value,compact=false}:{value?:RadarSafetyView;com
   {!s?<>
    {!compact&&<p>{invalid?c.invalidHelp:!value?c.unavailableHelp:value.alertId?c.noSnapshotHelp:c.noCallHelp}</p>}
    {!compact&&!invalid&&value?.alertAt&&<p className="research-note">{c.latestCall}: {f.date(value.alertAt)}</p>}
-   <p className="research-note">{c.missingHelp}</p>
+   {!compact&&<p className="research-note">{c.missingHelp}</p>}
   </>:<>
    <p>{s.mode==='shadow'?c.shadow:c.enforce}</p>
    <p className="research-note">{c.at}: {f.date(s.evaluatedAt)} · {c.historical}</p>

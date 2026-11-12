@@ -146,7 +146,7 @@ export async function dataHealth(db:PrismaClient,ports:HealthPorts,now:Date){
   const budgets={priceTokensPerRun:MARKET_DATA_LIMITS.maxTokensPerRun,infoCallsPerRun:MARKET_DATA_LIMITS.maxInfoCallsPerRun,lastPriceTokens:lastMarket?.counters?.tokensConsidered??null,lastInfoCalls:lastMarket?.counters?.infoCalls??null};
   return {
     checkedAt:now.toISOString(),issues,queues,coverage,collectors,budgets,
-  webhook:{configured:ports.webhookConfigured??null,lastReceipt:validReceipt,sync:validSync?{at:validSync.at,action:validSync.action,active:validSync.webhookActive,desired:validSync.desired,hasError:!!validSync.error}:null},
+  webhook:{configured:webhookConfigured??null,lastReceipt:validReceipt,sync:validSync?{at:validSync.at,action:validSync.action,active:validSync.webhookActive,desired:validSync.desired,hasError:!!validSync.error}:null},
   wallets:{tracked:walletCount,profiles:profileCount,withoutProfile:walletCount-profileCount,trades30d,lastTradeAt:lastTrade?.at.toISOString()??null,lastComputedAt:lastComputation,scanned:wallets.length,capped:walletCount>wallets.length,missingComputations,staleComputations,historyCapped:history.filter(h=>typeof h.value==='object'&&h.value!==null&&!Array.isArray(h.value)&&h.value.capped===true).length},
   market:{...market,enabled:ports.marketDataEnabled!==false,unknownNames},
   analysis:{enabled:aiOn,providerConfigured:ports.aiProviderConfigured??null,fastModel:cfg.fastModel,reasoningModel:cfg.reasoningModel,usedToday:used,budget:cfg.tokenBudget,recentCandidates:candidateCount,recentBelowThreshold:belowThreshold,olderUnanalyzed:expiredCount},

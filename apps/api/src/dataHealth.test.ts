@@ -104,6 +104,12 @@ it('marks a scheduled queue stale and surfaces a classified sync error without r
  expect(result.issues).toContain('QUEUE_STALE');
  expect(JSON.stringify(result)).not.toContain('secret');
 });
+it('resolves a live webhook reader to a boolean so the admin schema can parse it',async()=>{
+ const {db}=database();
+ const result=await dataHealth(db,{webhookConfigured:async()=>true},now);
+ expect(result.webhook.configured).toBe(true);
+ expect(DataHealthSchema.safeParse(result).success).toBe(true);
+});
 it('does not fail a market run for optional enrichment errors',async()=>{
  telemetry.stages=[{stage:'market',latest:{at:iso,runs:1,counters:{tokensConsidered:150,infoCalls:18,errors:0,enrichmentErrors:3}}}];
  const {db}=database();

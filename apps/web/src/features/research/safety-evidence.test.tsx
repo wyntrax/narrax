@@ -7,7 +7,7 @@ import {safetyFixture} from '@/test/safety-fixture';
 import messages from '../../../messages/research/en.json';
 vi.mock('@/i18n/navigation',()=>({useRouter:()=>({push:vi.fn()})}));
 afterEach(()=>{cleanup();vi.useRealTimers();});
-function view(value?:ReturnType<typeof safetyFixture>){return render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}><SafetyEvidence value={value}/></NextIntlClientProvider>);}
+function view(value?:ReturnType<typeof safetyFixture>,compact=false){return render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}><SafetyEvidence value={value} compact={compact}/></NextIntlClientProvider>);}
 it('keeps missing and invalid snapshots explicit instead of inferring a verdict',()=>{
  const unavailable=view();expect(screen.getByText('Radar safety information unavailable')).toBeVisible();expect(screen.queryByText('No Early Radar call for this token')).toBeNull();unavailable.unmount();
  const {unmount}=view({state:'NOT_RECORDED',snapshot:null,alertId:null,alertAt:null,evidenceStale:null});expect(screen.getByText('No Early Radar call for this token')).toBeVisible();expect(screen.getByText('No public Early Radar alert is recorded for this token.')).toBeVisible();expect(screen.queryByText(/PASS —/)).toBeNull();unmount();
@@ -15,6 +15,12 @@ it('keeps missing and invalid snapshots explicit instead of inferring a verdict'
  expect(screen.getByText('Its latest radar call has no safety snapshot')).toBeVisible();expect(screen.getByText(/never backfilled/)).toBeVisible();expect(screen.getByText(/Latest radar call/)).toBeVisible();
  expect(screen.queryByText('No Early Radar call for this token')).toBeNull();noSnapshot.unmount();
  view({state:'INVALID',snapshot:null,alertId:'invalid',alertAt:null,evidenceStale:null});expect(screen.getByText(/invalid or mismatched evidence/)).toBeVisible();expect(screen.getByText(/failed validation/)).toBeVisible();
+});
+it('keeps compact opportunity cards short by omitting explanatory notes',()=>{
+ const {unmount}=view({state:'NOT_RECORDED',snapshot:null,alertId:null,alertAt:null,evidenceStale:null},true);
+ expect(screen.getByText('No Early Radar call for this token')).toBeVisible();
+ expect(screen.queryByText('No verdict is inferred from scores, liquidity or a missing snapshot.')).toBeNull();
+ unmount();
 });
 it('renders frozen blockers, unknowns, mode and timestamps with zero and false preserved',()=>{
  const fixture=RadarSafetyViewSchema.parse(safetyFixture());view(fixture);
