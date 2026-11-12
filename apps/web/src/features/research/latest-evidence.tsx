@@ -39,6 +39,6 @@ export function LatestObservedEvidence({value,compact=false}:{value?:LatestEvide
   {compact?<strong>{c.title}</strong>:<h2>{c.title}</h2>}
    {!value?<p>{c.unavailable}</p>:compact?<p>{keys.filter(k=>state(k)==='FRESH').length}/5 {c.recent} · {c.tradeability}: {c.states[state('tradeability')]}</p>:<DataTable caption={c.title} headers={[c.source,c.state,c.at,c.facts]} rows={keys.map(key=>({key,cells:[<span key="source">{c[key]}<br/><small>{value[key].source??'—'}</small></span>,c.states[state(key)],<span key="time">{f.date(value[key].at)}{key==='holders'&&value.holders.retrievedAt&&<small>{locale==='id'?'Diambil':'Retrieved'}: {f.date(value.holders.retrievedAt)}</small>}</span>,summary(key)]}))}/>}
    {!compact&&<p className="research-note">{locale==='id'?'Jumlah holder adalah laporan penyedia, bukan hitungan on-chain langsung. Waktu pengamatan holder terpisah dari waktu pengambilan; mengambil ulang data cache tidak membuatnya terbaru.':'Holder counts are provider-reported, not a live on-chain count. Holder observation time is separate from retrieval time; fetching a cached count again does not make it fresh.'}</p>}
-  <p className="research-note">{c.note}</p>
+  {!compact&&<p className="research-note">{c.note}</p>}
  </section>;
 }
