@@ -35,6 +35,7 @@ import {registerManualTradeRoutes} from './manual-trades';
 import type {ManualSwapEngine} from './manual-swap-engine';
 import { registerPersonalResearchRoutes } from './personalResearch';
 import { registerIntegrationRoutes } from './integrations';
+import { registerHeliusRoutes } from './helius';
 import { registerSmartMoneyInvestigationRoutes } from './smartMoneyInvestigation';
 
 const EvaluateBody = z.object({
@@ -95,6 +96,7 @@ export async function buildApp(opts: { manualSwaps?:ManualSwapEngine; paperQuote
     registerAdminOpsRoutes(app, opts.account);
     registerAdminStatusRoutes(app, { ...opts.account, ops: opts.ops });
     registerIntegrationRoutes(app, opts.account);
+    registerHeliusRoutes(app, opts.account);
     registerMeRoutes(app, { ...opts.account, balances: opts.balances });
     if (opts.realtime) await registerGateway(app, { ...opts.realtime, db: opts.account.db, verifier: opts.account.verifier, allowedOrigins: opts.http?.corsOrigins, resolveAllowedOrigins: opts.http?.resolveCorsOrigins });
     registerChatRoutes(app, { ...opts.account, llm: opts.chatLlm ?? null, questionsPerMinute: opts.chatQuestionsPerMinute });

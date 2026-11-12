@@ -23,6 +23,8 @@ it('every literal HTTP registration is deliberately classified; generated accoun
   for (const route of ['GET /v1/admin/wallet-research/health', 'POST /v1/admin/wallets/:address/research-review']) newRoutes.add(route);
   // Admin-only integration credentials (Telegram token alerts, Treg ingestion). Every route is behind makeRequireAdmin.
   for (const route of ['GET /v1/admin/integrations', 'PUT /v1/admin/integrations', 'POST /v1/admin/integrations/telegram/test']) newRoutes.add(route);
+  // Admin-only Helius endpoints and write-only credentials. Every route is behind makeRequireAdmin.
+  for (const route of ['GET /v1/admin/helius', 'PUT /v1/admin/helius', 'POST /v1/admin/helius/test']) newRoutes.add(route);
   // Manual user-signed swaps: own-data config/history/status are authentication-only; research, balances,
   // preview and submit require research.tokens and are still blocked by evidence and wallet checks.
   for (const route of ['GET /v1/manual-trades/config', 'GET /v1/manual-trades/balances', 'POST /v1/manual-trades/research', 'POST /v1/manual-trades/preview', 'POST /v1/manual-trades/submit', 'GET /v1/manual-trades', 'GET /v1/manual-trades/:id']) newRoutes.add(route);

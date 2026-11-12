@@ -16,6 +16,7 @@ import {DataHealthCard} from './data-health-card';
 import {FeaturesCard} from './features-card';
 import {WalletResearchCard} from './wallet-research-card';
 import {IntegrationsCard} from './integrations-card';
+import {HeliusCard} from './helius-card';
 
 const ERROR_KEYS = {
   FORBIDDEN: 'adminErrForbidden', EARLY_ACCESS_DISABLED: 'adminErrDisabled', EARLY_ACCESS_FULL: 'adminErrFull', VERIFIED_WALLET_REQUIRED: 'adminErrWallet',
@@ -84,6 +85,7 @@ export function AdminPage() {
         <WalletResearchCard api={api} queryKey={key('wallet-research')}/>
       </Tabs.Content>
       <Tabs.Content className="admin-tab-panel" value="runtime">
+        <HeliusCard api={api} queryKey={key('helius')}/>
         <IntegrationsCard api={api} queryKey={key('integrations')}/>
         <RuntimeCard api={api} queryKey={key('runtime')}/>
       </Tabs.Content>

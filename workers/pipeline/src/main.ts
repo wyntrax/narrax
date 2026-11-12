@@ -1,7 +1,7 @@
 /**
  * Worker bootstrap. Reads and writes Postgres through Prisma.
  * This process cannot sign or send transactions and does NOT consume the execution queue (workers/executor does).
- * Set HELIUS_RPC_URL to enable real balances for the fan-out and portfolio snapshots. Without it the chain ports throw and real-wallet users are skipped.
+ * Set a Helius RPC URL in the environment or on the admin page to enable real balances for the fan-out and portfolio snapshots. Without it the chain ports throw and real-wallet users are skipped.
  */
 import { Worker } from 'bullmq';
 import { publishWalletResearch, measureWalletResearch } from './walletResearch';
@@ -15,9 +15,10 @@ import { runTregJob } from './tregJob';
 import { trackEarlyRadarOutcomes } from './earlyRadarTracking';
 import { DexScreenerSource, GeckoTerminalSource } from '@narra/market-data';
 import { aiProviderFromEnv } from '@narra/ai';
-import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhook, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, discoverTokenWallets, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, type ChainPorts, type WalletEventDeps } from './index';
+import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhook, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, discoverTokenWallets, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, readHeliusSettings, type ChainPorts, type WalletEventDeps } from './index';
 import { assertEnv } from '@narra/shared';
 import { makeDeveloperHoldingSource } from './developerHoldings';
+import { makeFailoverRpc } from './rpcFailover';
 import { makeRadarSafetySource } from './radarSafetyEvidence';
 import { makeTradeabilitySource } from './tradeabilityEvidence';
 import { deliverEarlyRadarTelegram, telegramConfigFromSettings, TelegramBotApiTransport } from './telegram';
@@ -31,7 +32,7 @@ import { deliverWyntraxMembership } from './wyntraxMembership';
 import { acquireWorkerLock, WORKER_LOCK_KEY } from './workerLock';
 
 // First, before any connection is opened: stop with a clear list of what is wrong. Messages never contain a value.
-assertEnv('worker');
+assertEnv('worker', process.env, console, undefined, { runtimeHelius: true });
 
 const WORKER_LOCK_TTL_MS = 90_000;
 
@@ -53,11 +54,16 @@ async function main(): Promise<void> {
   }
   const queues = createQueues(connection);
   const db = createPrisma();
+  // Admin-managed Helius credentials, with the environment as fallback. Read once at
+  // startup: replacing a key on the admin page requires a worker restart.
+  const helius = await readHeliusSettings(db);
+  const heliusRpcUrl = helius.rpcUrl.value, heliusFallbackUrl = helius.rpcFallbackUrl.value, heliusApiKey = helius.apiKey.value;
+  if (helius.invalid.length) console.warn(`ignoring invalid stored Helius settings: ${helius.invalid.join(', ')}`);
   const jupiter = new JupiterClient({ apiKey: process.env.JUPITER_API_KEY });
-  const notWired = (name: string) => async (): Promise<never> => { throw new Error(`${name} needs HELIUS_RPC_URL`); };
+  const notWired = (name: string) => async (): Promise<never> => { throw new Error(`${name} needs a Helius RPC URL`); };
   // Without an RPC URL the ports throw, so real-wallet work fails closed instead of guessing balances.
-  const chain: ChainPorts = process.env.HELIUS_RPC_URL
-    ? makeChainPorts({ db, rpc: new SolanaRpc({ url: process.env.HELIUS_RPC_URL }), jupiter })
+  const chain: ChainPorts = heliusRpcUrl
+    ? makeChainPorts({ db, rpc: new SolanaRpc({ url: heliusRpcUrl }), jupiter })
     : { getSolBalance: notWired('getSolBalance'), getPortfolioValueSol: notWired('getPortfolioValueSol'), getTokenBaseUnits: notWired('getTokenBaseUnits') };
 
   const walletStore = makeWalletEventStore(db);
@@ -65,7 +71,15 @@ async function main(): Promise<void> {
 
   // Real wallets are only touched when an RPC is configured. Without one, SEMI_AUTO and AUTO users are skipped by the fan-out
   // and their jobs fail closed; PAPER and SHADOW users use the paper ledger and need no RPC.
-  const realChain: ChainPorts | null = process.env.HELIUS_RPC_URL ? chain : null;
+  const realChain: ChainPorts | null = heliusRpcUrl ? chain : null;
+
+  // History and enrichment RPCs. Developer holdings and wallet funding use the fallback
+  // after a provider-level rejection, so an exhausted primary key does not silently
+  // degrade enrichment. Discovery keeps its own checkpointed failover and budget.
+  const historyRpc = heliusRpcUrl ? new SolanaRpc({ url: heliusRpcUrl, timeoutMs: 15_000 }) : null;
+  const discoveryFallbackRpc = heliusFallbackUrl ? new SolanaRpc({ url: heliusFallbackUrl, timeoutMs: 15_000 }) : undefined;
+  const enrichmentRpc = historyRpc && discoveryFallbackRpc ? makeFailoverRpc(historyRpc, discoveryFallbackRpc) : historyRpc;
+  if (enrichmentRpc && enrichmentRpc !== historyRpc) console.log('rpc failover on: developer holdings and wallet funding use the configured fallback after a provider rejection');
 
   // Integrations are admin-managed (with the environment as fallback) and read again on every job. The startup read
   // still fails fast on an invalid environment configuration, exactly as the env-only reader did.
@@ -82,10 +96,15 @@ async function main(): Promise<void> {
   // exhaust the discovery reserve by accident.
   const holderRpc = (() => {
     if (process.env.HOLDER_RPC_FALLBACK_ENABLED === 'false') return null;
-    const endpoints = holderRpcEndpoints();
+    const endpoints = holderRpcEndpoints({
+      HELIUS_RPC_URL: heliusRpcUrl,
+      HELIUS_RPC_FALLBACK_URL: heliusFallbackUrl,
+      HOLDER_RPC_URL: helius.holderRpcUrl.value,
+      HOLDER_RPC_FALLBACK_URL: helius.holderRpcFallbackUrl.value,
+    });
     if (!endpoints) return null;
-    const dedicatedPrimary = !!process.env.HOLDER_RPC_URL?.trim();
-    const dedicatedFallback = !!process.env.HOLDER_RPC_FALLBACK_URL?.trim();
+    const dedicatedPrimary = !!helius.holderRpcUrl.value;
+    const dedicatedFallback = !!helius.holderRpcFallbackUrl.value;
     console.log(`holder rpc endpoints: ${dedicatedPrimary ? 'dedicated' : 'shared'} primary${endpoints.fallback ? ` + ${dedicatedFallback ? 'dedicated' : 'shared'} fallback` : ' only'}`);
     if (!endpoints.fallback) return makeHolderRpcSource(endpoints.primary);
     console.log('holder rpc failover: enabled');
@@ -96,8 +115,8 @@ async function main(): Promise<void> {
   // With it off, no prices, holders or risk rows are written, so token resolution ranks nothing (fail closed).
   const marketDeps = process.env.MARKET_DATA_ENABLED === 'false' ? null : (() => {
     const gecko = new GeckoTerminalSource({ baseUrl: process.env.GECKOTERMINAL_BASE_URL });
-      const metadata = combinedMetadataSource(process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,jupiterMetadataSource());
-      return { holderFallback:holderRpc,metadata,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: process.env.HELIUS_RPC_URL ? makeDeveloperHoldingSource(db, new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 })) : null };
+      const metadata = combinedMetadataSource(heliusRpcUrl?heliusMetadataSource(heliusRpcUrl):null,jupiterMetadataSource());
+      return { holderFallback:holderRpc,metadata,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: enrichmentRpc ? makeDeveloperHoldingSource(db, enrichmentRpc) : null };
   })();
   if (!marketDeps) console.log('market data disabled');
   // Bounded public RugCheck lookups for early-radar candidates only. Missing/failed data stays UNKNOWN.
@@ -111,21 +130,18 @@ async function main(): Promise<void> {
 
   // Wallet jobs. History scans need an RPC URL. Webhook sync needs the Helius API key, the public webhook URL and the shared secret.
   // Each job does nothing when its inputs are missing, and none of them can trade.
-  const historyRpc = process.env.HELIUS_RPC_URL ? new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 }) : null;
-  const fallbackUrl = process.env.HELIUS_RPC_FALLBACK_URL?.trim();
-  const discoveryFallbackRpc = fallbackUrl ? new SolanaRpc({ url: fallbackUrl, timeoutMs: 15_000 }) : undefined;
   // $WYNTRAX holding checks write local entitlements. The optional outbound notification keeps Wyntrax membership in sync.
   const membershipWebhook = process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_URL && process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_SECRET
     ? { url: process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_URL, secret: process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_SECRET }
     : null;
-  if (!historyRpc) console.log('no HELIUS_RPC_URL: $WYNTRAX holding checks are off');
+  if (!historyRpc) console.log('no Helius RPC URL: $WYNTRAX holding checks are off');
   else if (!membershipWebhook) console.log('$WYNTRAX holding checks on; outbound membership webhook off');
   else console.log('$WYNTRAX holding checks on; outbound membership webhook on');
-  const syncDeps = process.env.HELIUS_API_KEY && process.env.HELIUS_WEBHOOK_URL && process.env.HELIUS_WEBHOOK_SECRET
-    ? { client: new HeliusWebhooks({ apiKey: process.env.HELIUS_API_KEY }), cfg: { webhookUrl: process.env.HELIUS_WEBHOOK_URL, authHeader: process.env.HELIUS_WEBHOOK_SECRET } }
+  const syncDeps = heliusApiKey && helius.webhookUrl.value && helius.webhookSecret.value
+    ? { client: new HeliusWebhooks({ apiKey: heliusApiKey }), cfg: { webhookUrl: helius.webhookUrl.value, authHeader: helius.webhookSecret.value } }
     : null;
-  if (!historyRpc) console.log('no HELIUS_RPC_URL: wallet funding and discovery scans are off');
-  if (!syncDeps) console.log('wallet webhook sync is off: set HELIUS_API_KEY, HELIUS_WEBHOOK_URL and HELIUS_WEBHOOK_SECRET');
+  if (!historyRpc) console.log('no Helius RPC URL: wallet funding and discovery scans are off');
+  if (!syncDeps) console.log('wallet webhook sync is off: set the Helius API key, webhook URL and webhook secret on the admin page or in the environment');
 
   // With no key the AI jobs skip. Nothing else depends on them, and nothing trades on their absence.
   const llm = aiProviderFromEnv();
@@ -154,16 +170,19 @@ async function main(): Promise<void> {
     if (historyRpc) await queues.scheduleWyntraxHoldings();
   })();
   scheduled.then(() => console.log('schedules registered'), (e) => { console.error('could not register schedules:', e instanceof Error ? e.message : e); process.exit(1); });
+  // After a restart with a new webhook secret, update the remote webhook now instead of
+  // waiting for the next scheduled run. The worker and API must share the same secret.
+  if (syncDeps) await queues.requestWalletSync().catch((e) => console.error('could not enqueue the initial webhook sync:', e instanceof Error ? e.message : e));
 
   const workers = [
     new Worker(QUEUE_NAMES.walletEvents, (j) => processWalletEvent(SwapEventSchema.parse(j.data), walletDeps), { connection, concurrency: 8 }),
     // One recompute at a time: it rewrites profiles, clusters and consensus together.
     new Worker(QUEUE_NAMES.walletIntelligence, async () => {
       const research = process.env.SMART_MONEY_RESEARCH_ENABLED === 'true';
-      const historyEnabled = process.env.SMART_MONEY_HISTORY_ENABLED === 'true', providerConfigured = !!process.env.HELIUS_API_KEY;
+      const historyEnabled = process.env.SMART_MONEY_HISTORY_ENABLED === 'true', providerConfigured = !!heliusApiKey;
       const intake = historyEnabled && providerConfigured ? await intakeEmergingWallets(db) : null;
       if (intake?.added) await queues.requestWalletSync();
-      const history = historyEnabled && process.env.HELIUS_API_KEY ? await refreshResearchHistory(db, process.env.HELIUS_API_KEY) : null;
+      const history = historyEnabled && heliusApiKey ? await refreshResearchHistory(db, heliusApiKey) : null;
       const intelligence = await recomputeWalletIntelligence(db);
       const pipeline = { checkedAt: new Date().toISOString(), historyEnabled, providerConfigured, intakeAdded: intake?.added ?? 0, scanned: history?.scanned ?? 0, failures: history?.failures ?? 0,
         intelligence: { readPages:intelligence.readPages,loadMs:intelligence.loadMs,computeMs:intelligence.computeMs,publishMs:intelligence.publishMs,publicationOperations:intelligence.publicationOperations,tradesUsed:intelligence.tradesUsed } };
@@ -189,16 +208,16 @@ async function main(): Promise<void> {
     }, { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletSync, async () => (syncDeps ? JSON.stringify(await syncWalletWebhook(db, syncDeps.client, syncDeps.cfg)) : 'not configured'), { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletFunding, async () => {
-      const ingest = historyRpc ? await ingestWalletFunding(db, historyRpc) : null;
+      const ingest = enrichmentRpc ? await ingestWalletFunding(db, enrichmentRpc) : null;
       return JSON.stringify({ ingest, graph: await rebuildFundingGraph(db) });
     }, { connection, concurrency: 1 }),
-    new Worker(QUEUE_NAMES.walletDiscovery, async () => (historyRpc ? JSON.stringify({ scan: await scanEarlyBuyers(db, historyRpc, new Date(), { fallbackRpc: discoveryFallbackRpc }), discovery: await discoverCandidates(db) }) : 'needs HELIUS_RPC_URL'), { connection, concurrency: 1 }),
+    new Worker(QUEUE_NAMES.walletDiscovery, async () => (historyRpc ? JSON.stringify({ scan: await scanEarlyBuyers(db, historyRpc, new Date(), { fallbackRpc: discoveryFallbackRpc }), discovery: await discoverCandidates(db) }) : 'needs a Helius RPC URL'), { connection, concurrency: 1 }),
     // User-requested, token-scoped discovery. It adds provisional wallets and bounded recent history, then asks for a webhook sync.
     new Worker(QUEUE_NAMES.tokenDiscovery, async (job) => {
       const { mint } = TokenDiscoveryJobSchema.parse(job.data);
       const token = await db.token.findUnique({ where: { mint }, select: { id: true, mint: true, symbol: true, blacklisted: true } });
       if (!token || token.blacklisted) return 'token not found';
-      const summary = await discoverTokenWallets(db, { tokenId: token.id, mint: token.mint, symbol: token.symbol, apiKey: process.env.HELIUS_API_KEY });
+      const summary = await discoverTokenWallets(db, { tokenId: token.id, mint: token.mint, symbol: token.symbol, apiKey: heliusApiKey });
       if (summary.newWallets > 0) await queues.requestWalletSync();
       return JSON.stringify(summary);
     }, { connection, concurrency: 1 }),
@@ -249,7 +268,7 @@ async function main(): Promise<void> {
     }, { connection, concurrency: 1 }),
     // $WYNTRAX holding discovery. It can grant paid access locally and enqueue an outbound Wyntrax membership event.
     new Worker(QUEUE_NAMES.wyntraxHoldings, async (job) => {
-      if (!historyRpc) return 'needs HELIUS_RPC_URL';
+      if (!historyRpc) return 'needs a Helius RPC URL';
       const { userId } = WyntraxHoldingsJobSchema.parse(job.data);
       return JSON.stringify(await syncWyntraxHoldings({
         db, rpc: historyRpc, now: () => new Date(), enqueue: event => queues.enqueueWyntraxMembership(event),

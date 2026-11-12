@@ -28,6 +28,8 @@ export async function saveResearchDiagnostics(db: PrismaClient, stage: ResearchS
   for (const [key, value] of Object.entries(summary)) {
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0 && key !== 'solUsd') counters[key] = value;
     if (key === 'errors' && Array.isArray(value)) counters.errors = value.length;
+    // Optional enrichment is counted separately so it cannot make the whole collector look failed.
+    if (key === 'enrichmentErrors' && Array.isArray(value)) counters.enrichmentErrors = value.length;
     if (key === 'evidenceSkipped' && value && typeof value === 'object') for (const [reason, count] of Object.entries(value)) {
       if (typeof count === 'number' && Number.isFinite(count) && count >= 0) counters[`evidence.${reason}`] = count;
     }

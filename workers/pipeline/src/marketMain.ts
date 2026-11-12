@@ -8,6 +8,8 @@ import {attributeNarrativeMentions} from './narrativeTokens';
 import {scanSocialTokens} from './socialTokens';
 import {SolanaRpc} from '@narra/solana';
 import {makeDeveloperHoldingSource} from './developerHoldings';
+import {makeFailoverRpc} from './rpcFailover';
+import {readHeliusSettings} from './heliusSettings';
 import {makeRadarSafetySource} from './radarSafetyEvidence';
 import {makeTradeabilitySource} from './tradeabilityEvidence';
 import {combinedMetadataSource,heliusMetadataSource,jupiterMetadataSource} from './tokenMetadata';
@@ -18,9 +20,19 @@ async function main(){
  if(!process.env.DATABASE_URL||!process.env.REDIS_URL)throw Error('Database and Redis configuration required');
  if(process.env.MARKET_DATA_ENABLED==='false')throw Error('Market data is disabled');
  const db=createPrisma(),connection=createRedis(),queue=new Queue(QUEUE_NAMES.marketData,{connection});
+ // Admin-managed Helius credentials, with the environment as fallback. Read once:
+ // an edit on the admin page requires restarting this worker.
+ const helius=await readHeliusSettings(db);
+ const heliusRpcUrl=helius.rpcUrl.value,heliusFallbackUrl=helius.rpcFallbackUrl.value;
+ if(helius.invalid.length)console.warn(`ignoring invalid stored Helius settings: ${helius.invalid.join(', ')}`);
  const gecko=new GeckoTerminalSource({baseUrl:process.env.GECKOTERMINAL_BASE_URL});
-   const metadata=combinedMetadataSource(process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,jupiterMetadataSource());
-   const deps={metadata,developerHoldings:process.env.HELIUS_RPC_URL?makeDeveloperHoldingSource(db,new SolanaRpc({url:process.env.HELIUS_RPC_URL,timeoutMs:15000})):null,quotes:new DexScreenerSource({baseUrl:process.env.DEXSCREENER_BASE_URL}),info:gecko,launches:{name:gecko.name,getNewPools:async()=>{
+   const metadata=combinedMetadataSource(heliusRpcUrl?heliusMetadataSource(heliusRpcUrl):null,jupiterMetadataSource());
+   // Developer holdings are optional enrichment. A provider rejection on the primary
+   // moves them to the configured fallback instead of failing the whole market run.
+   const primaryRpc=heliusRpcUrl?new SolanaRpc({url:heliusRpcUrl,timeoutMs:15000}):null;
+   const fallbackRpc=heliusFallbackUrl?new SolanaRpc({url:heliusFallbackUrl,timeoutMs:15000}):null;
+   const enrichmentRpc=primaryRpc&&fallbackRpc?makeFailoverRpc(primaryRpc,fallbackRpc):primaryRpc;
+   const deps={metadata,developerHoldings:enrichmentRpc?makeDeveloperHoldingSource(db,enrichmentRpc):null,quotes:new DexScreenerSource({baseUrl:process.env.DEXSCREENER_BASE_URL}),info:gecko,launches:{name:gecko.name,getNewPools:async()=>{
   const results=await Promise.allSettled([gecko.getNewPools(),gecko.getTrendingPools()]);
   if(results.every(r=>r.status==='rejected'))throw Error('Pool discovery unavailable');
   for(const r of results)if(r.status==='rejected')console.error('One pool discovery source is unavailable');

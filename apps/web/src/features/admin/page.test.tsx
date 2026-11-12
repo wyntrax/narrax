@@ -7,7 +7,7 @@ import {NextIntlClientProvider} from 'next-intl';
 import en from '../../../messages/research/en.json';
 
 const api=vi.hoisted(()=>({
-  settings:vi.fn(),stats:vi.fn(),grants:vi.fn(),runtime:vi.fn(),integrations:vi.fn(),save:vi.fn(),saveIntegrations:vi.fn(),testTelegram:vi.fn(),lookup:vi.fn(),grant:vi.fn(),revoke:vi.fn(),checkPrivy:vi.fn(),
+  settings:vi.fn(),stats:vi.fn(),grants:vi.fn(),runtime:vi.fn(),integrations:vi.fn(),helius:vi.fn(),save:vi.fn(),saveIntegrations:vi.fn(),saveHelius:vi.fn(),testTelegram:vi.fn(),testHelius:vi.fn(),lookup:vi.fn(),grant:vi.fn(),revoke:vi.fn(),checkPrivy:vi.fn(),
 }));
 /** Who /v1/me reports. Swapped per test so the not-an-admin path can be rendered without any admin request. */
 const session=vi.hoisted(()=>({
@@ -23,11 +23,12 @@ import {AdminPage} from './page';
 
 const runtime={privyAppId:{value:'app-one',source:'environment' as const},privyVerificationKey:{value:'-----BEGIN PUBLIC KEY-----\nX\n-----END PUBLIC KEY-----',source:'environment' as const},corsOrigins:{value:['https://env.example'],source:'environment' as const,extra:[],environment:['https://env.example']}};
 const integrations={telegram:{enabled:{value:false,source:'default' as const},chatId:{value:null,source:'default' as const},botToken:{configured:false,source:'default' as const},maxAgeMin:{value:15,source:'default' as const},maxPerRun:{value:10,source:'default' as const},sendDelayMs:{value:1200,source:'default' as const}},treg:{enabled:{value:false,source:'default' as const},token:{configured:false,source:'default' as const},org:{value:null,source:'default' as const}},invalid:[]};
+const helius={rpcUrl:{configured:false,source:'default' as const},rpcFallbackUrl:{configured:false,source:'default' as const},apiKey:{configured:false,source:'default' as const},holderRpcUrl:{configured:false,source:'default' as const},holderRpcFallbackUrl:{configured:false,source:'default' as const},webhookUrl:{value:null,source:'default' as const},webhookSecret:{configured:false,source:'default' as const},ready:{rpc:false,holder:false,webhook:false},invalid:[]};
 
 function mount(open:boolean){
   api.settings.mockResolvedValue({items:[{key:'early_access.enabled',value:open},{key:'early_access.seat_cap',value:25}]});
   api.stats.mockResolvedValue({occupied:3,available:22,cap:25,active:3,expired:1,revoked:0});
-  api.grants.mockResolvedValue({items:[]});api.runtime.mockResolvedValue(runtime);api.integrations.mockResolvedValue(integrations);api.save.mockResolvedValue({ok:true});api.saveIntegrations.mockResolvedValue(integrations);api.testTelegram.mockResolvedValue({ok:true});api.lookup.mockResolvedValue({items:[]});
+  api.grants.mockResolvedValue({items:[]});api.runtime.mockResolvedValue(runtime);api.integrations.mockResolvedValue(integrations);api.helius.mockResolvedValue(helius);api.save.mockResolvedValue({ok:true});api.saveIntegrations.mockResolvedValue(integrations);api.saveHelius.mockResolvedValue(helius);api.testTelegram.mockResolvedValue({ok:true});api.testHelius.mockResolvedValue({});api.lookup.mockResolvedValue({items:[]});
   const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{retry:false}}});
   render(<NextIntlClientProvider locale="en" messages={{workspace:en}}><QueryClientProvider client={client}><AdminPage/></QueryClientProvider></NextIntlClientProvider>);
   return client;

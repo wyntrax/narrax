@@ -3,6 +3,7 @@ import { SignJWT, exportSPKI, generateKeyPair } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPrisma } from '@narra/database';
 import type { QueueCounts } from '@narra/queue';
+import { QUEUE_NAMES } from '@narra/queue';
 import { TRADING_PAUSE_KEY } from '@narra/worker-pipeline';
 import { buildApp } from './app';
 import { AI_PRICING_KEY } from './adminStatus';
@@ -71,7 +72,8 @@ describe.skipIf(!up)('admin status and costs (needs Postgres)', () => {
     it('serves bounded read-only ingestion diagnostics for admins',async()=>{
       const r=await http('GET','/v1/admin/data-health',boss);
       expect(r.status).toBe(200);expect(r.body.checkedAt).toBe(NOW.toISOString());
-      expect(r.body.queues).toHaveLength(9);expect(r.body.queues.map((q:{name:string})=>q.name)).toEqual(expect.arrayContaining(['wallet-discovery','token-resolution','holder-refresh']));expect(r.body.market.scanned).toBeLessThanOrEqual(2000);
+      // Every registered queue is reported, so a new queue cannot silently disappear.
+      expect(r.body.queues.map((q:{name:string})=>q.name).sort()).toEqual(Object.values(QUEUE_NAMES).sort());expect(r.body.market.scanned).toBeLessThanOrEqual(2000);
       expect(r.body.coverage.scanned).toBeLessThanOrEqual(2000);
       expect(r.body.coverage.stages.map((s:{stage:string})=>s.stage)).toEqual(['market','social','narrative']);
       expect(r.body.webhook.configured).toBeNull();

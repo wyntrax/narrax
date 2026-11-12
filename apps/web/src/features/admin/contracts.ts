@@ -16,7 +16,7 @@ export const DataHealthSchema=z.object({
   budgets:z.object({priceTokensPerRun:Count,infoCallsPerRun:Count,lastPriceTokens:Count.nullable(),lastInfoCalls:Count.nullable()}).optional(),
  checkedAt:DateTime,issues:z.array(z.string()),
  coverage:ResearchCoverageSchema.optional(),
-  queues:z.array(z.object({name:z.string(),state:z.enum(['OK','WARNING','ERROR','UNKNOWN','DISABLED']),counts:z.object({waiting:Count,active:Count,failed:Count,delayed:Count,consumers:Count.optional()}).nullable(),lastCompletedAt:DateTime.nullable(),lastFailedAt:DateTime.nullable(),lastRun:z.object({analyzed:Count.optional(),providerFailures:Count.optional(),providerErrors:Count.optional(),mentionsStored:Count.optional(),narrativesUpdated:Count.optional(),topicsSeen:Count.optional(),tokensUsed:Count.optional(),skipped:z.string().optional(),rateLimited:z.boolean().optional()}).nullable()})),
+  queues:z.array(z.object({name:z.string(),state:z.enum(['OK','WARNING','ERROR','UNKNOWN','DISABLED']),counts:z.object({waiting:Count,active:Count,failed:Count,delayed:Count,consumers:Count.optional()}).nullable(),lastCompletedAt:DateTime.nullable(),lastFailedAt:DateTime.nullable(),lastRun:z.object({analyzed:Count.optional(),providerFailures:Count.optional(),providerErrors:Count.optional(),mentionsStored:Count.optional(),narrativesUpdated:Count.optional(),topicsSeen:Count.optional(),tokensUsed:Count.optional(),skipped:z.string().optional(),action:z.string().optional(),errors:Count.optional(),enrichmentErrors:Count.optional(),error:z.string().optional(),rateLimited:z.boolean().optional()}).nullable()})),
  webhook:z.object({configured:z.boolean().nullable(),lastReceipt:z.object({at:DateTime,items:Count,parsed:Count,queued:Count,skipped:Count}).nullable(),sync:z.object({at:DateTime,action:z.string(),active:z.boolean().nullable(),desired:Count,hasError:z.boolean()}).nullable()}),
  wallets:z.object({tracked:Count,profiles:Count,withoutProfile:Count,trades30d:Count,lastTradeAt:DateTime.nullable(),lastComputedAt:DateTime.nullable(),scanned:Count,capped:z.boolean(),missingComputations:Count,staleComputations:Count,historyCapped:Count}),
   market:z.object({scanned:Count,total:Count,capped:z.boolean(),fresh:Count,stale:Count,unverified:Count,lastAt:DateTime.nullable(),enabled:z.boolean(),unknownNames:Count,future:Count.optional(),withStoredArtwork:Count.optional(),withoutStoredArtwork:Count.optional()}),
@@ -39,6 +39,21 @@ export const IntegrationsSchema=z.object({
   invalid:z.array(z.string()),
 });
 export type Integrations=z.infer<typeof IntegrationsSchema>;
+export const HeliusSchema=z.object({
+  rpcUrl:SecretStatus,
+  rpcFallbackUrl:SecretStatus,
+  apiKey:SecretStatus,
+  holderRpcUrl:SecretStatus,
+  holderRpcFallbackUrl:SecretStatus,
+  webhookUrl:SourcedText,
+  webhookSecret:SecretStatus,
+  ready:z.object({rpc:z.boolean(),holder:z.boolean(),webhook:z.boolean()}),
+  invalid:z.array(z.string()),
+});
+export type Helius=z.infer<typeof HeliusSchema>;
+const EndpointTest=z.object({ok:z.boolean(),code:z.string(),status:z.number().int().optional(),latencyMs:z.number().nonnegative()});
+export const HeliusTestSchema=z.object({primary:EndpointTest.optional(),fallback:EndpointTest.optional(),holder:EndpointTest.optional(),holderFallback:EndpointTest.optional()});
+export type HeliusTest=z.infer<typeof HeliusTestSchema>;
 export const TelegramTestSchema=z.object({ok:z.literal(true),messageId:z.string().optional()});
 const Source = z.enum(['database','environment']);
 export const RuntimeSettingsSchema = z.object({
