@@ -80,22 +80,26 @@ it('separates intentionally disabled pipelines from absent workers',async()=>{
 it('flags stale delivery even when webhook sync and scoring are fresh',async()=>{
  const {db,rows}=database();
  Object.assign(rows[0]!.value,{at:new Date(+now-2*3600000).toISOString(),parsed:5,queued:5});
- const result=await dataHealth(db,{},now);
+ const counts=async()=>({'wallet-events':{waiting:0,active:0,failed:0,delayed:0,consumers:1}});
+ const result=await dataHealth(db,{queueCounts:counts},now);
  expect(result.issues).toContain('DELIVERY_STALE');
+ // The event-driven queue has no schedule, so a stale receipt is its staleness evidence.
+ expect(result.queues.find(q=>q.name==='wallet-events')?.state).toBe('WARNING');
  expect(result.webhook.lastReceipt?.at).toBe(new Date(+now-2*3600000).toISOString());
  expect((await dataHealth(database().db,{},now)).issues).not.toContain('DELIVERY_STALE');
+ expect((await dataHealth(database().db,{queueCounts:counts,webhookConfigured:false},now)).queues.find(q=>q.name==='wallet-events')?.state).toBe('DISABLED');
 });
 it('marks a scheduled queue stale and surfaces a classified sync error without raw provider text',async()=>{
  const {db}=database();
  const counts=async()=>({
-  'wallet-events':{waiting:0,active:0,failed:0,delayed:0,consumers:1},
+  'wallet-intelligence':{waiting:0,active:0,failed:0,delayed:0,consumers:1},
   'wallet-sync':{waiting:0,active:0,failed:0,delayed:0,consumers:1},
  });
  const result=await dataHealth(db,{queueCounts:counts,queueHealth:async()=>({
-  'wallet-events':{lastCompletedAt:new Date(+now-25*3600000).toISOString(),lastFailedAt:null,lastRun:null},
+  'wallet-intelligence':{lastCompletedAt:new Date(+now-50*60000).toISOString(),lastFailedAt:null,lastRun:null},
   'wallet-sync':{lastCompletedAt:iso,lastFailedAt:null,lastRun:{action:'skipped',error:'RATE_LIMITED'}},
  })},now);
- expect(result.queues.find(q=>q.name==='wallet-events')?.state).toBe('WARNING');
+ expect(result.queues.find(q=>q.name==='wallet-intelligence')?.state).toBe('WARNING');
  expect(result.queues.find(q=>q.name==='wallet-sync')?.state).toBe('WARNING');
  expect(result.issues).toContain('QUEUE_STALE');
  expect(JSON.stringify(result)).not.toContain('secret');

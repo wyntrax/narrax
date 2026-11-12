@@ -11,19 +11,17 @@ export interface HealthPorts {queueCounts?:()=>Promise<Record<string,QueueCounts
 // Every queue, not only the ones that had a worker bug. A queue that is missing from
 // this table is invisible, so derive it from the single queue-name registry.
 const QUEUES=Object.values(QUEUE_NAMES);
-// Expected maximum silence before a queue is considered stale. Event-driven queues
-// without a schedule are excluded; their delivery evidence is reported separately.
-// wallet-events uses a long inactivity threshold as a backstop to the receipt check.
-// Retained completions are kept for at least an hour, so a null timestamp is not proof
-// of health and is never treated as stale on its own.
+// Expected maximum silence before a scheduled queue is considered stale. Only queues
+// whose completed jobs are retained longer than the threshold are listed: a threshold
+// beyond the retention window could never fire, and one inside it would flag normal
+// job age. Event-driven and high-frequency queues are covered by the consumer count,
+// backlog and the webhook receipt instead. A null timestamp is never stale on its own.
 const QUEUE_STALE_AFTER_SECONDS:Record<string,number>={
- 'wallet-events':24*3600,
  'wallet-intelligence':45*60,
  'ai-analysis':15*60,
- 'narrative-ingestion':30*60,
+ 'narrative-ingestion':90*60,
  'token-resolution':30*60,
  'market-data':20*60,
- 'holder-refresh':10*60,
  'wallet-sync':30*60,
  'position-monitor':20*60,
  'wallet-funding':90*60,
@@ -32,9 +30,6 @@ const QUEUE_STALE_AFTER_SECONDS:Record<string,number>={
  'exit-fan-out':10*60,
  'portfolio-snapshots':20*60,
  'outcome-tracking':45*60,
- 'notification-dispatch':5*60,
- 'realtime-publish':5*60,
- 'telegram-delivery':5*60,
  'wyntrax-holdings':30*60,
 };
 const SCAN_LIMIT=2000;
@@ -91,13 +86,17 @@ export async function dataHealth(db:PrismaClient,ports:HealthPorts,now:Date){
  const staleNames:string[]=[];
  const queues=QUEUES.map(name=>{
   const count=counts?.[name]??null,run=runs?.[name]??null;
-  const enabled=name==='market-data'?ports.marketDataEnabled!==false:name==='ai-analysis'?aiOn&&ports.aiProviderConfigured!==false:name==='wallet-sync'?ports.webhookConfigured!==false:true;
+  const enabled=name==='wallet-events'?ports.webhookConfigured!==false:name==='market-data'?ports.marketDataEnabled!==false:name==='ai-analysis'?aiOn&&ports.aiProviderConfigured!==false:name==='wallet-sync'?ports.webhookConfigured!==false:true;
    // Retained failed jobs are history. Only a failure inside this window describes current health.
    const failedMs=run?.lastFailedAt?Date.parse(run.lastFailedAt):NaN,recentFailure=Number.isFinite(failedMs)&&failedMs<=+now&&+now-failedMs<=60*60_000;
-   // A queue with a known schedule must complete within its expected interval. A null
-   // completion is not enough evidence to call it stale: the retained sample may be empty.
+   // A scheduled queue must complete within its expected interval. wallet-events is
+   // event-driven, so its only delivery evidence is the webhook receipt: tracked
+   // wallets with no receipt in the delivery window need review, even when a worker is
+   // connected. A null retained timestamp alone is never treated as stale.
    const staleAfter=QUEUE_STALE_AFTER_SECONDS[name],completedAge=run?.lastCompletedAt?elapsed(run.lastCompletedAt,now):null;
-   const stale=enabled&&staleAfter!==undefined&&completedAge!==null&&completedAge>staleAfter;
+   const stale=!enabled?false:name==='wallet-events'
+     ? walletCount>0&&(!validReceipt||elapsed(validReceipt.at,now)!>WEBHOOK_RECEIPT_STALE_SECONDS)
+     : staleAfter!==undefined&&completedAge!==null&&completedAge>staleAfter;
    if(stale)staleNames.push(name);
    const state=!enabled?'DISABLED':!count?'UNKNOWN':count.consumers===0?'ERROR':count.consumers==null?'UNKNOWN':recentFailure||count.waiting>100||run?.lastRun?.providerFailures||run?.lastRun?.providerErrors||run?.lastRun?.errors||run?.lastRun?.rateLimited||run?.lastRun?.error||run?.lastRun?.skipped||stale?'WARNING':'OK';
   return {name,state,counts:count,lastCompletedAt:run?.lastCompletedAt??null,lastFailedAt:run?.lastFailedAt??null,lastRun:run?.lastRun??null};
