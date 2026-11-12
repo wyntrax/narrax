@@ -54,7 +54,7 @@ export function HeliusForm({api,initial}:{api:AdminApi;initial:Helius}) {
   return api.testHelius(entered);
  }});
  const source=(value:'database'|'environment'|'default')=>t(value);
- const status=(configured:boolean,sourceValue:'database'|'environment'|'default')=><small>{t('current')}: {configured?t('configured'):t('notConfigured')} ({source(sourceValue)})</small>;
+ const statusText=(configured:boolean,sourceValue:'database'|'environment'|'default')=>`${t('current')}: ${configured?t('configured'):t('notConfigured')} (${source(sourceValue)})`;
  const poolField=(name:PoolName,id:string,label:string,help:string,view:{configured:number;source:'database'|'environment'|'default'})=><div className="admin-field" key={name}>
   <label htmlFor={id}>{label}</label>
   <textarea id={id} rows={3} maxLength={16_384} spellCheck={false} value={pools[name]} placeholder={view.configured?t('configuredCount',{count:view.configured}):t('missingPlaceholder')} onChange={event=>setPool(name,event.target.value)}/>
@@ -79,17 +79,17 @@ export function HeliusForm({api,initial}:{api:AdminApi;initial:Helius}) {
   </div>
   {poolField('rpcUrls','helius-rpc-urls',t('rpcUrls'),t('rpcUrlsHelp'),baseline.rpcUrls)}
   {poolField('rpcFallbackUrls','helius-rpc-fallback-urls',t('rpcFallbackUrls'),t('rpcFallbackUrlsHelp'),baseline.rpcFallbackUrls)}
-  <div className="admin-field"><label htmlFor="helius-api-key">{t('apiKey')}</label><input id="helius-api-key" type="password" autoComplete="off" spellCheck={false} maxLength={300} value={apiKey} placeholder={baseline.apiKey.configured?t('configuredPlaceholder'):t('missingPlaceholder')} onChange={event=>{reset();setApiKey(event.target.value);}}/><small>{t('apiKeyHelp')} · {status(baseline.apiKey.configured,baseline.apiKey.source)}</small></div>
+  <div className="admin-field"><label htmlFor="helius-api-key">{t('apiKey')}</label><input id="helius-api-key" type="password" autoComplete="off" spellCheck={false} maxLength={300} value={apiKey} placeholder={baseline.apiKey.configured?t('configuredPlaceholder'):t('missingPlaceholder')} onChange={event=>{reset();setApiKey(event.target.value);}}/><small>{t('apiKeyHelp')} · {statusText(baseline.apiKey.configured,baseline.apiKey.source)}</small></div>
   {poolField('holderRpcUrls','helius-holder-rpc-urls',t('holderRpcUrls'),t('holderRpcUrlsHelp'),baseline.holderRpcUrls)}
   {poolField('holderRpcFallbackUrls','helius-holder-rpc-fallback-urls',t('holderRpcFallbackUrls'),t('holderRpcFallbackUrlsHelp'),baseline.holderRpcFallbackUrls)}
   <div className="admin-field"><label htmlFor="helius-webhook-url">{t('webhookUrl')}</label><input id="helius-webhook-url" maxLength={2048} value={webhookUrl} onChange={event=>{reset();setWebhookUrl(event.target.value);}}/><small>{t('webhookUrlHelp')} · {t('source')}: {source(baseline.webhookUrl.source)}</small></div>
-  <div className="admin-field"><label htmlFor="helius-webhook-secret">{t('webhookSecret')}</label><input id="helius-webhook-secret" type="password" autoComplete="off" spellCheck={false} maxLength={500} value={webhookSecret} placeholder={baseline.webhookSecret.configured?t('configuredPlaceholder'):t('missingPlaceholder')} onChange={event=>{reset();setWebhookSecret(event.target.value);}}/><small>{t('webhookSecretHelp')} · {status(baseline.webhookSecret.configured,baseline.webhookSecret.source)}</small></div>
+  <div className="admin-field"><label htmlFor="helius-webhook-secret">{t('webhookSecret')}</label><input id="helius-webhook-secret" type="password" autoComplete="off" spellCheck={false} maxLength={500} value={webhookSecret} placeholder={baseline.webhookSecret.configured?t('configuredPlaceholder'):t('missingPlaceholder')} onChange={event=>{reset();setWebhookSecret(event.target.value);}}/><small>{t('webhookSecretHelp')} · {statusText(baseline.webhookSecret.configured,baseline.webhookSecret.source)}</small></div>
   <div className="admin-field"><label htmlFor="helius-reason">{t('reason')}</label><input id="helius-reason" maxLength={300} required value={reason} onChange={event=>{save.reset();setReason(event.target.value);}}/></div>
   <div className="admin-actions">
    <button type="button" className="research-control" disabled={test.isPending||save.isPending} onClick={()=>test.mutate()}>{t('test')}</button>
    <button type="submit" className="research-control admin-primary" disabled={!valid||save.isPending||test.isPending}>{t('save')}</button>
   </div>
-  {test.data&&<div className="admin-hint" aria-label={t('testResults')}>{resultGroups.map(([group,key])=>{const results=test.data?.[group]??[];return results.length?<div key={group}><b>{t(`endpoints.${key}`)}</b><ul>{results.map((result,index)=><li key={index}>{t('endpointIndex',{index:index+1})}: {result.ok?t('ok'):code(result.code)}{typeof result.status==='number'?` (${result.status})`:''} · {result.latencyMs} ms</li>)}</ul></div>:null;})}</div>}
+  {test.data&&<div className="admin-hint"><p><b>{t('testResults')}</b></p>{resultGroups.map(([group,key])=>{const results=test.data?.[group]??[];return results.length?<div key={group}><b>{t(`endpoints.${key}`)}</b><ul>{results.map((result,index)=><li key={index}>{t('endpointIndex',{index:index+1})}: {result.ok?t('ok'):code(result.code)}{typeof result.status==='number'?` (${result.status})`:''} · {result.latencyMs} ms</li>)}</ul></div>:null;})}</div>}
   {!parsed.success&&changed&&<p role="alert" className="admin-bad">{t('invalid')}</p>}
   {baseline.invalid.length>0&&<p role="alert" className="admin-bad">{t('invalidStored',{keys:baseline.invalid.join(', ')})}</p>}
   {test.isError&&<p role="alert" className="admin-bad">{error(test.error)}</p>}
