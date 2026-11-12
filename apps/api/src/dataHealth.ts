@@ -1,14 +1,42 @@
 import {z} from 'zod';
-import type {PrismaClient} from '@narra/database';
-import type {QueueCounts,QueueHealth} from '@narra/queue';
-import {aiEnabled,loadAiConfig,tokensUsedToday,researchCoverage,MARKET_DATA_LIMITS} from '@narra/worker-pipeline';
+import type {Prisma,PrismaClient} from '@narra/database';
+import {QUEUE_NAMES,type QueueCounts,type QueueHealth} from '@narra/queue';
+import {aiEnabled,loadAiConfig,tokensUsedToday,researchCoverage,readSocialPriority,MARKET_DATA_LIMITS} from '@narra/worker-pipeline';
 import {marketEvidence,marketTokenImage,observation} from './marketEvidence';
 
 const Receipt=z.object({at:z.string().datetime(),items:z.number().int().positive(),parsed:z.number().int().nonnegative(),queued:z.number().int().nonnegative(),skipped:z.number().int().nonnegative()});
 const Sync=z.object({at:z.string().datetime(),action:z.string(),webhookActive:z.boolean().nullable(),desired:z.number().int().nonnegative(),error:z.string().optional()});
 const Progress=z.object({checkedAt:z.string().datetime(),closedTrades:z.number().nonnegative(),observedTrades:z.number().nonnegative(),status:z.enum(['READY','INSUFFICIENT_HISTORY'])});
 export interface HealthPorts {queueCounts?:()=>Promise<Record<string,QueueCounts>>;queueHealth?:()=>Promise<Record<string,QueueHealth>>;marketDataEnabled?:boolean;webhookConfigured?:boolean;aiProviderConfigured?:boolean}
-const QUEUES=['wallet-events','wallet-sync','wallet-intelligence','wallet-discovery','market-data','holder-refresh','token-resolution','ai-analysis','narrative-ingestion'];
+// Every queue, not only the ones that had a worker bug. A queue that is missing from
+// this table is invisible, so derive it from the single queue-name registry.
+const QUEUES=Object.values(QUEUE_NAMES);
+// Expected maximum silence before a queue is considered stale. Event-driven queues
+// without a schedule are excluded; their delivery evidence is reported separately.
+// wallet-events uses a long inactivity threshold as a backstop to the receipt check.
+// Retained completions are kept for at least an hour, so a null timestamp is not proof
+// of health and is never treated as stale on its own.
+const QUEUE_STALE_AFTER_SECONDS:Record<string,number>={
+ 'wallet-events':24*3600,
+ 'wallet-intelligence':45*60,
+ 'ai-analysis':15*60,
+ 'narrative-ingestion':30*60,
+ 'token-resolution':30*60,
+ 'market-data':20*60,
+ 'holder-refresh':10*60,
+ 'wallet-sync':30*60,
+ 'position-monitor':20*60,
+ 'wallet-funding':90*60,
+ 'wallet-discovery':45*60,
+ 'entry-fan-out':10*60,
+ 'exit-fan-out':10*60,
+ 'portfolio-snapshots':20*60,
+ 'outcome-tracking':45*60,
+ 'notification-dispatch':5*60,
+ 'realtime-publish':5*60,
+ 'telegram-delivery':5*60,
+ 'wyntrax-holdings':30*60,
+};
 const SCAN_LIMIT=2000;
 // A warning to inspect delivery, not proof of failure: tracked wallets can be quiet.
 const WEBHOOK_RECEIPT_STALE_SECONDS=60*60;
@@ -18,14 +46,19 @@ const elapsed=(at:string|null,now:Date)=>at?Math.max(0,Math.round((+now-Date.par
  * webhook, and a successful sync is not an endpoint/delivery connectivity test. */
 export async function dataHealth(db:PrismaClient,ports:HealthPorts,now:Date){
  const since=new Date(+now-30*86400000),recent=new Date(+now-3600000);
+ // Market coverage is measured on the tokens the product actually researches: active
+ // narrative links and the recent social handoff. The oldest 2,000 rows included dead
+ // or unsupported tokens and made coverage look broken when collection was healthy.
+ const socialIds=await readSocialPriority(db,now);
+ const marketScope:Prisma.TokenWhereInput={blacklisted:false,OR:[{narratives:{some:{narrative:{stage:{not:'DEAD'}}}}},{id:{in:socialIds}}]};
  const [settings,wallets,walletCount,profileCount,lastTrade,trades30d,tokenCount,tokens,unknownNames,candidateCount,belowThreshold,expiredCount,cfg,aiOn,used]=await Promise.all([
   db.systemSetting.findMany({where:{key:{in:['health.walletWebhook.receipt','wallets.syncStatus']}}}),
   db.trackedWallet.findMany({where:{active:true},take:SCAN_LIMIT,orderBy:{id:'asc'},select:{id:true}}),
   db.trackedWallet.count({where:{active:true}}),db.walletProfile.count({where:{wallet:{active:true}}}),
   db.walletTrade.findFirst({where:{wallet:{active:true},at:{lte:now}},orderBy:{at:'desc'},select:{at:true}}),
   db.walletTrade.count({where:{wallet:{active:true},at:{gte:since,lte:now},tokenAmount:{not:null}}}),
-  db.token.count({where:{blacklisted:false}}),
-  db.token.findMany({where:{blacklisted:false},orderBy:{id:'asc'},take:SCAN_LIMIT,select:{id:true,mint:true,symbol:true,metrics:{orderBy:{at:'desc'},take:1,select:{id:true}}}}),
+  db.token.count({where:marketScope}),
+  db.token.findMany({where:marketScope,orderBy:{id:'asc'},take:SCAN_LIMIT,select:{id:true,mint:true,symbol:true,metrics:{orderBy:{at:'desc'},take:1,select:{id:true}}}}),
   db.token.count({where:{OR:[{symbol:'UNKNOWN'},{name:'Unknown'}]}}),
   db.opportunity.count({where:{createdAt:{gte:recent,lte:now},score:{gte:50},analyses:{none:{}}}}),
   db.opportunity.count({where:{createdAt:{gte:recent,lte:now},score:{lt:50},analyses:{none:{}}}}),
@@ -55,18 +88,25 @@ export async function dataHealth(db:PrismaClient,ports:HealthPorts,now:Date){
  let counts:Record<string,QueueCounts>|null=null,runs:Record<string,QueueHealth>|null=null;
  try{counts=await ports.queueCounts?.()??null;}catch{/* Unknown, not an empty healthy queue. */}
  try{runs=await ports.queueHealth?.()??null;}catch{/* Retained-job diagnostics unavailable. */}
+ const staleNames:string[]=[];
  const queues=QUEUES.map(name=>{
   const count=counts?.[name]??null,run=runs?.[name]??null;
   const enabled=name==='market-data'?ports.marketDataEnabled!==false:name==='ai-analysis'?aiOn&&ports.aiProviderConfigured!==false:name==='wallet-sync'?ports.webhookConfigured!==false:true;
    // Retained failed jobs are history. Only a failure inside this window describes current health.
    const failedMs=run?.lastFailedAt?Date.parse(run.lastFailedAt):NaN,recentFailure=Number.isFinite(failedMs)&&failedMs<=+now&&+now-failedMs<=60*60_000;
-   const state=!enabled?'DISABLED':!count?'UNKNOWN':count.consumers===0?'ERROR':count.consumers==null?'UNKNOWN':recentFailure||count.waiting>100||run?.lastRun?.providerFailures||run?.lastRun?.providerErrors||run?.lastRun?.rateLimited||run?.lastRun?.skipped?'WARNING':'OK';
+   // A queue with a known schedule must complete within its expected interval. A null
+   // completion is not enough evidence to call it stale: the retained sample may be empty.
+   const staleAfter=QUEUE_STALE_AFTER_SECONDS[name],completedAge=run?.lastCompletedAt?elapsed(run.lastCompletedAt,now):null;
+   const stale=enabled&&staleAfter!==undefined&&completedAge!==null&&completedAge>staleAfter;
+   if(stale)staleNames.push(name);
+   const state=!enabled?'DISABLED':!count?'UNKNOWN':count.consumers===0?'ERROR':count.consumers==null?'UNKNOWN':recentFailure||count.waiting>100||run?.lastRun?.providerFailures||run?.lastRun?.providerErrors||run?.lastRun?.errors||run?.lastRun?.rateLimited||run?.lastRun?.error||run?.lastRun?.skipped||stale?'WARNING':'OK';
   return {name,state,counts:count,lastCompletedAt:run?.lastCompletedAt??null,lastFailedAt:run?.lastFailedAt??null,lastRun:run?.lastRun??null};
  });
  const issues:string[]=[];
  if(!counts)issues.push('QUEUES_UNAVAILABLE');
  if(queues.some(q=>q.state==='ERROR'))issues.push('WORKER_MISSING');
  if(queues.some(q=>q.counts&&q.counts.failed>0))issues.push('RETAINED_FAILURES');
+ if(staleNames.length)issues.push('QUEUE_STALE');
  if(queues.some(q=>q.lastRun?.providerFailures))issues.push('AI_PROVIDER_FAILURES');
  if(queues.some(q=>q.name==='ai-analysis'&&q.lastRun?.skipped))issues.push('AI_RUN_SKIPPED');
  if(queues.some(q=>q.lastRun?.rateLimited))issues.push('PROVIDER_RATE_LIMIT');
@@ -83,6 +123,7 @@ export async function dataHealth(db:PrismaClient,ports:HealthPorts,now:Date){
  if(staleComputations||missingComputations)issues.push('WALLET_COMPUTATION_GAPS');
  if(walletCount>profileCount)issues.push('INSUFFICIENT_WALLET_HISTORY');
   if(ports.marketDataEnabled!==false&&(market.stale||market.unverified||market.future))issues.push('MARKET_COVERAGE_GAPS');
+ if(ports.marketDataEnabled!==false&&queues.some(q=>q.lastRun?.enrichmentErrors))issues.push('ENRICHMENT_DEGRADED');
  if(unknownNames)issues.push('TOKEN_NAMES_MISSING');
  if([cfg.fastModel,cfg.reasoningModel].some(model=>!model.trim()||['gpt-6-luna','gpt-6-sol'].includes(model.trim())))issues.push('AI_MODEL_PLACEHOLDER');
  if(!aiOn)issues.push('AI_DISABLED');else if(ports.aiProviderConfigured===false)issues.push('AI_NOT_CONFIGURED');else if(used>=cfg.tokenBudget)issues.push('ANALYSIS_BUDGET_EXHAUSTED');

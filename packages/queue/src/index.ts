@@ -8,7 +8,22 @@ export { PERSONAL_RESEARCH_QUEUE, PersonalResearchJobSchema, createPersonalResea
 export { TOKEN_DISCOVERY_QUEUE, TokenDiscoveryJobSchema, createTokenDiscoveryQueue } from './tokenDiscovery';
 
 export interface QueueCounts { waiting: number; active: number; failed: number; delayed: number; /** Workers connected to this queue right now. 0 with jobs waiting means nothing is consuming it. */ consumers?: number }
-export interface QueueHealth {lastCompletedAt:string|null;lastFailedAt:string|null;lastRun:{analyzed?:number;providerFailures?:number;providerErrors?:number;mentionsStored?:number;narrativesUpdated?:number;topicsSeen?:number;tokensUsed?:number;skipped?:string;rateLimited?:boolean}|null}
+/** Allowlisted run evidence. Raw error text and job payloads are never returned. */
+export interface QueueRun {
+  analyzed?:number;providerFailures?:number;providerErrors?:number;mentionsStored?:number;narrativesUpdated?:number;topicsSeen?:number;tokensUsed?:number;
+  /** A run that intentionally did no work. Only known reasons are surfaced. */
+  skipped?:string;
+  /** The wallet-sync action, when it completed. */
+  action?:string;
+  /** Hard failures recorded by the run itself, for example a provider or database error. */
+  errors?:number;
+  /** Failures in optional enrichment (developer holdings) that do not invalidate collected prices. */
+  enrichmentErrors?:number;
+  /** Classified error code, never the provider message. */
+  error?:string;
+  rateLimited?:boolean;
+}
+export interface QueueHealth {lastCompletedAt:string|null;lastFailedAt:string|null;lastRun:QueueRun|null}
 
 export const QUEUE_NAMES = {
   walletEvents: 'wallet-events',
@@ -110,6 +125,15 @@ const RETAIN_SHORT: Pick<JobsOptions, 'removeOnComplete' | 'removeOnFail'> = {
   removeOnFail: { age: 24 * 3600, count: 500 },
 };
 
+/** Classifies a completed job's error without returning provider text, URLs or credentials. */
+function classifyRunError(message: string): string {
+  if (/rate.?limit|HTTP\s*429|\b429\b/i.test(message)) return 'RATE_LIMITED';
+  if (/HTTP\s*401|HTTP\s*403|unauthori[sz]ed|forbidden/i.test(message)) return 'UNAUTHORIZED';
+  if (/timeout|timed out|ETIMEDOUT|aborted/i.test(message)) return 'TIMEOUT';
+  if (/HTTP\s*5\d\d|ECONN|fetch failed|unavailable/i.test(message)) return 'UNAVAILABLE';
+  return 'ERROR';
+}
+
 export function createQueues(connection: Redis) {
   const walletEvents = new Queue(QUEUE_NAMES.walletEvents, { connection });
   const aiScreening = new Queue(QUEUE_NAMES.aiScreening, { connection });
@@ -134,6 +158,9 @@ export function createQueues(connection: Redis) {
   const tokenDiscovery = createTokenDiscoveryQueue(connection);
   const wyntraxHoldings = new Queue(QUEUE_NAMES.wyntraxHoldings, { connection });
   const wyntraxMembership = new Queue(QUEUE_NAMES.wyntraxMembership, { connection });
+  // One list for counts, retained-run evidence and shutdown, so a new queue cannot be
+  // counted but silently omitted from diagnostics.
+  const allQueues = [walletEvents, aiScreening, execution, walletIntelligence, narrativeIngestion, tokenResolution, aiAnalysis, marketData, holderRefresh, walletSync, walletFunding, walletDiscovery, positionMonitor, entryFanOut, exitFanOut, portfolioSnapshots, outcomeTracking, notificationDispatch, realtimePublish, telegramDelivery, tokenDiscovery.queue, wyntraxHoldings, wyntraxMembership];
 
   return {
     walletEvents,
@@ -228,7 +255,7 @@ export function createQueues(connection: Redis) {
     /** Waiting, active, failed and delayed job counts for every queue, for the admin status view. */
     counts: async (): Promise<Record<string, QueueCounts>> => {
       const out: Record<string, QueueCounts> = {};
-      for (const q of [walletEvents, aiScreening, execution, walletIntelligence, narrativeIngestion, tokenResolution, aiAnalysis, marketData, holderRefresh, walletSync, walletFunding, walletDiscovery, positionMonitor, entryFanOut, exitFanOut, portfolioSnapshots, outcomeTracking, notificationDispatch, realtimePublish, telegramDelivery, tokenDiscovery.queue, wyntraxHoldings, wyntraxMembership]) {
+      for (const q of allQueues) {
         const c = await q.getJobCounts('waiting', 'active', 'failed', 'delayed');
         let consumers: number | undefined;
         try { consumers = (await q.getWorkers()).length; } catch { consumers = undefined; } // unknown, not zero, when Redis will not say
@@ -236,23 +263,28 @@ export function createQueues(connection: Redis) {
       }
       return out;
     },
-    /** Small retained-job sample. Never return job payloads, raw error messages or credentials. */
+    /** Small retained-job sample for every queue. Never return job payloads, raw error messages or credentials. */
     health:async():Promise<Record<string,QueueHealth>>=>{
       const out:Record<string,QueueHealth>={};
-      await Promise.all([walletEvents,walletIntelligence,walletSync,marketData,holderRefresh,aiAnalysis,narrativeIngestion].map(async q=>{
+      await Promise.all(allQueues.map(async q=>{
         const [completed,failed]=await Promise.all([q.getJobs(['completed'],0,0),q.getJobs(['failed'],0,0)]);
         const job=completed[0];let value:unknown=job?.returnvalue;
         if(typeof value==='string'){try{value=JSON.parse(value);}catch{value=null;}}
         const object=value&&typeof value==='object'?value as Record<string,unknown>:null;
-        const run:NonNullable<QueueHealth['lastRun']>={};
+        const run:QueueRun={};
         for(const key of ['analyzed','providerFailures','providerErrors','mentionsStored','narrativesUpdated','topicsSeen','tokensUsed'] as const)if(typeof object?.[key]==='number'&&Number.isInteger(object[key])&&object[key]>=0)run[key]=object[key];
-        if(typeof object?.skipped==='string'&&['disabled','budget','no_provider'].includes(object.skipped))run.skipped=object.skipped;
+        if(typeof object?.skipped==='string'&&['disabled','budget','no_provider','invalid'].includes(object.skipped))run.skipped=object.skipped;
+        if(typeof object?.action==='string'&&['created','updated','in_sync','skipped'].includes(object.action))run.action=object.action;
+        if(typeof object?.error==='string'&&object.error)run.error=classifyRunError(object.error);
         const summary=object?.summary&&typeof object.summary==='object'?object.summary as Record<string,unknown>:object;
-        if(Array.isArray(summary?.errors))run.rateLimited=summary.errors.some(e=>typeof e==='string'&&/rate_limited|HTTP 429/.test(e));
+        const errors=Array.isArray(summary?.errors)?summary.errors.filter((e):e is string=>typeof e==='string'):[];
+        if(errors.length)run.errors=errors.length;
+        if(errors.some(e=>/rate_limited|HTTP 429/i.test(e)))run.rateLimited=true;
+        if(Array.isArray(summary?.enrichmentErrors))run.enrichmentErrors=summary.enrichmentErrors.length;
         out[q.name]={lastCompletedAt:job?.finishedOn?new Date(job.finishedOn).toISOString():null,lastFailedAt:failed[0]?.finishedOn?new Date(failed[0].finishedOn).toISOString():null,lastRun:Object.keys(run).length?run:null};
       }));return out;
     },
-    close: async () => { await Promise.all([walletEvents.close(), aiScreening.close(), execution.close(), walletIntelligence.close(), narrativeIngestion.close(), tokenResolution.close(), aiAnalysis.close(), marketData.close(), holderRefresh.close(), walletSync.close(), walletFunding.close(), walletDiscovery.close(), positionMonitor.close(), entryFanOut.close(), exitFanOut.close(), portfolioSnapshots.close(), outcomeTracking.close(), notificationDispatch.close(), realtimePublish.close(), telegramDelivery.close(), tokenDiscovery.queue.close(), wyntraxHoldings.close(), wyntraxMembership.close()]); },
+    close: async () => { await Promise.all(allQueues.map(q => q.close())); },
   };
 }
 export type Queues = ReturnType<typeof createQueues>;

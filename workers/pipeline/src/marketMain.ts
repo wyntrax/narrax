@@ -8,6 +8,7 @@ import {attributeNarrativeMentions} from './narrativeTokens';
 import {scanSocialTokens} from './socialTokens';
 import {SolanaRpc} from '@narra/solana';
 import {makeDeveloperHoldingSource} from './developerHoldings';
+import {makeFailoverRpc} from './rpcFailover';
 import {makeRadarSafetySource} from './radarSafetyEvidence';
 import {makeTradeabilitySource} from './tradeabilityEvidence';
 import {combinedMetadataSource,heliusMetadataSource,jupiterMetadataSource} from './tokenMetadata';
@@ -20,7 +21,13 @@ async function main(){
  const db=createPrisma(),connection=createRedis(),queue=new Queue(QUEUE_NAMES.marketData,{connection});
  const gecko=new GeckoTerminalSource({baseUrl:process.env.GECKOTERMINAL_BASE_URL});
    const metadata=combinedMetadataSource(process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,jupiterMetadataSource());
-   const deps={metadata,developerHoldings:process.env.HELIUS_RPC_URL?makeDeveloperHoldingSource(db,new SolanaRpc({url:process.env.HELIUS_RPC_URL,timeoutMs:15000})):null,quotes:new DexScreenerSource({baseUrl:process.env.DEXSCREENER_BASE_URL}),info:gecko,launches:{name:gecko.name,getNewPools:async()=>{
+   // Developer holdings are optional enrichment. A provider rejection on the primary
+   // moves them to HELIUS_RPC_FALLBACK_URL instead of failing the whole market run.
+   const primaryRpc=process.env.HELIUS_RPC_URL?new SolanaRpc({url:process.env.HELIUS_RPC_URL,timeoutMs:15000}):null;
+   const fallbackUrl=process.env.HELIUS_RPC_FALLBACK_URL?.trim();
+   const fallbackRpc=fallbackUrl?new SolanaRpc({url:fallbackUrl,timeoutMs:15000}):null;
+   const enrichmentRpc=primaryRpc&&fallbackRpc?makeFailoverRpc(primaryRpc,fallbackRpc):primaryRpc;
+   const deps={metadata,developerHoldings:enrichmentRpc?makeDeveloperHoldingSource(db,enrichmentRpc):null,quotes:new DexScreenerSource({baseUrl:process.env.DEXSCREENER_BASE_URL}),info:gecko,launches:{name:gecko.name,getNewPools:async()=>{
   const results=await Promise.allSettled([gecko.getNewPools(),gecko.getTrendingPools()]);
   if(results.every(r=>r.status==='rejected'))throw Error('Pool discovery unavailable');
   for(const r of results)if(r.status==='rejected')console.error('One pool discovery source is unavailable');

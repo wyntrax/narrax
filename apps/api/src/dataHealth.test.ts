@@ -4,7 +4,7 @@ import {dataHealth} from './dataHealth';
 import {DataHealthSchema} from '../../web/src/features/admin/contracts';
 const config=vi.hoisted(()=>({tokenBudget:1000,fastModel:'model-fast',reasoningModel:'model-reason'}));
 const telemetry=vi.hoisted(()=>({stages:[] as {stage:string;latest:{at:string;runs:number;counters:Record<string,number>}|null}[]}));
-vi.mock('@narra/worker-pipeline',()=>({aiEnabled:async()=>true,loadAiConfig:async()=>config,tokensUsedToday:async()=>1000,researchCoverage:async()=>telemetry.stages.length?{stages:telemetry.stages}:undefined,MARKET_DATA_LIMITS:{maxTokensPerRun:150,maxInfoCallsPerRun:18}}));
+vi.mock('@narra/worker-pipeline',()=>({aiEnabled:async()=>true,loadAiConfig:async()=>config,tokensUsedToday:async()=>1000,readSocialPriority:async()=>[],researchCoverage:async()=>telemetry.stages.length?{stages:telemetry.stages}:undefined,MARKET_DATA_LIMITS:{maxTokensPerRun:150,maxInfoCallsPerRun:18}}));
 afterEach(()=>{telemetry.stages=[];});
 const now=new Date('2026-10-18T12:00:00Z'),iso=now.toISOString();
 it.each(['gpt-6-luna','gpt-6-sol','','   '])('flags placeholder or empty model %j read-only',async model=>{
@@ -16,7 +16,7 @@ it.each(['gpt-6-luna','gpt-6-sol','','   '])('flags placeholder or empty model %
 it('does not flag real configured model names',async()=>{expect((await dataHealth(database().db,{},now)).issues).not.toContain('AI_MODEL_PLACEHOLDER');});
 function database(){
  const rows=[{key:'health.walletWebhook.receipt',value:{at:iso,items:5,parsed:0,queued:0,skipped:5}},{key:'wallets.syncStatus',value:{at:iso,action:'skipped',desired:2,webhookActive:true,error:'secret-key-and-provider-url'}},{key:'wallet.intelligence.w1',value:{checkedAt:iso,closedTrades:5,observedTrades:10,status:'READY'}},{key:'wallet.history.w1',value:{capped:true}},{key:'research.market.t1',value:{metricId:'m1',at:iso,source:'dexscreener',marketCapIsFdv:false,priceChange1hPct:null,pairAddress:'pool',dexId:null,pairCreatedAt:null}}];
- const db={systemSetting:{findMany:async(q:{where:{key:{in:string[]}}})=>rows.filter(r=>q.where.key.in.includes(r.key))},trackedWallet:{count:async()=>2,findMany:async()=>[{id:'w1'},{id:'w2'}]},walletProfile:{count:async()=>1},walletTrade:{findFirst:async()=>({at:now}),count:async()=>10},token:{count:async(q:{where:{OR?:unknown}})=>q.where.OR?1:2,findMany:async()=>[{id:'t1',mint:'mint1',symbol:'ONE',metrics:[{id:'m1'}]},{id:'t2',mint:'mint2',symbol:'UNKNOWN',metrics:[{id:'m2'}]}]},opportunity:{count:async()=>3}};
+ const db={systemSetting:{findMany:async(q:{where:{key:{in:string[]}}})=>rows.filter(r=>q.where.key.in.includes(r.key))},trackedWallet:{count:async()=>2,findMany:async()=>[{id:'w1'},{id:'w2'}]},walletProfile:{count:async()=>1},walletTrade:{findFirst:async()=>({at:now}),count:async()=>10},token:{count:async(q:{where:{OR?:unknown[]}})=>Array.isArray(q.where.OR)&&q.where.OR.some(o=>o&&typeof o==='object'&&('symbol'in o||'name'in o))?1:2,findMany:async()=>[{id:'t1',mint:'mint1',symbol:'ONE',metrics:[{id:'m1'}]},{id:'t2',mint:'mint2',symbol:'UNKNOWN',metrics:[{id:'m2'}]}]},opportunity:{count:async()=>3}};
  return {db:db as unknown as PrismaClient,rows};
 }
 it('distinguishes missing computation, unsupported delivery and source-linked price coverage without leaking errors',async()=>{
@@ -84,4 +84,30 @@ it('flags stale delivery even when webhook sync and scoring are fresh',async()=>
  expect(result.issues).toContain('DELIVERY_STALE');
  expect(result.webhook.lastReceipt?.at).toBe(new Date(+now-2*3600000).toISOString());
  expect((await dataHealth(database().db,{},now)).issues).not.toContain('DELIVERY_STALE');
+});
+it('marks a scheduled queue stale and surfaces a classified sync error without raw provider text',async()=>{
+ const {db}=database();
+ const counts=async()=>({
+  'wallet-events':{waiting:0,active:0,failed:0,delayed:0,consumers:1},
+  'wallet-sync':{waiting:0,active:0,failed:0,delayed:0,consumers:1},
+ });
+ const result=await dataHealth(db,{queueCounts:counts,queueHealth:async()=>({
+  'wallet-events':{lastCompletedAt:new Date(+now-25*3600000).toISOString(),lastFailedAt:null,lastRun:null},
+  'wallet-sync':{lastCompletedAt:iso,lastFailedAt:null,lastRun:{action:'skipped',error:'RATE_LIMITED'}},
+ })},now);
+ expect(result.queues.find(q=>q.name==='wallet-events')?.state).toBe('WARNING');
+ expect(result.queues.find(q=>q.name==='wallet-sync')?.state).toBe('WARNING');
+ expect(result.issues).toContain('QUEUE_STALE');
+ expect(JSON.stringify(result)).not.toContain('secret');
+});
+it('does not fail a market run for optional enrichment errors',async()=>{
+ telemetry.stages=[{stage:'market',latest:{at:iso,runs:1,counters:{tokensConsidered:150,infoCalls:18,errors:0,enrichmentErrors:3}}}];
+ const {db}=database();
+ const result=await dataHealth(db,{
+  queueCounts:async()=>({'market-data':{waiting:0,active:1,failed:0,delayed:0,consumers:1}}),
+  queueHealth:async()=>({'market-data':{lastCompletedAt:iso,lastFailedAt:null,lastRun:{enrichmentErrors:3}}}),
+ },now);
+ expect(result.queues.find(q=>q.name==='market-data')?.state).toBe('OK');
+ expect(result.collectors.find(c=>c.stage==='market')?.state).toBe('OK');
+ expect(result.issues).toContain('ENRICHMENT_DEGRADED');
 });

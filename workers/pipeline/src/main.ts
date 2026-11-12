@@ -18,6 +18,7 @@ import { aiProviderFromEnv } from '@narra/ai';
 import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhook, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, discoverTokenWallets, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, type ChainPorts, type WalletEventDeps } from './index';
 import { assertEnv } from '@narra/shared';
 import { makeDeveloperHoldingSource } from './developerHoldings';
+import { makeFailoverRpc } from './rpcFailover';
 import { makeRadarSafetySource } from './radarSafetyEvidence';
 import { makeTradeabilitySource } from './tradeabilityEvidence';
 import { deliverEarlyRadarTelegram, telegramConfigFromSettings, TelegramBotApiTransport } from './telegram';
@@ -67,6 +68,15 @@ async function main(): Promise<void> {
   // and their jobs fail closed; PAPER and SHADOW users use the paper ledger and need no RPC.
   const realChain: ChainPorts | null = process.env.HELIUS_RPC_URL ? chain : null;
 
+  // History and enrichment RPCs. Developer holdings and wallet funding use the fallback
+  // after a provider-level rejection, so an exhausted primary key does not silently
+  // degrade enrichment. Discovery keeps its own checkpointed failover and budget.
+  const historyRpc = process.env.HELIUS_RPC_URL ? new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 }) : null;
+  const fallbackUrl = process.env.HELIUS_RPC_FALLBACK_URL?.trim();
+  const discoveryFallbackRpc = fallbackUrl ? new SolanaRpc({ url: fallbackUrl, timeoutMs: 15_000 }) : undefined;
+  const enrichmentRpc = historyRpc && discoveryFallbackRpc ? makeFailoverRpc(historyRpc, discoveryFallbackRpc) : historyRpc;
+  if (enrichmentRpc && enrichmentRpc !== historyRpc) console.log('rpc failover on: developer holdings and wallet funding use HELIUS_RPC_FALLBACK_URL after a provider rejection');
+
   // Integrations are admin-managed (with the environment as fallback) and read again on every job. The startup read
   // still fails fast on an invalid environment configuration, exactly as the env-only reader did.
   const startupTreg = await tregConfigFromSettings(db);
@@ -97,7 +107,7 @@ async function main(): Promise<void> {
   const marketDeps = process.env.MARKET_DATA_ENABLED === 'false' ? null : (() => {
     const gecko = new GeckoTerminalSource({ baseUrl: process.env.GECKOTERMINAL_BASE_URL });
       const metadata = combinedMetadataSource(process.env.HELIUS_RPC_URL?heliusMetadataSource(process.env.HELIUS_RPC_URL):null,jupiterMetadataSource());
-      return { holderFallback:holderRpc,metadata,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: process.env.HELIUS_RPC_URL ? makeDeveloperHoldingSource(db, new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 })) : null };
+      return { holderFallback:holderRpc,metadata,quotes: new DexScreenerSource({ baseUrl: process.env.DEXSCREENER_BASE_URL }), info: gecko, launches: gecko, developerHoldings: enrichmentRpc ? makeDeveloperHoldingSource(db, enrichmentRpc) : null };
   })();
   if (!marketDeps) console.log('market data disabled');
   // Bounded public RugCheck lookups for early-radar candidates only. Missing/failed data stays UNKNOWN.
@@ -111,9 +121,6 @@ async function main(): Promise<void> {
 
   // Wallet jobs. History scans need an RPC URL. Webhook sync needs the Helius API key, the public webhook URL and the shared secret.
   // Each job does nothing when its inputs are missing, and none of them can trade.
-  const historyRpc = process.env.HELIUS_RPC_URL ? new SolanaRpc({ url: process.env.HELIUS_RPC_URL, timeoutMs: 15_000 }) : null;
-  const fallbackUrl = process.env.HELIUS_RPC_FALLBACK_URL?.trim();
-  const discoveryFallbackRpc = fallbackUrl ? new SolanaRpc({ url: fallbackUrl, timeoutMs: 15_000 }) : undefined;
   // $WYNTRAX holding checks write local entitlements. The optional outbound notification keeps Wyntrax membership in sync.
   const membershipWebhook = process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_URL && process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_SECRET
     ? { url: process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_URL, secret: process.env.WYNTRAX_MEMBERSHIP_WEBHOOK_SECRET }
@@ -189,7 +196,7 @@ async function main(): Promise<void> {
     }, { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletSync, async () => (syncDeps ? JSON.stringify(await syncWalletWebhook(db, syncDeps.client, syncDeps.cfg)) : 'not configured'), { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletFunding, async () => {
-      const ingest = historyRpc ? await ingestWalletFunding(db, historyRpc) : null;
+      const ingest = enrichmentRpc ? await ingestWalletFunding(db, enrichmentRpc) : null;
       return JSON.stringify({ ingest, graph: await rebuildFundingGraph(db) });
     }, { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletDiscovery, async () => (historyRpc ? JSON.stringify({ scan: await scanEarlyBuyers(db, historyRpc, new Date(), { fallbackRpc: discoveryFallbackRpc }), discovery: await discoverCandidates(db) }) : 'needs HELIUS_RPC_URL'), { connection, concurrency: 1 }),
