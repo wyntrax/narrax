@@ -18,6 +18,16 @@ it('fails over on a provider rejection and returns to the primary after the cool
   expect(calls).toEqual(['primary', 'fallback', 'fallback', 'primary', 'fallback']);
 });
 
+it('fails over on the wrapped timeout and network shapes SolanaRpc throws', async () => {
+  for (const message of ['getSignaturesForAddress failed: AbortError', 'getSignaturesForAddress failed: TypeError']) {
+    const calls: string[] = [];
+    const primary = { async getSignaturesForAddress() { calls.push('primary'); throw new Error(message); } };
+    const fallback = { async getSignaturesForAddress() { calls.push('fallback'); return ['ok']; } };
+    expect(await makeFailoverRpc(primary, fallback).getSignaturesForAddress()).toEqual(['ok']);
+    expect(calls).toEqual(['primary', 'fallback']);
+  }
+});
+
 it('does not hide a data error behind the fallback', async () => {
   const calls: string[] = [];
   const primary = { async getParsedTransaction() { calls.push('primary'); throw new Error('unexpected response shape'); } };

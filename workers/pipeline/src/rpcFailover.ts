@@ -7,11 +7,15 @@ export const RPC_FAILOVER_LIMITS = { cooldownMs: 15 * 60_000 } as const;
  * A 429, a timeout or a 5xx is an endpoint problem, so the fallback can answer the
  * same question. A malformed or stale response is a data problem that the fallback
  * would report the same way, so it is never hidden.
+ *
+ * SolanaRpc wraps transport failures as "<method> failed: AbortError" (timeout) or
+ * "<method> failed: TypeError" (network), so those shapes must match as well as a
+ * raw HTTP status.
  */
 function providerFailure(error: unknown): boolean {
   if (error instanceof RpcHttpError) return error.status === 408 || error.status === 429 || error.status >= 500;
   const message = error instanceof Error ? error.message : String(error);
-  return /HTTP\s*(408|429|5\d\d)|rate.?limit|ECONN|ETIMEDOUT|timeout|timed out|fetch failed|aborted/i.test(message);
+  return /HTTP\s*(408|429|5\d\d)|rate.?limit|ECONN|ETIMEDOUT|timeout|timed out|fetch failed|abort|failed: TypeError/i.test(message);
 }
 
 /**
