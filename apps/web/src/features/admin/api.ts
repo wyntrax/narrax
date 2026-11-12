@@ -24,7 +24,7 @@ export function createAdminApi(getToken: () => Promise<string | null>, base = pr
     saveIntegrations: (settings: Record<string, unknown>, reason: string) => request('/v1/admin/integrations', IntegrationsSchema, 'PUT', {settings, reason}),
     helius: () => request('/v1/admin/helius', HeliusSchema),
     saveHelius: (settings: Record<string, unknown>, reason: string) => request('/v1/admin/helius', HeliusSchema, 'PUT', {settings, reason}),
-    testHelius: (values: {rpcUrl?:string;rpcFallbackUrl?:string;holderRpcUrl?:string;holderRpcFallbackUrl?:string}) => request('/v1/admin/helius/test', HeliusTestSchema, 'POST', values),
+    testHelius: (values: {rpcUrls?:string[];rpcFallbackUrls?:string[];holderRpcUrls?:string[];holderRpcFallbackUrls?:string[]}) => request('/v1/admin/helius/test', HeliusTestSchema, 'POST', values),
     testTelegram: (chatId?: string, botToken?: string) => request('/v1/admin/integrations/telegram/test', TelegramTestSchema, 'POST', {
       ...(chatId ? {chatId} : {}), ...(botToken ? {botToken} : {}),
     }),

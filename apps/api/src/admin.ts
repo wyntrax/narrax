@@ -21,14 +21,14 @@ export interface ConnectionStatus {
   purpose: string;
 }
 
-export function registerAdminRoutes(app: FastifyInstance, deps: Pick<AccountDeps, 'db' | 'verifier'> & { /** Reports which external providers are configured. */ connections?: () => ConnectionStatus[] }): void {
+export function registerAdminRoutes(app: FastifyInstance, deps: Pick<AccountDeps, 'db' | 'verifier'> & { /** Reports which external providers are configured. */ connections?: () => ConnectionStatus[] | Promise<ConnectionStatus[]> }): void {
   const db: PrismaClient = deps.db;
   const requireAdmin = makeRequireAdmin(deps);
   const opts = { preHandler: requireAdmin, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } };
 
   // Which external providers are set up, as yes or no. Keys and URLs are server-side secrets and are never returned, so there is
   // nothing here to leak and nothing to edit; this only answers "is it configured".
-  app.get('/v1/admin/connections', opts, async () => ({ items: (deps.connections?.() ?? []).map((c) => ({ name: c.name, configured: c.configured === true, purpose: c.purpose })) }));
+  app.get('/v1/admin/connections', opts, async () => ({ items: (await (deps.connections?.() ?? [])).map((c) => ({ name: c.name, configured: c.configured === true, purpose: c.purpose })) }));
 
   // The executor reads this before every order. Turning it on stops all executor activity at the next order, entries and exits alike.
   // No row means it was never touched, and a row that cannot be read counts as ON (see interpretKillSwitch).

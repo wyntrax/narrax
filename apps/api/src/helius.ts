@@ -5,8 +5,8 @@ import {
   effectiveHeliusSettings,
   HELIUS_SETTING_KEYS,
   HeliusSettingsInput,
+  HeliusUrlList,
   isSecretHeliusKey,
-  OptionalHeliusUrl,
   sanitizeUntrusted,
   type HeliusSettingKey,
 } from '@narra/shared';
@@ -14,10 +14,10 @@ import { makeRequireAdmin, type AccountDeps } from './account';
 
 const Reason = z.string().min(1).max(1_000);
 const TestBody = z.object({
-  rpcUrl: OptionalHeliusUrl.optional(),
-  rpcFallbackUrl: OptionalHeliusUrl.optional(),
-  holderRpcUrl: OptionalHeliusUrl.optional(),
-  holderRpcFallbackUrl: OptionalHeliusUrl.optional(),
+  rpcUrls: HeliusUrlList.optional(),
+  rpcFallbackUrls: HeliusUrlList.optional(),
+  holderRpcUrls: HeliusUrlList.optional(),
+  holderRpcFallbackUrls: HeliusUrlList.optional(),
 }).strict();
 
 export interface HeliusDeps extends Pick<AccountDeps, 'db' | 'verifier'> {
@@ -26,13 +26,20 @@ export interface HeliusDeps extends Pick<AccountDeps, 'db' | 'verifier'> {
   /** Injected in tests so no request leaves the process. */
   fetch?: typeof fetch;
   testTimeoutMs?: number;
+  /** The API's effective-settings cache, invalidated immediately after a save. */
+  runtime?: { invalidate: () => void };
+  /** Queues the webhook sync so a rotated secret reaches Helius without waiting. */
+  requestSync?: () => Promise<unknown>;
 }
 
 const cleanReason = (value: string) => sanitizeUntrusted(value, 300).trim();
 
 /** Never store a credential in the audit log. The action still records that it changed. */
 const auditValue = (key: string, value: unknown): Prisma.InputJsonValue => {
-  if (isSecretHeliusKey(key)) return value == null || value === '' ? '<unset>' : '<set>';
+  if (isSecretHeliusKey(key)) {
+    if (Array.isArray(value)) return value.length ? `${value.length} endpoint(s)` : '<unset>';
+    return value == null || value === '' ? '<unset>' : '<set>';
+  }
   return (value ?? null) as Prisma.InputJsonValue;
 };
 
@@ -40,12 +47,11 @@ type EndpointCode = 'OK' | 'RATE_LIMITED' | 'UNAUTHORIZED' | 'HTTP_ERROR' | 'TIM
 export interface EndpointTest { ok: boolean; code: EndpointCode; status?: number; latencyMs: number }
 
 /**
- * Admin-managed Helius credentials and endpoints.
+ * Admin-managed Helius credentials and endpoint pools.
  *
- * A saved value wins over the environment, so an exhausted key can be replaced without
- * editing .env or redeploying. RPC URLs embed the API key, so only the public webhook
- * URL is ever returned; every credential is write-only. Values are read at process
- * startup, so the admin page says a restart is required.
+ * A saved value wins over the environment. RPC URLs embed the API key, so pool counts
+ * and sources are returned but never the values; every credential is write-only.
+ * Processes read the rows through a short cache, so a save applies without a restart.
  */
 export function registerHeliusRoutes(app: FastifyInstance, deps: HeliusDeps): void {
   const db: PrismaClient = deps.db;
@@ -63,16 +69,16 @@ export function registerHeliusRoutes(app: FastifyInstance, deps: HeliusDeps): vo
 
   function view(current: Awaited<ReturnType<typeof rows>>) {
     const effective = effectiveHeliusSettings(current, env);
-    const secret = (value: { value: string; source: 'database' | 'environment' | 'default' }) =>
-      ({ configured: !!value.value, source: value.source });
+    const pool = (value: { value: string[]; source: 'database' | 'environment' | 'default' }) =>
+      ({ configured: value.value.length, source: value.source });
     return {
-      rpcUrl: secret(effective.rpcUrl),
-      rpcFallbackUrl: secret(effective.rpcFallbackUrl),
-      apiKey: secret(effective.apiKey),
-      holderRpcUrl: secret(effective.holderRpcUrl),
-      holderRpcFallbackUrl: secret(effective.holderRpcFallbackUrl),
+      rpcUrls: pool(effective.rpcUrls),
+      rpcFallbackUrls: pool(effective.rpcFallbackUrls),
+      apiKey: { configured: !!effective.apiKey.value, source: effective.apiKey.source },
+      holderRpcUrls: pool(effective.holderRpcUrls),
+      holderRpcFallbackUrls: pool(effective.holderRpcFallbackUrls),
       webhookUrl: { value: effective.webhookUrl.value || null, source: effective.webhookUrl.source },
-      webhookSecret: secret(effective.webhookSecret),
+      webhookSecret: { configured: !!effective.webhookSecret.value, source: effective.webhookSecret.source },
       ready: effective.ready,
       invalid: effective.invalid,
     };
@@ -92,9 +98,7 @@ export function registerHeliusRoutes(app: FastifyInstance, deps: HeliusDeps): vo
     for (const [key, value] of Object.entries(settings) as [HeliusSettingKey, unknown][]) proposed.set(key, value);
     const next = effectiveHeliusSettings([...proposed].map(([key, value]) => ({ key, value })), env);
 
-    if (next.rpcFallbackUrl.value && !next.rpcUrl.value) return bad(reply, 'HELIUS_RPC_FALLBACK_REQUIRES_PRIMARY');
-    if (next.rpcUrl.value && next.rpcFallbackUrl.value && next.rpcUrl.value === next.rpcFallbackUrl.value) return bad(reply, 'HELIUS_RPC_FALLBACK_DUPLICATE');
-    if (next.holderRpcUrl.value && next.holderRpcFallbackUrl.value && next.holderRpcUrl.value === next.holderRpcFallbackUrl.value) return bad(reply, 'HOLDER_RPC_FALLBACK_DUPLICATE');
+    if (next.rpcFallbackUrls.value.length && !next.rpcUrls.value.length) return bad(reply, 'HELIUS_RPC_FALLBACK_REQUIRES_PRIMARY');
 
     const writes: Prisma.PrismaPromise<unknown>[] = [];
     for (const [key, value] of Object.entries(settings) as [HeliusSettingKey, unknown][]) {
@@ -112,35 +116,33 @@ export function registerHeliusRoutes(app: FastifyInstance, deps: HeliusDeps): vo
       }));
     }
     await db.$transaction(writes);
+    deps.runtime?.invalidate();
+    // The worker builds the webhook client from the same rows, so ask it to sync now.
+    if (['integrations.helius.api_key', 'integrations.helius.webhook_url', 'integrations.helius.webhook_secret'].some(key => key in settings)) {
+      try { await deps.requestSync?.(); } catch { /* the scheduled sync retries */ }
+    }
     return view(await rows());
   });
 
-  // Tests the entered endpoints, or the saved ones when a field is omitted. It never
+  // Tests entered endpoints, or the saved pools when a field is omitted. It never
   // saves, and neither the URL nor the response body is returned. The client that sent
-  // a URL already has it, so an error code is enough.
+  // a URL already has it, so an error code and latency are enough.
   app.post('/v1/admin/helius/test', testOpts, async (req, reply) => {
     const body = TestBody.safeParse(req.body ?? {});
     if (!body.success) return bad(reply);
     const saved = effectiveHeliusSettings(await rows(), env);
-    const primary = body.data.rpcUrl ?? saved.rpcUrl.value;
-    const fallback = body.data.rpcFallbackUrl ?? saved.rpcFallbackUrl.value;
-    const holder = body.data.holderRpcUrl ?? saved.holderRpcUrl.value;
-    const holderFallback = body.data.holderRpcFallbackUrl ?? saved.holderRpcFallbackUrl.value;
-    if (![primary, fallback, holder, holderFallback].some(Boolean)) return bad(reply, 'HELIUS_NOT_CONFIGURED');
+    const groups = {
+      rpc: body.data.rpcUrls ?? saved.rpcUrls.value,
+      rpcFallback: body.data.rpcFallbackUrls ?? saved.rpcFallbackUrls.value,
+      holder: body.data.holderRpcUrls ?? saved.holderRpcUrls.value,
+      holderFallback: body.data.holderRpcFallbackUrls ?? saved.holderRpcFallbackUrls.value,
+    };
+    if (!Object.values(groups).some(urls => urls.length)) return bad(reply, 'HELIUS_NOT_CONFIGURED');
 
     const test = (url: string) => testEndpoint(url, deps.fetch ?? fetch, deps.testTimeoutMs ?? 5_000);
-    const [primaryResult, fallbackResult, holderResult, holderFallbackResult] = await Promise.all([
-      primary ? test(primary) : undefined,
-      fallback ? test(fallback) : undefined,
-      holder ? test(holder) : undefined,
-      holderFallback ? test(holderFallback) : undefined,
-    ]);
-    return {
-      ...(primaryResult ? { primary: primaryResult } : {}),
-      ...(fallbackResult ? { fallback: fallbackResult } : {}),
-      ...(holderResult ? { holder: holderResult } : {}),
-      ...(holderFallbackResult ? { holderFallback: holderFallbackResult } : {}),
-    };
+    const entries = await Promise.all(Object.entries(groups).map(async ([name, urls]) =>
+      [name, await Promise.all(urls.map(test))] as const));
+    return Object.fromEntries(entries);
   });
 }
 

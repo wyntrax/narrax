@@ -9,11 +9,11 @@ import en from '../../../messages/research/en.json';
 import id from '../../../messages/research/id.json';
 
 const initial:Helius={
- rpcUrl:{configured:true,source:'environment'},
- rpcFallbackUrl:{configured:false,source:'default'},
+ rpcUrls:{configured:1,source:'environment'},
+ rpcFallbackUrls:{configured:0,source:'default'},
  apiKey:{configured:false,source:'default'},
- holderRpcUrl:{configured:false,source:'default'},
- holderRpcFallbackUrl:{configured:false,source:'default'},
+ holderRpcUrls:{configured:0,source:'default'},
+ holderRpcFallbackUrls:{configured:0,source:'default'},
  webhookUrl:{value:'https://api.example.com/webhooks/helius',source:'environment'},
  webhookSecret:{configured:false,source:'default'},
  ready:{rpc:true,holder:true,webhook:false},
@@ -21,21 +21,21 @@ const initial:Helius={
 };
 
 function setup(){
- const api={saveHelius:vi.fn<AdminApi['saveHelius']>().mockResolvedValue(initial),testHelius:vi.fn<AdminApi['testHelius']>().mockResolvedValue({primary:{ok:true,code:'OK',latencyMs:9}})} as unknown as AdminApi;
+ const api={saveHelius:vi.fn<AdminApi['saveHelius']>().mockResolvedValue(initial),testHelius:vi.fn<AdminApi['testHelius']>().mockResolvedValue({rpc:[{ok:true,code:'OK',latencyMs:9}]})} as unknown as AdminApi;
  render(<NextIntlClientProvider locale="en" messages={{workspace:en}}><QueryClientProvider client={new QueryClient({defaultOptions:{mutations:{retry:false}}})}><HeliusForm api={api} initial={initial}/></QueryClientProvider></NextIntlClientProvider>);
  return {api};
 }
 
 describe('helius admin form',()=>{
- it('saves a replacement endpoint and never sends blank credentials',async()=>{
+ it('saves a multi-line primary pool and never sends blank credentials',async()=>{
   const {api}=setup();
   const save=screen.getByRole('button',{name:en.helius.save});
   expect(save).toBeDisabled();
-  fireEvent.change(screen.getByLabelText(en.helius.rpcUrl),{target:{value:'https://ready.example/?api-key=ready'}});
-  fireEvent.change(screen.getByLabelText(en.helius.reason),{target:{value:'Rotate exhausted key'}});
+  fireEvent.change(screen.getByLabelText(en.helius.rpcUrls),{target:{value:'https://ready-one.example/?api-key=one\nhttps://ready-two.example/?api-key=two\n'}});
+  fireEvent.change(screen.getByLabelText(en.helius.reason),{target:{value:'Rotate exhausted keys'}});
   expect(save).toBeEnabled();
   fireEvent.click(save);
-  await waitFor(()=>expect(api.saveHelius).toHaveBeenCalledWith({'integrations.helius.rpc_url':'https://ready.example/?api-key=ready'},'Rotate exhausted key'));
+  await waitFor(()=>expect(api.saveHelius).toHaveBeenCalledWith({'integrations.helius.rpc_urls':['https://ready-one.example/?api-key=one','https://ready-two.example/?api-key=two']},'Rotate exhausted keys'));
   expect(api.testHelius).not.toHaveBeenCalled();
  });
  it('clears the webhook endpoint when the field is emptied',async()=>{
@@ -45,12 +45,12 @@ describe('helius admin form',()=>{
   fireEvent.click(screen.getByRole('button',{name:en.helius.save}));
   await waitFor(()=>expect(api.saveHelius).toHaveBeenCalledWith({'integrations.helius.webhook_url':''},'Disable webhook sync'));
  });
- it('tests entered endpoints without saving and reports each result',async()=>{
+ it('tests entered fallback endpoints and reports the result per endpoint',async()=>{
   const {api}=setup();
-  fireEvent.change(screen.getByLabelText(en.helius.rpcFallbackUrl),{target:{value:'https://fallback.example/?api-key=fallback'}});
+  fireEvent.change(screen.getByLabelText(en.helius.rpcFallbackUrls),{target:{value:'https://fallback.example/?api-key=fallback'}});
   fireEvent.click(screen.getByRole('button',{name:en.helius.test}));
   await screen.findByText((_content,element)=>element?.tagName==='LI'&&element.textContent?.includes(en.helius.ok)===true);
-  expect(api.testHelius).toHaveBeenCalledWith({rpcFallbackUrl:'https://fallback.example/?api-key=fallback'});
+  expect(api.testHelius).toHaveBeenCalledWith({rpcFallbackUrls:['https://fallback.example/?api-key=fallback']});
   expect(api.saveHelius).not.toHaveBeenCalled();
  });
  it('keeps secret inputs blank after saving',async()=>{

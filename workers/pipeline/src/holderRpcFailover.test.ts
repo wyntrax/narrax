@@ -1,5 +1,5 @@
 import {describe,expect,it,vi} from 'vitest';
-import {HOLDER_RPC_FAILOVER_LIMITS,holderRpcEndpoints,makeFailoverHolderSource} from './holderRpcFailover';
+import {HOLDER_RPC_FAILOVER_LIMITS,holderRpcEndpointPools,holderRpcEndpoints,makeFailoverHolderSource,makePooledHolderSource} from './holderRpcFailover';
 import type {HolderRpcResult} from './holderRpc';
 
 const NOW=Date.parse('2051-03-01T12:00:00Z');
@@ -78,5 +78,29 @@ describe('holder rpc endpoints',()=>{
  it('ignores blank and duplicate URLs',()=>{
   expect(holderRpcEndpoints({HELIUS_RPC_URL:shared,HOLDER_RPC_URL:'   ',HOLDER_RPC_FALLBACK_URL:shared})).toEqual({primary:shared,fallback:null});
   expect(holderRpcEndpoints({HOLDER_RPC_URL:holder,HOLDER_RPC_FALLBACK_URL:holder})).toEqual({primary:holder,fallback:null});
+ });
+
+ it('builds four primary and four fallback pools, excluding cross-tier duplicates',()=>{
+  const primary=Array.from({length:4},(_,index)=>`https://primary-${index}.example/?k=${index}`);
+  const fallback=Array.from({length:4},(_,index)=>`https://fallback-${index}.example/?k=${index}`);
+  expect(holderRpcEndpointPools({sharedPrimary:[],sharedFallback:[],holderPrimary:[...primary,primary[0]!],holderFallback:[...fallback,primary[0]!]})).toEqual({primary,fallback});
+ });
+});
+
+describe('pooled holder source',()=>{
+ it('round-robins across four primaries and uses fallbacks only after all primaries fail',async()=>{
+  const firstCalls:string[]=[];
+  const primary=(name:string,shouldFail=false,calls=firstCalls)=>({get:vi.fn(async(mint:string)=>{calls.push(name);return shouldFail?fail('RATE_LIMITED'):ok(mint);})});
+  const source=makePooledHolderSource([primary('p1'),primary('p2'),primary('p3'),primary('p4')],[primary('f1'),primary('f2')],{now:()=>NOW});
+  expect(await source.get('m1')).toMatchObject({ok:true,endpoint:'primary',failedOver:false});
+  expect(await source.get('m2')).toMatchObject({ok:true,endpoint:'primary',failedOver:false});
+  expect(firstCalls).toEqual(['p1','p2']);
+
+  const failCalls:string[]=[];
+  const failing=makePooledHolderSource([
+   primary('p1',true,failCalls),primary('p2',true,failCalls),primary('p3',true,failCalls),primary('p4',true,failCalls),
+  ],[primary('f1',false,failCalls),primary('f2',false,failCalls)],{now:()=>NOW});
+  expect(await failing.get('m3')).toMatchObject({ok:true,endpoint:'fallback',failedOver:true});
+  expect(failCalls).toEqual(['p1','p2','p3','p4','f1']);
  });
 });
