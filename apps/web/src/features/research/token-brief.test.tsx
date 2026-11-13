@@ -23,6 +23,14 @@ function view(children:ReactNode){return render(<NextIntlClientProvider locale="
 beforeEach(()=>{mocked.allowed=true;mocked.query.mockReturnValue({data:token,isPending:false,isError:false,isFetching:false,refetch:vi.fn()});});
 afterEach(()=>{cleanup();vi.useRealTimers();vi.clearAllMocks();vi.unstubAllGlobals();});
 
+it('shows a tombstone without market or safety facts for a no-market token',()=>{
+ mocked.query.mockReturnValue({data:{...token,marketStatus:'NO_MARKET',lastMarketAt:at},isPending:false,isError:false,isFetching:false,refetch:vi.fn()});
+ view(<TokenPage mint={mint}/>);
+ expect(screen.getByText(messages.brief.noMarketTitle)).toBeVisible();
+ expect(screen.getByText(/Last market observation:/)).toBeVisible();
+ expect(screen.queryByText(messages.brief.lastObserved)).toBeNull();
+});
+
 it('opens the exact mint independently of list filters, preserving case and trimming whitespace',()=>{
  view(<MintLookup/>);fireEvent.change(screen.getByRole('textbox'),{target:{value:`  ${mint}  `}});fireEvent.click(screen.getByRole('button',{name:messages.brief.open}));
  expect(mocked.push).toHaveBeenCalledWith(`/app/tokens/${mint}`);

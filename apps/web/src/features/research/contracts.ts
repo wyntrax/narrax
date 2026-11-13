@@ -64,7 +64,7 @@ export const TokenSchema=TokenRef.extend({
   radarSafety:RadarSafetyViewSchema.optional(),
   developerHolding:z.object({wallet:text,holdingPct:number.min(0).max(100),signature:text,source:z.literal('INITIAL_MINT_AUTHORITY'),at:date,relatedWalletsIncluded:z.boolean()}).nullish(),
  observation:MarketObservation.nullish(),
- blacklisted:z.boolean(),createdOnChainAt:date.nullable(),
+ blacklisted:z.boolean(),createdOnChainAt:date.nullable(),marketStatus:z.enum(['ACTIVE','NO_MARKET']).optional(),lastMarketAt:date.nullable().optional(),
  metrics:z.object({priceUsd:nullable,marketCapUsd:nullable,liquidityUsd:nullable,volume24hUsd:nullable,at:date}).nullable(),
   holders:z.object({holders:number,top10Pct:nullable,devHoldingPct:nullable,smartWalletHolders:nullable.optional(),at:date}).nullable(),
  risk:z.object({riskScore:number,flags:z.array(text),at:date}).nullable(),

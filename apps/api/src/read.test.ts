@@ -65,6 +65,13 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     };
     const robot = await mk('ROBOT', 0.01, 91, 'BUY');
     await mk('QCAT', 0.004, 83);
+    const old = new Date(Date.now() - 4 * 86_400_000);
+    const hidden = await db.token.create({ data: {
+      mint: M('HIDE'), symbol: `HIDE${tag}`, name: 'Hidden no-market token',
+      createdOnChainAt: old, firstSeenAt: old, marketQuoteFailures: 2,
+      metrics: { create: { priceUsd: 1, marketCapUsd: 100_000, liquidityUsd: 50_000, volume24hUsd: 1_000, at: old } },
+    } });
+    await db.narrativeTokenRelation.create({ data: { narrativeId: nar.id, tokenId: hidden.id, relation: 'DERIVATIVE', ogScore: 99, matchScore: 90, confidence: 0.8 } });
 
     const order = (key: string, at: Date) => db.order.create({ data: { userId: aliceId, tokenId: robot.id, idempotencyKey: `${key}${tag}`, side: 'BUY', mode: 'AI_AUTO', status: 'CONFIRMED', sizeSol: 0.2, createdAt: at } });
     await db.position.create({ data: { userId: aliceId, tokenId: robot.id, mode: 'PAPER', entryPriceUsd: 0.008, sizeSol: 0.2, entryContext: { narrativeScore: 87 } } });
@@ -84,7 +91,7 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     // Users first: their positions, orders and trades would otherwise block deleting the tokens.
     await db.user.deleteMany({ where: { id: { in: [aliceId, bobId] } } });
     await db.walletTrade.deleteMany({ where: { walletId } });
-    await db.token.deleteMany({ where: { symbol: { in: [`ROBOT${tag}`, `QCAT${tag}`, `IMGF${tag}`] } } });
+    await db.token.deleteMany({ where: { symbol: { in: [`ROBOT${tag}`, `QCAT${tag}`, `IMGF${tag}`, `HIDE${tag}`] } } });
     await db.narrative.deleteMany({ where: { slug: { endsWith: tag } } });
     await db.trackedWallet.deleteMany({ where: { address: walletAddress } });
     await app.close();
@@ -174,6 +181,18 @@ describe.skipIf(!up)('read routes (needs Postgres)', () => {
     expect(items[0].token.imageUrl).toBe(artwork);expect(items[1].token.imageUrl).toBeNull();
     const bobView = (await get('/v1/opportunities?limit=100', bob)).body.items.find((i: { token: { symbol: string } }) => i.token.symbol === `ROBOT${tag}`);
     expect(bobView.decision).toMatchObject({ action: 'SELL' }); // Bob sees his own decision, Alice never does
+  });
+
+  it('hides a confirmed no-market token from discovery, search and its narrative', async () => {
+    const mint = M('HIDE');
+    expect((await get(`/v1/tokens?q=${encodeURIComponent(`HIDE${tag}`)}`)).body.items).toEqual([]);
+    expect((await get(`/v1/tokens?q=${encodeURIComponent(`HIDE${tag}`)}&minLiquidityUsd=0`)).body.items).toEqual([]);
+    expect((await get(`/v1/search?q=${encodeURIComponent(`HIDE${tag}`)}`)).body.results.tokens).toEqual([]);
+    const narrative = await get(`/v1/narratives/robotics-${tag}`);
+    expect(narrative.body.tokens.map((t: { mint: string }) => t.mint)).not.toContain(mint);
+    const direct = await get(`/v1/tokens/${mint}`);
+    expect(direct.status).toBe(200);
+    expect(direct.body).toMatchObject({ marketStatus: 'NO_MARKET', lastMarketAt: expect.any(String) });
   });
 
   it('searches tokens and returns token detail', async () => {

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Prisma, type PrismaClient } from '@narra/database';
 import { NarrativeStage } from '@narra/shared';
 import { encodeCursor, decodeCursor, Limit } from './paging';
+import { TOKEN_VISIBILITY, tokenVisibilityCutoff } from './tokenVisibility';
 
 const num = z.coerce.number().finite();
 const nonNeg = num.min(0);
@@ -70,6 +71,10 @@ export async function runScreener(db: PrismaClient, q: ScreenerQuery, now: Date)
   const add = (cond: Prisma.Sql) => where.push(cond);
 
   if (q.includeBlacklisted !== 'true') add(Prisma.sql`t."blacklisted" = false`);
+  // Hide tokens whose market has been unusable for three days. The failure count is
+  // only incremented after a completed dead-pool read; a fresh metric restores them.
+  const cutoff = tokenVisibilityCutoff(now);
+  add(Prisma.sql`(t."marketQuoteFailures" < ${TOKEN_VISIBILITY.deadQuoteFailures} OR (m."at" >= ${cutoff} AND m."at" <= ${now}) OR t."firstSeenAt" >= ${cutoff})`);
   if(q.verifiedOnly==='true') add(Prisma.sql`evidence."key" IS NOT NULL AND m."at" >= ${new Date(+now-15*60000)} AND m."at" <= ${now}`);
   if(q.marketCapOnly==='true') add(Prisma.sql`evidence."value"->>'marketCapIsFdv' = 'false'`);
   if (q.q) {
