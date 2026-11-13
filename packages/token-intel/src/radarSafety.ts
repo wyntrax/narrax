@@ -32,6 +32,10 @@ export const RADAR_SAFETY_POLICY = {
   maxTop10ExLpPct: 35,
   maxDevHoldingPct: { trencher: 10, holder: 5 } as const,
   maxBundleSniperInsiderPct: 20,
+  /** Distinct wallets buying in the same launch slot. More than two is a bundle signature. */
+  maxSameSlotBuyers: 2,
+  /** A deployer with more prior launches than this is treated as a serial launcher. */
+  maxDeployerPriorTokens: 3,
   minLpBurnedPct: 80,
   washTurnover: 30,
   minWashUniqueBuyers24h: 50,
@@ -76,10 +80,13 @@ export interface RadarSafetyFacts {
   bundlePct?: number | null;
   sniperPct?: number | null;
   insiderPct?: number | null;
+  /** Distinct wallets that bought in the pool-creation slot (or the first second when slots are unavailable). */
+  sameSlotBuyers?: number | null;
   uniqueBuyers24h?: number | null;
   uniqueSellers24h?: number | null;
   priceImpactPct?: number | null;
   deployerPriorRugs?: number | null;
+  deployerPriorTokens?: number | null;
   /** Quote source timestamp, kept separate from the primary evidence provenance. */
   tradeabilityAt?: Date | null;
   tradeability?: TradeabilityQuote | null;
@@ -138,10 +145,12 @@ export interface RadarSafetySnapshot {
     bundlePct: number | null;
     sniperPct: number | null;
     insiderPct: number | null;
+    sameSlotBuyers: number | null;
     uniqueBuyers24h: number | null;
     uniqueSellers24h: number | null;
     priceImpactPct: number | null;
     deployerPriorRugs: number | null;
+    deployerPriorTokens: number | null;
     evidenceSource: string | null;
     evidenceAt: string | null;
     /** Absent on snapshots frozen before tradeability quotes existed. */
@@ -303,6 +312,14 @@ export function evaluateRadarSafety(i: RadarSafetyFacts, now: Date = new Date())
     ));
   }
 
+  if (!finite(i.sameSlotBuyers)) {
+    checks.push(check('LAUNCH_BUNDLE', 'CRITICAL', 'UNKNOWN', null, `<= ${policy.maxSameSlotBuyers} distinct buyers`, 'same-slot buyer evidence is not available'));
+  } else if (i.sameSlotBuyers > policy.maxSameSlotBuyers) {
+    checks.push(check('LAUNCH_BUNDLE', 'CRITICAL', 'BLOCK', i.sameSlotBuyers, `<= ${policy.maxSameSlotBuyers} distinct buyers`, 'multiple wallets bought in the same launch slot'));
+  } else {
+    checks.push(check('LAUNCH_BUNDLE', 'CRITICAL', 'PASS', i.sameSlotBuyers, `<= ${policy.maxSameSlotBuyers} distinct buyers`));
+  }
+
   if (!finite(i.narrativeManipulationRisk)) {
     checks.push(check('ORGANIC_EVIDENCE', 'CRITICAL', 'UNKNOWN', null, `< ${policy.maxOrganicManipulationRisk}`, 'organic/manipulation evidence is not available'));
   } else if (i.narrativeManipulationRisk >= policy.maxOrganicManipulationRisk) {
@@ -338,8 +355,11 @@ export function evaluateRadarSafety(i: RadarSafetyFacts, now: Date = new Date())
     checks.push(check('TRADEABILITY', 'CRITICAL', 'PASS', i.priceImpactPct, `<= ${policy.maxPriceImpactPct}%`));
   }
 
-  if (i.deployerPriorRugs == null) {
-    checks.push(check('DEPLOYER_HISTORY', 'CRITICAL', 'WARN', null, '0 prior rugs', 'deployer history is not available'));
+  if (finite(i.deployerPriorTokens) && i.deployerPriorTokens > policy.maxDeployerPriorTokens) {
+    checks.push(check('DEPLOYER_HISTORY', 'CRITICAL', 'BLOCK', i.deployerPriorTokens,
+      `<= ${policy.maxDeployerPriorTokens} prior tokens`, 'deployer is a serial launcher'));
+  } else if (i.deployerPriorRugs == null) {
+    checks.push(check('DEPLOYER_HISTORY', 'CRITICAL', 'UNKNOWN', null, '0 prior rugs', 'deployer history is not available'));
   } else if (i.deployerPriorRugs > 0) {
     checks.push(check('DEPLOYER_HISTORY', 'CRITICAL', 'BLOCK', i.deployerPriorRugs, '0 prior rugs', 'deployer has a prior rug'));
   } else {
@@ -399,10 +419,12 @@ export function evaluateRadarSafety(i: RadarSafetyFacts, now: Date = new Date())
       bundlePct: i.bundlePct ?? null,
       sniperPct: i.sniperPct ?? null,
       insiderPct: i.insiderPct ?? null,
+      sameSlotBuyers: i.sameSlotBuyers ?? null,
       uniqueBuyers24h: i.uniqueBuyers24h ?? null,
       uniqueSellers24h: i.uniqueSellers24h ?? null,
       priceImpactPct: i.priceImpactPct ?? null,
       deployerPriorRugs: i.deployerPriorRugs ?? null,
+      deployerPriorTokens: i.deployerPriorTokens ?? null,
       evidenceSource: i.evidenceSource ?? null,
       evidenceAt: iso(i.evidenceAt),
       tradeabilityAt: iso(i.tradeabilityAt),

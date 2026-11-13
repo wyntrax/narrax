@@ -5,6 +5,7 @@ import { EARLY_RULES, RADAR_EVIDENCE_LIMITS, attentionPriceDivergence, evaluateE
 import { WSOL_MINT, type MarketQuoteSource } from '@narra/market-data';
 import { createEarlyRadarAlert } from './earlyRadarTracking';
 import type { RadarSafetyEvidence, RadarSafetySource } from './radarSafetyEvidence';
+import type { LaunchEvidence, LaunchEvidenceSource } from './launchEvidence';
 import type { TradeabilityEvidence, TradeabilitySource } from './tradeabilityEvidence';
 import { storeMarketSnapshot } from './marketSnapshot';
 import { COVERAGE_LIMITS, saveSocialPriority, saveResearchDiagnostics } from './researchDiagnostics';
@@ -50,10 +51,11 @@ const num = (v: { toString(): string } | null | undefined) => (v == null ? null 
  * market source confirms the mint trades and is under the early market cap ceiling, at most a few per run.
  * A cashtag resolves only when exactly one known token carries that symbol. Anything else is skipped, not guessed.
  */
-export async function scanSocialTokens(db: PrismaClient, deps: { quotes: MarketQuoteSource | null; safety?: RadarSafetySource | null; tradeability?: TradeabilitySource | null }, at?: Date): Promise<SocialScanSummary> {
+export async function scanSocialTokens(db: PrismaClient, deps: { quotes: MarketQuoteSource | null; safety?: RadarSafetySource | null; tradeability?: TradeabilitySource | null; launchEvidence?: LaunchEvidenceSource | null }, at?: Date): Promise<SocialScanSummary> {
   const now=at??new Date();
   deps.safety?.begin();
   deps.tradeability?.begin();
+  deps.launchEvidence?.begin();
   const R = SOCIAL_RULES;
   const out: SocialScanSummary = { rowsRead: 0, groupsQualified: 0, tokensCreated: 0, metricsWritten: 0, mintsUnverified: 0, cashtagsResolved: 0, cashtagsAmbiguous: 0, tokensEvaluated: 0, tokensResolved: 0, holderPriorityCandidates: 0, holderPriorityOmitted: 0, earlyCandidates: 0, evidenceSkipped: {}, alerts: 0, safetyPass: 0, safetyUnknown: 0, safetyBlocked: 0, pruned: 0, errors: [] };
   const priorityIds: string[] = [];
@@ -201,15 +203,21 @@ export async function scanSocialTokens(db: PrismaClient, deps: { quotes: MarketQ
     const early = earlyInput(h.devHoldingPct ?? null);
     let safetyEvidence: RadarSafetyEvidence | null = null;
     let tradeability: TradeabilityEvidence | null = null;
+    let launchEvidence: LaunchEvidence | null = null;
     // Preserve scoring inputs; enrichment is used only by the separate safety gate.
     if ([early.trencher, early.holder].some(e => e.eligible && (e.tier === 'WATCH' || e.tier === 'STRONG'))) {
       if (deps.safety) safetyEvidence = await deps.safety.get(t.mint, at);
       if (deps.tradeability) tradeability = await deps.tradeability.get(t.mint, at);
+      if (deps.launchEvidence) launchEvidence = await deps.launchEvidence.get(t.mint, at);
     }
     const safetyContext = {
       priceGrowth1hPct: growth1h, priceGrowth3hPct: growth3h,
       narrativeManipulationRisk: c.organicKnown ? c.manipulationRisk : null,
       ...(safetyEvidence ?? {}),
+      ...(launchEvidence ? {
+        bundlePct: launchEvidence.bundlePct, sniperPct: launchEvidence.sniperPct, insiderPct: launchEvidence.insiderPct,
+        sameSlotBuyers: launchEvidence.sameSlotBuyers, deployerPriorRugs: launchEvidence.deployerPriorRugs, deployerPriorTokens: launchEvidence.deployerPriorTokens,
+      } : {}),
       ...(tradeability ? {priceImpactPct: tradeability.priceImpactPct, tradeabilityAt: tradeability.sourceAt,tradeability} : {}),
     };
 

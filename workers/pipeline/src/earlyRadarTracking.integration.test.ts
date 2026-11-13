@@ -121,8 +121,8 @@ describe('early radar frozen outcomes on isolated PostgreSQL',()=>{
     try{
       const created=await createEarlyRadarAlert(db,{...input,safetyContext:{
         priceGrowth1hPct:10,priceGrowth3hPct:20,narrativeManipulationRisk:20,top10ExLpPct:15,
-        lpBurnedPct:100,lpLocked:null,bundlePct:0,sniperPct:0,insiderPct:0,
-        uniqueBuyers24h:100,uniqueSellers24h:90,priceImpactPct:1,deployerPriorRugs:0,tradeabilityAt:at.toISOString(),tradeability:testTradeability(token.mint,at),
+        lpBurnedPct:100,lpLocked:null,bundlePct:0,sniperPct:0,insiderPct:0,sameSlotBuyers:1,
+        uniqueBuyers24h:100,uniqueSellers24h:90,priceImpactPct:1,deployerPriorRugs:0,deployerPriorTokens:0,tradeabilityAt:at.toISOString(),tradeability:testTradeability(token.mint,at),
       }},at);
       expect(created).toMatchObject({created:true,safety:expect.objectContaining({status:'PASS',blockers:[],unknowns:[],facts:expect.objectContaining({tradeabilityAt:at.toISOString(),priceImpactPct:1})})});
       if(!created.created)throw Error('complete safety evidence was withheld');

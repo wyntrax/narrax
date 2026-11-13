@@ -44,12 +44,14 @@ const base: RadarSafetyFacts = {
   bundlePct: 1,
   sniperPct: 1,
   insiderPct: 1,
+  sameSlotBuyers: 1,
   uniqueBuyers24h: 100,
   uniqueSellers24h: 80,
   priceImpactPct: 1,
   tradeabilityAt: NOW,
   tradeability: testTradeability('mint-1',NOW),
   deployerPriorRugs: 0,
+  deployerPriorTokens: 0,
 };
 
 describe('radar safety gate', () => {
@@ -74,10 +76,12 @@ describe('radar safety gate', () => {
       [{ lpLocked: false }, 'LP_CONTROL'],
       [{ lpBurnedPct: 79, lpLocked: null }, 'LP_CONTROL'],
       [{ bundlePct: 10, sniperPct: 8, insiderPct: 5 }, 'BUNDLE_SNIPER_INSIDER'],
+      [{ sameSlotBuyers: 3 }, 'LAUNCH_BUNDLE'],
       [{ narrativeManipulationRisk: 60 }, 'ORGANIC_EVIDENCE'],
       [{ volume24hUsd: 50_000 * 31, uniqueBuyers24h: 10 }, 'WASH_VOLUME'],
       [{ priceImpactPct: 3.1,tradeability:testTradeability(base.mint,NOW,3.1) }, 'TRADEABILITY'],
       [{ deployerPriorRugs: 1 }, 'DEPLOYER_HISTORY'],
+      [{ deployerPriorTokens: RADAR_SAFETY_POLICY.maxDeployerPriorTokens + 1 }, 'DEPLOYER_HISTORY'],
     ];
     for (const [over, code] of cases) {
       const r = evaluateRadarSafety({ ...base, ...over }, NOW);
@@ -116,6 +120,8 @@ describe('radar safety gate', () => {
       [{ top10ExLpPct: null }, 'TOP10_EX_LP'],
       [{ lpBurnedPct: null, lpLocked: null }, 'LP_CONTROL'],
       [{ bundlePct: null }, 'BUNDLE_SNIPER_INSIDER'],
+      [{ sameSlotBuyers: null }, 'LAUNCH_BUNDLE'],
+      [{ deployerPriorRugs: null }, 'DEPLOYER_HISTORY'],
       [{ narrativeManipulationRisk: null }, 'ORGANIC_EVIDENCE'],
       [{ riskAt: null }, 'RISK_EVIDENCE'],
       [{ riskAt: new Date(+NOW - 61 * 60_000) }, 'RISK_EVIDENCE'],
