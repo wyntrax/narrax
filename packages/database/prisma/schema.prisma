@@ -605,6 +605,8 @@ model Token {
   symbol           String
   name             String
   createdOnChainAt DateTime?
+  /// First time this mint was stored. Used for the 3-day no-market visibility rule.
+  firstSeenAt      DateTime                 @default(now())
   deployer         String?
   blacklisted      Boolean                  @default(false)
   /// Why an admin blacklisted it, when, and who. Cleared when it is un-blacklisted (the change itself stays in the audit log).
@@ -633,6 +635,7 @@ model Token {
   @@index([symbol])
   @@index([marketQuarantineUntil])
   @@index([marketPriorityUntil])
+  @@index([firstSeenAt])
 }
 
 model TokenMetric {

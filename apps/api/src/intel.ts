@@ -165,7 +165,7 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
 
     const [tokens, narratives, wallets, creators, walletTx, myTx] = await Promise.all([
       tokenAccess ? db.token.findMany({
-        where: { OR: [{ symbol: { contains: like, mode: 'insensitive' } }, { name: { contains: like, mode: 'insensitive' } }, ...(addressPrefix ? [{ mint: { startsWith: like } }] : [])] },
+        where: { AND: [visibleTokenWhere(now()), { OR: [{ symbol: { contains: like, mode: 'insensitive' } }, { name: { contains: like, mode: 'insensitive' } }, ...(addressPrefix ? [{ mint: { startsWith: like } }] : [])] }] },
         take, orderBy: [{ symbol: 'asc' }, { id: 'asc' }], select: { mint: true, symbol: true, name: true, blacklisted: true },
       }) : [],
       narrativeAccess ? db.narrative.findMany({ where: { stage: { not: 'DEAD' }, OR: [{ name: { contains: like, mode: 'insensitive' } }, { slug: { contains: likeEscape(term.toLowerCase().replace(/\s+/g, '-')) } }] }, take, orderBy: [{ score: 'desc' }, { id: 'asc' }], select: { slug: true, name: true, stage: true, score: true } }) : [],
@@ -193,3 +193,4 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
   });
 }
 import { walletQualifications } from '@narra/worker-pipeline';
+import { visibleTokenWhere } from './tokenVisibility';

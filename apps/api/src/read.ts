@@ -12,6 +12,7 @@ import { tokenHistory } from './tokenHistory';
 import { walletScorePage } from './walletScorePage';
 import {radarSafetyViews} from './radarSafetyView';
 import {latestEvidenceViews} from './latestEvidence';
+import {tokenMarketStatus,visibleTokenWhere} from './tokenVisibility';
 
 const n = (v: { toString(): string } | null | undefined) => (v == null ? null : Number(v.toString()));
 const Paging = z.object({ limit: Limit, cursor: IdCursor.optional() });
@@ -30,10 +31,11 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
     const q = z.object({ limit: Limit, cursor: IdCursor.optional(), stage: z.enum(['SEED', 'EMERGING', 'ACCELERATING', 'MAINSTREAM', 'SATURATED', 'DECAYING', 'DEAD']).optional() }).safeParse(req.query);
     if (!q.success) return reply.code(400).send(bad);
     if (q.data.cursor && !(await db.narrative.count({ where: { id: q.data.cursor } }))) return reply.code(400).send(bad);
+    const at = now();
     const rows = await db.narrative.findMany({
       where: q.data.stage ? { stage: q.data.stage } : {}, orderBy: [{ score: 'desc' }, { id: 'asc' }], take: q.data.limit + 1,
       ...(q.data.cursor ? { cursor: { id: q.data.cursor }, skip: 1 } : {}),
-      include: { _count: { select: { tokens: true } } },
+      include: { _count: { select: { tokens: { where: { token: visibleTokenWhere(at) } } } } },
     });
     const page = rows.slice(0, q.data.limit);
     return {
@@ -44,6 +46,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
 
   app.get('/v1/narratives/:slug', opts, async (req, reply) => {
     const { slug } = req.params as { slug: string };
+    const at = now();
     const r = await db.narrative.findUnique({
       where: { slug },
       include: {
@@ -51,7 +54,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
         // Only creators attributed to this narrative, capped so a busy narrative
         // cannot ship an unbounded payload. Originators sort first (enum order).
         creators: { orderBy: [{ role: 'asc' }, { id: 'asc' }], take: 50, include: { creator: { select: { platform: true, handle: true } } } },
-        tokens: { orderBy: { ogScore: 'desc' }, take: 20, include: { token: { select: { id: true, mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1 } } } } },
+        tokens: { where: { token: visibleTokenWhere(at) }, orderBy: { ogScore: 'desc' }, take: 20, include: { token: { select: { id: true, mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1 } } } } },
       },
     });
     if (!r) return reply.code(404).send({ error: 'NOT_FOUND' });
@@ -161,7 +164,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
     const cursor = q.data.cursor;
     if (cursor && (!IdCursor.safeParse(cursor).success || !(await db.token.count({ where: { id: cursor } })))) return reply.code(400).send(bad);
     const rows = await db.token.findMany({
-      where: term ? { OR: [{ symbol: { contains: term, mode: 'insensitive' } }, { name: { contains: term, mode: 'insensitive' } }, { mint: { startsWith: term } }] } : {},
+      where: { AND: [visibleTokenWhere(now()), ...(term ? [{ OR: [{ symbol: { contains: term, mode: 'insensitive' as const } }, { name: { contains: term, mode: 'insensitive' as const } }, { mint: { startsWith: term } }] }] : [])] },
       take: q.data.limit + 1, orderBy: [{ symbol: 'asc' }, { id: 'asc' }], ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       include: { metrics: { orderBy: { at: 'desc' }, take: 1 } },
     });
@@ -193,20 +196,21 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
       },
     });
     if (!t) return reply.code(404).send({ error: 'NOT_FOUND' });
-    const m = t.metrics[0];
+    const at=now(),m = t.metrics[0],latestMetricAt=m?.at??null,marketStatus=tokenMarketStatus(t,latestMetricAt,at);
     const c = t.consensus[0];
     const evidence=await marketEvidence(db,[t.id]);
     const images=await marketTokenImages(db,[t]);
     const developerHolding=await db.systemSetting.findUnique({where:{key:`research.developerHolding.${t.id}`}});
-    const safety=await radarSafetyViews(db,[t],now());
-    const latestEvidence=await latestEvidenceViews(db,[t],now());
+    const safety=await radarSafetyViews(db,[t],at);
+    const latestEvidence=await latestEvidenceViews(db,[t],at);
     const holderObservation=latestEvidence.get(t.id)?.holders;
     return {
       mint: t.mint, symbol: t.symbol, name: t.name, blacklisted: t.blacklisted, createdOnChainAt: t.createdOnChainAt,
+      marketStatus,lastMarketAt:latestMetricAt?.toISOString()??null,
       imageUrl: images.get(t.id) ?? null,
       radarSafety:safety.get(t.id),
       latestEvidence:latestEvidence.get(t.id),
-      observation:observation(evidence.get(t.id),m?.id,now()),
+      observation:observation(evidence.get(t.id),m?.id,at),
       developerHolding:developerHolding?.value??null,
       metrics: m ? { priceUsd: n(m.priceUsd), marketCapUsd: n(m.marketCapUsd), liquidityUsd: n(m.liquidityUsd), volume24hUsd: n(m.volume24hUsd), at: m.at } : null,
       holders: holderObservation?.data && holderObservation.at && ['FRESH','STALE'].includes(holderObservation.state)
