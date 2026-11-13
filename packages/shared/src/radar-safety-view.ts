@@ -12,7 +12,7 @@ export const FrozenRadarSafetySchema=z.object({
   metricId:text,holderMetricId:text,riskMetricId:text.nullable(),marketAt:date.nullable(),holdersAt:date.nullable(),riskAt:date.nullable(),
   priceUsd:number,marketCapUsd:number,liquidityUsd:number,volume24hUsd:number,holders:number,top10Pct:number,top10ExLpPct:number,devHoldingPct:number,
   riskFlags:z.array(text),priceGrowth1hPct:number,priceGrowth3hPct:number,narrativeManipulationRisk:number,lpBurnedPct:number,lpLocked:z.boolean().nullable(),
-  bundlePct:number,sniperPct:number,insiderPct:number,uniqueBuyers24h:number,uniqueSellers24h:number,priceImpactPct:number,deployerPriorRugs:number,evidenceSource:text.nullable(),evidenceAt:date.nullable(),tradeabilityAt:date.nullable().optional(),tradeability:TradeabilityQuoteSchema.nullable().optional(),
+  bundlePct:number,sniperPct:number,insiderPct:number,uniqueBuyers24h:number,uniqueSellers24h:number,priceImpactPct:number,deployerPriorRugs:number,sameSlotBuyers:number.optional(),deployerPriorTokens:number.optional(),evidenceSource:text.nullable(),evidenceAt:date.nullable(),tradeabilityAt:date.nullable().optional(),tradeability:TradeabilityQuoteSchema.nullable().optional(),
  }),evaluatedAt:date,
 }).superRefine((value,ctx)=>{
  const codes=(status:string)=>value.checks.filter(c=>c.status===status&&(status==='WARN'||c.severity==='CRITICAL')).map(c=>c.code).sort();

@@ -9,7 +9,7 @@ import {testTradeability} from '../../../scripts/test-tradeability';
 assertTestDatabase(new URL(process.env.DATABASE_URL??'invalid:'));
 const db=createPrisma(),tag=`safety-view-${randomUUID()}`,now=new Date('2026-10-23T12:00:00Z');
 const token={id:`${tag}-token`,mint:`${tag}-mint`};
-const facts:RadarSafetyFacts={tokenId:token.id,mint:token.mint,profile:'trencher',route:'NARRATIVE',matchKind:'NAME',tier:'WATCH',score:60,metricId:'metric',holderMetricId:'holders',riskMetricId:'risk',priceUsd:.01,marketCapUsd:50000,liquidityUsd:20000,volume24hUsd:30000,holders:500,top10Pct:20,devHoldingPct:0,riskFlags:[],marketAt:now,holdersAt:now,riskAt:now,priceGrowth1hPct:0,priceGrowth3hPct:0,narrativeManipulationRisk:0,top10ExLpPct:10,lpBurnedPct:100,bundlePct:0,sniperPct:0,insiderPct:0,uniqueBuyers24h:100,uniqueSellers24h:80,priceImpactPct:1,deployerPriorRugs:0};
+const facts:RadarSafetyFacts={tokenId:token.id,mint:token.mint,profile:'trencher',route:'NARRATIVE',matchKind:'NAME',tier:'WATCH',score:60,metricId:'metric',holderMetricId:'holders',riskMetricId:'risk',priceUsd:.01,marketCapUsd:50000,liquidityUsd:20000,volume24hUsd:30000,holders:500,top10Pct:20,devHoldingPct:0,riskFlags:[],marketAt:now,holdersAt:now,riskAt:now,priceGrowth1hPct:0,priceGrowth3hPct:0,narrativeManipulationRisk:0,top10ExLpPct:10,lpBurnedPct:100,bundlePct:0,sniperPct:0,insiderPct:0,sameSlotBuyers:1,uniqueBuyers24h:100,uniqueSellers24h:80,priceImpactPct:1,deployerPriorRugs:0,deployerPriorTokens:0};
 const alerts:string[]=[],keys:string[]=[];
 async function alert(at:Date,snapshot:unknown,userId?:string){
  const a=await db.alert.create({data:{kind:'EARLY_RADAR_TRENCHER',priority:'WATCH',refType:'TOKEN',refId:token.id,title:'Test',body:'Stored text',createdAt:at,userId}});alerts.push(a.id);

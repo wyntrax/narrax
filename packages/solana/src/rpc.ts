@@ -34,6 +34,7 @@ const SignaturesResult = z.array(z.object({ signature: z.string(), blockTime: z.
 const Instruction = z.unknown();
 const TokenBalance = z.object({ mint: z.string(), owner: z.string().nullish(), uiTokenAmount: z.object({ amount: z.string().regex(/^\d+$/) }).passthrough() }).passthrough();
 const ParsedTxResult = z.object({
+  slot: z.number().int().nonnegative().nullish(),
   blockTime: z.number().nullish(),
   transaction: z.object({
     message: z.object({

@@ -19,6 +19,7 @@ import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPo
 import { assertEnv } from '@narra/shared';
 import { makeDeveloperHoldingSource } from './developerHoldings';
 import { makeRadarSafetySource } from './radarSafetyEvidence';
+import { makeLaunchEvidenceSource } from './launchEvidence';
 import { makeTradeabilitySource } from './tradeabilityEvidence';
 import { deliverEarlyRadarTelegram, telegramConfigFromSettings, TelegramBotApiTransport } from './telegram';
 import { tregConfigFromSettings } from './integrationSettings';
@@ -84,13 +85,14 @@ async function main(): Promise<void> {
     if (!marketEnabled) return null;
     const metadata = combinedMetadataSource(await helius.metadataSource(), jupiterMetadataSource());
     const rpc = await helius.rpc(15_000);
-    return { holderFallback: await helius.holderSource(), metadata, quotes, info: gecko, launches: gecko, developerHoldings: rpc ? makeDeveloperHoldingSource(db, rpc) : null };
+    return { holderFallback: await helius.holderSource(), metadata, quotes, info: gecko, launches: gecko, developerHoldings: rpc ? makeDeveloperHoldingSource(db, rpc) : null, launchEvidence: rpc ? makeLaunchEvidenceSource(db, rpc) : null };
   };
   // Bounded public RugCheck lookups for early-radar candidates only. Missing/failed data stays UNKNOWN.
   const radarSafety = marketEnabled ? makeRadarSafetySource(db) : null;
   const tradeability = makeTradeabilitySource(db);
   if (tradeability) console.log('radar tradeability evidence on: jupiter, $50 USDC quote');
   if (radarSafety) console.log(`radar safety evidence on: rugcheck, max ${process.env.RADAR_SAFETY_EVIDENCE_MAX_PER_RUN ?? '3'} lookups per run`);
+  if (marketEnabled) console.log('radar launch evidence on: bounded Helius launch scan, 2 candidates per run');
 
   // Telegram is a delivery layer for global research alerts only. It is off unless the admin page (or env) enables it.
   // The worker never reads user-owned alerts and cannot place orders or touch a position.
@@ -163,7 +165,7 @@ async function main(): Promise<void> {
     new Worker(QUEUE_NAMES.aiScreening, async (j) => JSON.stringify(await processScreeningJob(db, { llm }, AiScreeningJobSchema.parse(j.data))), { connection, concurrency: 2 }),
     new Worker(QUEUE_NAMES.tokenResolution, async () => {
       const deps = await marketDepsFor();
-      return JSON.stringify({ mentionLinks: await attributeNarrativeMentions(db), ...(await resolveTokens(db, undefined, { safety: radarSafety, tradeability })), social: await scanSocialTokens(db, { quotes: deps?.quotes ?? null, safety: radarSafety, tradeability }).catch(() => 'social scan failed') });
+      return JSON.stringify({ mentionLinks: await attributeNarrativeMentions(db), ...(await resolveTokens(db, undefined, { safety: radarSafety, tradeability, launchEvidence: deps?.launchEvidence ?? null })), social: await scanSocialTokens(db, { quotes: deps?.quotes ?? null, safety: radarSafety, tradeability, launchEvidence: deps?.launchEvidence ?? null }).catch(() => 'social scan failed') });
     }, { connection, concurrency: 1 }),
     // One refresh at a time: the sources are rate limited per process.
     new Worker(QUEUE_NAMES.marketData, async () => {

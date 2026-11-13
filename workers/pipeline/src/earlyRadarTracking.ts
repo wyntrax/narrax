@@ -33,10 +33,12 @@ export interface RadarSafetyContext{
   bundlePct?:number|null;
   sniperPct?:number|null;
   insiderPct?:number|null;
+  sameSlotBuyers?:number|null;
   uniqueBuyers24h?:number|null;
   uniqueSellers24h?:number|null;
   priceImpactPct?:number|null;
   deployerPriorRugs?:number|null;
+  deployerPriorTokens?:number|null;
   /** When the tradeability quote was taken. Recorded separately from the primary safety source. */
   tradeabilityAt?:string|null;
   tradeability?:import('@narra/shared').TradeabilityQuote|null;
@@ -77,9 +79,9 @@ export async function createEarlyRadarAlert(db:PrismaClient,input:RadarAlertInpu
         priceGrowth1hPct:input.safetyContext?.priceGrowth1hPct??null,priceGrowth3hPct:input.safetyContext?.priceGrowth3hPct??null,
         narrativeManipulationRisk:input.safetyContext?.narrativeManipulationRisk??null,
         top10ExLpPct:input.safetyContext?.top10ExLpPct??null,lpBurnedPct:input.safetyContext?.lpBurnedPct??null,lpLocked:input.safetyContext?.lpLocked??null,
-        bundlePct:input.safetyContext?.bundlePct??null,sniperPct:input.safetyContext?.sniperPct??null,insiderPct:input.safetyContext?.insiderPct??null,
+        bundlePct:input.safetyContext?.bundlePct??null,sniperPct:input.safetyContext?.sniperPct??null,insiderPct:input.safetyContext?.insiderPct??null,sameSlotBuyers:input.safetyContext?.sameSlotBuyers??null,
         uniqueBuyers24h:input.safetyContext?.uniqueBuyers24h??null,uniqueSellers24h:input.safetyContext?.uniqueSellers24h??null,
-        priceImpactPct:input.safetyContext?.priceImpactPct??null,deployerPriorRugs:input.safetyContext?.deployerPriorRugs??null,
+        priceImpactPct:input.safetyContext?.priceImpactPct??null,deployerPriorRugs:input.safetyContext?.deployerPriorRugs??null,deployerPriorTokens:input.safetyContext?.deployerPriorTokens??null,
         tradeabilityAt:input.safetyContext?.tradeabilityAt&&Number.isFinite(+new Date(input.safetyContext.tradeabilityAt))?new Date(input.safetyContext.tradeabilityAt):null,
         tradeability:input.safetyContext?.tradeability??null,
         evidenceSource:input.safetyContext?.source??null,

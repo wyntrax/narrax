@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@narra/database';
 import { createEarlyRadarAlert } from './earlyRadarTracking';
 import type { RadarSafetyEvidence, RadarSafetySource } from './radarSafetyEvidence';
+import type { LaunchEvidence, LaunchEvidenceSource } from './launchEvidence';
 import type { TradeabilityEvidence, TradeabilitySource } from './tradeabilityEvidence';
 import { socialOpportunityEvidence } from './socialOpportunity';
 import { saveResearchDiagnostics } from './researchDiagnostics';
@@ -36,10 +37,11 @@ const num = (v: { toString(): string } | null | undefined) => (v == null ? null 
  * that pass liquidity and holder floors. This job only reads market data and writes research rows and alerts.
  * It has no access to orders, positions or execution, so a matching ticker can never trigger a buy.
  */
-export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?: RadarSafetySource | null; tradeability?: TradeabilitySource | null } = {}): Promise<ResolveSummary> {
+export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?: RadarSafetySource | null; tradeability?: TradeabilitySource | null; launchEvidence?: LaunchEvidenceSource | null } = {}): Promise<ResolveSummary> {
   const now=at??new Date();
   deps.safety?.begin();
   deps.tradeability?.begin();
+  deps.launchEvidence?.begin();
   const out: ResolveSummary = { narrativesChecked: 0, candidates: 0, newCandidates: 0, opportunitiesWritten: 0, noTokenYet: 0, alerts: 0, radarAlerts: 0, earlyCandidates: 0, evidenceSkipped: {}, safetyPass: 0, safetyUnknown: 0, safetyBlocked: 0 };
   const alert = async (data: { kind: string; priority: 'INFO' | 'WATCH' | 'IMPORTANT' | 'CRITICAL'; title: string; body: string; refType: string; refId: string }) => {
     await db.alert.create({ data: { ...data, createdAt: now } });
@@ -156,15 +158,21 @@ export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?
         const early = earlyInput(h.devHoldingPct ?? null);
         let safetyEvidence: RadarSafetyEvidence | null = null;
         let tradeability: TradeabilityEvidence | null = null;
+        let launchEvidence: LaunchEvidence | null = null;
         // Enrich publication candidates for the separate safety gate; preserve the attention score and its inputs.
         if ([early.trencher, early.holder].some(e => e.eligible && (e.tier === 'WATCH' || e.tier === 'STRONG'))) {
           if (deps.safety) safetyEvidence = await deps.safety.get(t.mint, at);
           if (deps.tradeability) tradeability = await deps.tradeability.get(t.mint, at);
+          if (deps.launchEvidence) launchEvidence = await deps.launchEvidence.get(t.mint, at);
         }
         const safetyContext = {
           priceGrowth1hPct: growth1h, priceGrowth3hPct: growth3h,
           narrativeManipulationRisk: n.metrics[0]?.manipulationRisk ?? null,
           ...(safetyEvidence ?? {}),
+          ...(launchEvidence ? {
+            bundlePct: launchEvidence.bundlePct, sniperPct: launchEvidence.sniperPct, insiderPct: launchEvidence.insiderPct,
+            sameSlotBuyers: launchEvidence.sameSlotBuyers, deployerPriorRugs: launchEvidence.deployerPriorRugs, deployerPriorTokens: launchEvidence.deployerPriorTokens,
+          } : {}),
           ...(tradeability ? {priceImpactPct: tradeability.priceImpactPct, tradeabilityAt: tradeability.sourceAt,tradeability} : {}),
         };
         let counted = false;
