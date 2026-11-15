@@ -22,6 +22,7 @@ const horizons=(at:Date)=>EARLY_OUTCOME_RULES.horizonsHours.map(horizonHours=>({
 export interface RadarSafetyContext{
   priceGrowth1hPct:number|null;
   priceGrowth3hPct:number|null;
+  drawdownFromPeakPct?:number|null;
   narrativeManipulationRisk:number|null;
   /** Optional source facts. Omitted/null means unknown, never safe. */
   devHoldingPct?:number|null;
@@ -47,9 +48,35 @@ export interface RadarSafetyContext{
   sourceAt?:string|null;
 }
 
+/** Computes 1h/3h price growth and percentage drawdown from the recent 72h recorded peak price. */
+export async function recentPriceDynamics(
+  db: Pick<PrismaClient, 'tokenMetric'>,
+  tokenId: string,
+  currentPrice: number,
+  now: Date,
+): Promise<{ growth1h: number | null; growth3h: number | null; drawdownFromPeakPct: number | null }> {
+  const priceAt = async (hoursAgo: number) => num((await db.tokenMetric.findFirst({
+    where: { tokenId, at: { lte: new Date(now.getTime() - hoursAgo * HOUR) } },
+    orderBy: { at: 'desc' },
+    select: { priceUsd: true },
+  }))?.priceUsd);
+  const peakQuery = db.tokenMetric.aggregate({
+    where: { tokenId, at: { gte: new Date(now.getTime() - 72 * HOUR), lte: now } },
+    _max: { priceUsd: true },
+  });
+  const [p1, p3, peakAgg] = await Promise.all([priceAt(1), priceAt(3), peakQuery]);
+  const growth = (then: number | null) => (then && then > 0 ? (currentPrice / then - 1) * 100 : null);
+  const peakPrice = num(peakAgg._max.priceUsd);
+  const drawdownFromPeakPct = peakPrice && peakPrice > 0 && currentPrice > 0
+    ? Math.max(0, ((peakPrice - currentPrice) / peakPrice) * 100)
+    : null;
+  return { growth1h: growth(p1), growth3h: growth(p3), drawdownFromPeakPct };
+}
+
 export function buildRadarSafetyContext(input: {
   priceGrowth1hPct: number | null;
   priceGrowth3hPct: number | null;
+  drawdownFromPeakPct?: number | null;
   narrativeManipulationRisk: number | null;
   safetyEvidence?: {
     source: string;
@@ -78,6 +105,7 @@ export function buildRadarSafetyContext(input: {
   return {
     priceGrowth1hPct: input.priceGrowth1hPct,
     priceGrowth3hPct: input.priceGrowth3hPct,
+    ...(input.drawdownFromPeakPct !== undefined ? { drawdownFromPeakPct: input.drawdownFromPeakPct } : {}),
     narrativeManipulationRisk: input.narrativeManipulationRisk,
     ...(safetyEvidence ?? {}),
     ...(launchEvidence ? {
@@ -127,7 +155,7 @@ export async function createEarlyRadarAlert(db:PrismaClient,input:RadarAlertInpu
         // A second source cannot erase a higher recorded developer holding.
         devHoldingPct:input.safetyContext?.devHoldingPct!=null&&holders?.devHoldingPct!=null?Math.max(input.safetyContext.devHoldingPct,holders.devHoldingPct):input.safetyContext?.devHoldingPct??holders?.devHoldingPct??null,
         riskFlags:[...new Set([...(risk?.flags??[]),...(input.safetyContext?.riskFlags??[])])],marketAt:metric?.at??null,holdersAt:holders?.at??null,riskAt,
-        priceGrowth1hPct:input.safetyContext?.priceGrowth1hPct??null,priceGrowth3hPct:input.safetyContext?.priceGrowth3hPct??null,
+        priceGrowth1hPct:input.safetyContext?.priceGrowth1hPct??null,priceGrowth3hPct:input.safetyContext?.priceGrowth3hPct??null,drawdownFromPeakPct:input.safetyContext?.drawdownFromPeakPct??null,
         narrativeManipulationRisk:input.safetyContext?.narrativeManipulationRisk??null,
         top10ExLpPct:input.safetyContext?.top10ExLpPct??null,lpBurnedPct:input.safetyContext?.lpBurnedPct??null,lpLocked:input.safetyContext?.lpLocked??null,
         bundlePct:input.safetyContext?.bundlePct??null,sniperPct:input.safetyContext?.sniperPct??null,insiderPct:input.safetyContext?.insiderPct??null,sameSlotBuyers:input.safetyContext?.sameSlotBuyers??null,

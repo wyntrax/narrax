@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@narra/database';
-import { buildRadarSafetyContext, createEarlyRadarAlert } from './earlyRadarTracking';
+import { buildRadarSafetyContext, createEarlyRadarAlert, recentPriceDynamics } from './earlyRadarTracking';
 import type { RadarSafetyEvidence, RadarSafetySource } from './radarSafetyEvidence';
 import type { LaunchEvidence, LaunchEvidenceSource } from './launchEvidence';
 import type { TradeabilityEvidence, TradeabilitySource } from './tradeabilityEvidence';
@@ -133,13 +133,7 @@ export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?
       const liquidityUsd = num(m.liquidityUsd) ?? 0;
 
       const price = num(m.priceUsd) ?? 0;
-      const priceAt = async (hoursAgo: number) => {
-        const row = await db.tokenMetric.findFirst({ where: { tokenId: t.id, at: { lte: new Date(now.getTime() - hoursAgo * HOUR) } }, orderBy: { at: 'desc' }, select: { priceUsd: true } });
-        return num(row?.priceUsd);
-      };
-      const [p1, p3] = await Promise.all([priceAt(1), priceAt(3)]);
-      const growth = (then: number | null) => (then && then > 0 ? (price / then - 1) * 100 : null);
-      const growth1h = growth(p1), growth3h = growth(p3);
+      const { growth1h, growth3h, drawdownFromPeakPct } = await recentPriceDynamics(db, t.id, price, now);
 
       const divergence = attentionPriceDivergence(n.velocity, growth3h);
 
@@ -166,7 +160,7 @@ export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?
           if (deps.launchEvidence) launchEvidence = await deps.launchEvidence.get(t.mint, at);
         }
         const safetyContext = buildRadarSafetyContext({
-          priceGrowth1hPct: growth1h, priceGrowth3hPct: growth3h,
+          priceGrowth1hPct: growth1h, priceGrowth3hPct: growth3h, drawdownFromPeakPct,
           narrativeManipulationRisk: n.metrics[0]?.manipulationRisk ?? null,
           safetyEvidence, launchEvidence, tradeability,
         });

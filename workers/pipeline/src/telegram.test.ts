@@ -257,6 +257,20 @@ describe('telegram Early Radar delivery', () => {
     const result = await deliverEarlyRadarTelegram(fake.db, { chatId: '-100123', now: NOW, transport, delayMs: 0, dryRun: true });
     expect(result.messages[0]?.text).toContain('🟢 <b>Marketcat (MC)</b>');
     expect(result.messages[0]?.text).toContain('• Bundle 2.0% · Sniper 3.0% · Insider 1.0%');
+
+    const drawdownSnap = evaluateRadarSafety({
+      ...snapshot.facts,
+      marketAt: ago(1),
+      holdersAt: ago(2),
+      riskAt: ago(2),
+      evidenceAt: null,
+      priceGrowth1hPct: -45,
+      drawdownFromPeakPct: 68,
+      tradeabilityAt: ago(1),
+      tradeability: testTradeability(token.mint, ago(1), 0.5),
+    }, NOW);
+    const renderedDrawdown = formatTelegramAlert(alert(), token, drawdownSnap);
+    expect(renderedDrawdown).toContain('Price already dumped from peak');
   });
 
   it('defaults to a read-only dry run and does not move the cursor', async () => {

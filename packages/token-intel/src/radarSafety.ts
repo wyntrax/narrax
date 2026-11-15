@@ -45,6 +45,9 @@ export const RADAR_SAFETY_POLICY = {
   maxRiskAgeMs: 60 * 60_000,
   priceExtension1hPct: 50,
   priceExtension3hPct: 100,
+  maxDrawdownFromPeakPct: 50,
+  maxDrop1hPct: -40,
+  maxDrop3hPct: -50,
   maxPriceImpactPct: 3,
 } as const;
 
@@ -72,6 +75,8 @@ export interface RadarSafetyFacts {
   riskAt: Date | null;
   priceGrowth1hPct: number | null;
   priceGrowth3hPct: number | null;
+  /** Recorded percentage drop from the recent pre-alert peak (0..100). */
+  drawdownFromPeakPct?: number | null;
   narrativeManipulationRisk: number | null;
   /** The following facts are optional because current sources do not provide them. Null means unknown, never safe. */
   top10ExLpPct?: number | null;
@@ -139,6 +144,7 @@ export interface RadarSafetySnapshot {
     riskFlags: string[];
     priceGrowth1hPct: number | null;
     priceGrowth3hPct: number | null;
+    drawdownFromPeakPct?: number | null;
     narrativeManipulationRisk: number | null;
     lpBurnedPct: number | null;
     lpLocked: boolean | null;
@@ -370,10 +376,29 @@ export function evaluateRadarSafety(i: RadarSafetyFacts, now: Date = new Date())
   }
 
   if (finite(i.priceGrowth1hPct) && i.priceGrowth1hPct >= policy.priceExtension1hPct) {
-    checks.push(check('PRICE_ALREADY_EXTENDED', 'WARN', 'WARN', i.priceGrowth1hPct, `< ${policy.priceExtension1hPct}% in 1h`, 'price already ran before the call'));
+    checks.push(check('PRICE_ALREADY_EXTENDED', 'CRITICAL', 'BLOCK', i.priceGrowth1hPct, `< ${policy.priceExtension1hPct}% in 1h`, 'price already ran before the call'));
   }
   if (finite(i.priceGrowth3hPct) && i.priceGrowth3hPct >= policy.priceExtension3hPct) {
-    checks.push(check('PRICE_ALREADY_EXTENDED_3H', 'WARN', 'WARN', i.priceGrowth3hPct, `< ${policy.priceExtension3hPct}% in 3h`, 'price already ran before the call'));
+    checks.push(check('PRICE_ALREADY_EXTENDED_3H', 'CRITICAL', 'BLOCK', i.priceGrowth3hPct, `< ${policy.priceExtension3hPct}% in 3h`, 'price already ran before the call'));
+  }
+  const ddPeak = finite(i.drawdownFromPeakPct) ? i.drawdownFromPeakPct : null;
+  const drop1h = finite(i.priceGrowth1hPct) && i.priceGrowth1hPct <= policy.maxDrop1hPct ? i.priceGrowth1hPct : null;
+  const drop3h = finite(i.priceGrowth3hPct) && i.priceGrowth3hPct <= policy.maxDrop3hPct ? i.priceGrowth3hPct : null;
+  if ((ddPeak != null && ddPeak >= policy.maxDrawdownFromPeakPct) || drop1h != null || drop3h != null) {
+    const reasons: string[] = [];
+    if (ddPeak != null && ddPeak >= policy.maxDrawdownFromPeakPct) reasons.push(`-${ddPeak.toFixed(1)}% from recorded peak`);
+    if (drop1h != null) reasons.push(`${drop1h.toFixed(1)}% in 1h`);
+    if (drop3h != null) reasons.push(`${drop3h.toFixed(1)}% in 3h`);
+    checks.push(check(
+      'PRICE_DRAWDOWN',
+      'CRITICAL',
+      'BLOCK',
+      ddPeak != null && ddPeak >= policy.maxDrawdownFromPeakPct ? ddPeak : (drop1h ?? drop3h),
+      `< ${policy.maxDrawdownFromPeakPct}% off peak and > ${policy.maxDrop1hPct}% 1h / ${policy.maxDrop3hPct}% 3h`,
+      `already in deep drawdown before the call (${reasons.join(', ')})`,
+    ));
+  } else if (ddPeak != null || finite(i.priceGrowth1hPct) || finite(i.priceGrowth3hPct)) {
+    checks.push(check('PRICE_DRAWDOWN', 'CRITICAL', 'PASS', ddPeak ?? i.priceGrowth1hPct ?? i.priceGrowth3hPct ?? null, `< ${policy.maxDrawdownFromPeakPct}% off peak`));
   }
 
   const critical = checks.filter((c) => c.severity === 'CRITICAL');
@@ -416,6 +441,7 @@ export function evaluateRadarSafety(i: RadarSafetyFacts, now: Date = new Date())
       riskFlags: [...i.riskFlags],
       priceGrowth1hPct: i.priceGrowth1hPct,
       priceGrowth3hPct: i.priceGrowth3hPct,
+      drawdownFromPeakPct: i.drawdownFromPeakPct ?? null,
       narrativeManipulationRisk: i.narrativeManipulationRisk,
       lpBurnedPct: i.lpBurnedPct ?? null,
       lpLocked: i.lpLocked ?? null,
