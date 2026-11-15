@@ -46,6 +46,51 @@ export interface RadarSafetyContext{
   source?:string|null;
   sourceAt?:string|null;
 }
+
+export function buildRadarSafetyContext(input: {
+  priceGrowth1hPct: number | null;
+  priceGrowth3hPct: number | null;
+  narrativeManipulationRisk: number | null;
+  safetyEvidence?: {
+    source: string;
+    sourceAt: string;
+    devHoldingPct: number | null;
+    top10ExLpPct: number | null;
+    lpBurnedPct: number | null;
+    lpLocked: boolean | null;
+    insiderPct: number | null;
+    riskFlags: string[];
+  } | null;
+  launchEvidence?: {
+    bundlePct: number | null;
+    sniperPct: number | null;
+    insiderPct: number | null;
+    sameSlotBuyers: number | null;
+    deployerPriorRugs: number | null;
+    deployerPriorTokens: number | null;
+  } | null;
+  tradeability?: import('@narra/shared').TradeabilityQuote | null;
+}): RadarSafetyContext {
+  const { safetyEvidence, launchEvidence, tradeability } = input;
+  const insiderPct = launchEvidence?.insiderPct != null && safetyEvidence?.insiderPct != null
+    ? Math.max(launchEvidence.insiderPct, safetyEvidence.insiderPct)
+    : (launchEvidence?.insiderPct ?? safetyEvidence?.insiderPct ?? null);
+  return {
+    priceGrowth1hPct: input.priceGrowth1hPct,
+    priceGrowth3hPct: input.priceGrowth3hPct,
+    narrativeManipulationRisk: input.narrativeManipulationRisk,
+    ...(safetyEvidence ?? {}),
+    ...(launchEvidence ? {
+      bundlePct: launchEvidence.bundlePct,
+      sniperPct: launchEvidence.sniperPct,
+      insiderPct,
+      sameSlotBuyers: launchEvidence.sameSlotBuyers,
+      deployerPriorRugs: launchEvidence.deployerPriorRugs,
+      deployerPriorTokens: launchEvidence.deployerPriorTokens,
+    } : {}),
+    ...(tradeability ? { priceImpactPct: tradeability.priceImpactPct, tradeabilityAt: tradeability.sourceAt, tradeability } : {}),
+  };
+}
 type RadarAlertInput={tokenId:string;mint:string;profile:'trencher'|'holder';tier:'WATCH'|'STRONG';route:'NARRATIVE'|'SOCIAL';matchKind:'NAME'|'MINT'|'TICKER_ONLY';score:number;metricId:string;holderMetricId:string;title:string;body:string;safetyContext?:RadarSafetyContext};
 export type RadarPublicationResult={created:true;safety:RadarSafetySnapshot|null}|{created:false;reason:RadarEvidenceIssue|'DUPLICATE'|'SAFETY_BLOCKED';safety?:RadarSafetySnapshot};
 
@@ -68,6 +113,12 @@ export async function createEarlyRadarAlert(db:PrismaClient,input:RadarAlertInpu
     const risk=await tx.tokenRiskMetric.findFirst({where:{tokenId:input.tokenId,at:{lte:alertedAt}},orderBy:{at:'desc'},select:{id:true,at:true,flags:true}});
     const mode=radarSafetyModeFromEnv();
     const safety=mode==='off'?null:(()=>{
+      const evidenceAt = input.safetyContext?.sourceAt && Number.isFinite(+new Date(input.safetyContext.sourceAt))
+        ? new Date(input.safetyContext.sourceAt)
+        : null;
+      const riskAt = input.safetyContext?.source === 'rugcheck' && evidenceAt
+        ? (!risk?.at || +evidenceAt > +risk.at ? evidenceAt : risk.at)
+        : (risk?.at ?? null);
       const facts:RadarSafetyFacts={
         tokenId:input.tokenId,mint:input.mint,profile:input.profile,route:input.route,matchKind:input.matchKind,tier:input.tier,score:input.score,
         metricId:input.metricId,holderMetricId:input.holderMetricId,riskMetricId:risk?.id??null,
@@ -75,7 +126,7 @@ export async function createEarlyRadarAlert(db:PrismaClient,input:RadarAlertInpu
         holders:holders?.holders??null,top10Pct:holders?.top10Pct??null,
         // A second source cannot erase a higher recorded developer holding.
         devHoldingPct:input.safetyContext?.devHoldingPct!=null&&holders?.devHoldingPct!=null?Math.max(input.safetyContext.devHoldingPct,holders.devHoldingPct):input.safetyContext?.devHoldingPct??holders?.devHoldingPct??null,
-        riskFlags:[...new Set([...(risk?.flags??[]),...(input.safetyContext?.riskFlags??[])])],marketAt:metric?.at??null,holdersAt:holders?.at??null,riskAt:risk?.at??null,
+        riskFlags:[...new Set([...(risk?.flags??[]),...(input.safetyContext?.riskFlags??[])])],marketAt:metric?.at??null,holdersAt:holders?.at??null,riskAt,
         priceGrowth1hPct:input.safetyContext?.priceGrowth1hPct??null,priceGrowth3hPct:input.safetyContext?.priceGrowth3hPct??null,
         narrativeManipulationRisk:input.safetyContext?.narrativeManipulationRisk??null,
         top10ExLpPct:input.safetyContext?.top10ExLpPct??null,lpBurnedPct:input.safetyContext?.lpBurnedPct??null,lpLocked:input.safetyContext?.lpLocked??null,
@@ -85,7 +136,7 @@ export async function createEarlyRadarAlert(db:PrismaClient,input:RadarAlertInpu
         tradeabilityAt:input.safetyContext?.tradeabilityAt&&Number.isFinite(+new Date(input.safetyContext.tradeabilityAt))?new Date(input.safetyContext.tradeabilityAt):null,
         tradeability:input.safetyContext?.tradeability??null,
         evidenceSource:input.safetyContext?.source??null,
-        evidenceAt:input.safetyContext?.sourceAt&&Number.isFinite(+new Date(input.safetyContext.sourceAt))?new Date(input.safetyContext.sourceAt):null,
+        evidenceAt,
       };
       return {...evaluateRadarSafety(facts,alertedAt),mode};
     })();

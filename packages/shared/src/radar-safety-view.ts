@@ -31,6 +31,7 @@ export const FrozenRadarSafetySchema=z.object({
    ctx.addIssue({code:z.ZodIssueCode.custom,message:'Missing or mismatched frozen quote provenance'});
  }
 });
+export type FrozenRadarSafety=z.infer<typeof FrozenRadarSafetySchema>;
 export const RadarSafetyViewSchema=z.object({
  state:z.enum(['RECORDED','NOT_RECORDED','INVALID']),alertId:text.nullable(),alertAt:date.nullable(),
  snapshot:FrozenRadarSafetySchema.nullable(),evidenceStale:z.boolean().nullable(),
