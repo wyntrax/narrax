@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from '@narra/database';
-import { earlyBuyer, firstFunding, RpcHttpError, type ParsedTx, type SolanaRpc } from '@narra/solana';
+import { earlyBuyer, firstFunding, RpcError, RpcHttpError, type ParsedTx, type SolanaRpc } from '@narra/solana';
 import { isSolanaAddress } from '@narra/shared';
 import { initialIssuingWallet } from './developerHoldings';
 import { oldestSignatures } from './walletFunding';
@@ -20,8 +20,11 @@ export const LAUNCH_EVIDENCE_LIMITS = {
   pageSize: 1_000,
   /** Enough pages to reach the launch of a busy new token. A longer history stays UNKNOWN. */
   maxPages: 50,
-  /** Oldest signatures parsed for buyers and the issuing wallet. */
+  /** Oldest signatures parsed in fallback mode when getTransactionsForAddress is unavailable. */
   maxTransactions: 160,
+  /** Oldest transactions examined per mint when using getTransactionsForAddress. */
+  txPageLimit: 100,
+  txMaxPages: 2,
   maxBuyers: 40,
   /** Buyers whose funder is resolved for the insider cluster. */
   maxFundingWallets: 5,
@@ -30,9 +33,9 @@ export const LAUNCH_EVIDENCE_LIMITS = {
   cacheTtlMs: 6 * 3_600_000,
   unknownTtlMs: 10 * 60_000,
   /** Candidate scans per resolution run. The rest are left for the next run. */
-  maxPerRun: 2,
+  maxPerRun: 5,
   /** Mirrors RADAR_SAFETY_POLICY.maxDeployerPriorTokens in @narra/token-intel. */
-  maxDeployerPriorTokens: 3,
+  maxDeployerPriorTokens: 2,
 } as const;
 
 export interface LaunchBuy {
@@ -158,26 +161,53 @@ interface FunderResult {
   funder: string | null;
 }
 
-/** One-hop funding source for a launch buyer, cached for a week. */
+function isUnsupportedRpcMethod(error: unknown): boolean {
+  return error instanceof RpcError && !(error instanceof RpcHttpError) && /not found|unsupported|does not exist/i.test(error.message);
+}
+
+/** One-hop funding source for a launch buyer, cached for a week (or 10m when incomplete). */
 async function funderOf(db: PrismaClient, rpc: SolanaRpc, wallet: string, now: Date): Promise<FunderResult> {
   const key = `${FUNDER_PREFIX}${wallet}`;
   const row = await db.systemSetting.findUnique({ where: { key } });
   const cached = row?.value as { status?: unknown; funder?: unknown; checkedAt?: unknown } | null;
-  if (cached && typeof cached.status === 'string' && typeof cached.checkedAt === 'string' && Date.now() - Date.parse(cached.checkedAt) < 7 * 86_400_000) {
-    return { status: cached.status as FunderResult['status'], funder: typeof cached.funder === 'string' ? cached.funder : null };
+  if (cached && typeof cached.status === 'string' && typeof cached.checkedAt === 'string') {
+    const age = +now - Date.parse(cached.checkedAt);
+    const ttl = cached.status === 'INCOMPLETE' ? LAUNCH_EVIDENCE_LIMITS.unknownTtlMs : 7 * 86_400_000;
+    if (Number.isFinite(age) && age >= 0 && age < ttl) {
+      return { status: cached.status as FunderResult['status'], funder: typeof cached.funder === 'string' ? cached.funder : null };
+    }
   }
 
   let result: FunderResult;
   try {
-    const { oldestFirst, complete } = await oldestSignatures(rpc, wallet, LAUNCH_EVIDENCE_LIMITS.fundingPages, LAUNCH_EVIDENCE_LIMITS.pageSize);
-    const txs: { signature: string; tx: ParsedTx | null }[] = [];
-    for (const signature of oldestFirst.slice(0, LAUNCH_EVIDENCE_LIMITS.fundingTransactions)) {
-      txs.push({ signature, tx: await parsedTransaction(rpc, signature) });
-      await sleep(10);
+    let txs: { signature: string; tx: ParsedTx | null }[] = [];
+    let examinedAll = false;
+    let usedIndexed = false;
+    if (typeof rpc.getTransactionsForAddress === 'function') {
+      try {
+        const page = await rpc.getTransactionsForAddress(wallet, {
+          sortOrder: 'asc',
+          limit: LAUNCH_EVIDENCE_LIMITS.fundingTransactions,
+          status: 'succeeded',
+        });
+        txs = page.data.map((tx) => ({ signature: tx.transaction.signatures?.[0] ?? '', tx }));
+        examinedAll = !page.paginationToken && page.data.length <= LAUNCH_EVIDENCE_LIMITS.fundingTransactions;
+        usedIndexed = true;
+      } catch (error) {
+        if (!isUnsupportedRpcMethod(error)) throw error;
+      }
+    }
+    if (!usedIndexed) {
+      const { oldestFirst, complete } = await oldestSignatures(rpc, wallet, LAUNCH_EVIDENCE_LIMITS.fundingPages, LAUNCH_EVIDENCE_LIMITS.pageSize);
+      for (const signature of oldestFirst.slice(0, LAUNCH_EVIDENCE_LIMITS.fundingTransactions)) {
+        txs.push({ signature, tx: await parsedTransaction(rpc, signature) });
+        await sleep(10);
+      }
+      examinedAll = complete && oldestFirst.length <= LAUNCH_EVIDENCE_LIMITS.fundingTransactions;
     }
     const found = firstFunding(txs, wallet);
     // A short, complete history with no qualifying transfer is a known "no funder", not missing evidence.
-    const status: FunderResult['status'] = found ? 'FOUND' : complete && oldestFirst.length <= LAUNCH_EVIDENCE_LIMITS.fundingTransactions ? 'NOT_FOUND' : 'INCOMPLETE';
+    const status: FunderResult['status'] = found ? 'FOUND' : examinedAll ? 'NOT_FOUND' : 'INCOMPLETE';
     result = { status, funder: found?.funder ?? null };
   } catch {
     result = { status: 'INCOMPLETE', funder: null };
@@ -195,12 +225,12 @@ async function funderOf(db: PrismaClient, rpc: SolanaRpc, wallet: string, now: D
 export async function deployerHistory(
   db: PrismaClient,
   deployer: string | null,
-  tokenId: string,
+  tokenIdOrMint: string,
   now: Date,
 ): Promise<{ priorTokens: number | null; priorRugs: number | null; mints: string[] }> {
   if (!deployer) return { priorTokens: null, priorRugs: null, mints: [] };
   const rows = await db.token.findMany({
-    where: { deployer, id: { not: tokenId } },
+    where: { deployer, id: { not: tokenIdOrMint }, mint: { not: tokenIdOrMint } },
     select: {
       id: true,
       mint: true,
@@ -227,31 +257,74 @@ interface DeployerEvidence {
   source: 'MINT_AUTHORITY' | 'FIRST_FEE_PAYER';
 }
 
+function extractCreatedMints(txs: readonly (ParsedTx | null)[], deployer: string, mints: Set<string>): void {
+  for (const tx of txs) {
+    if (!tx || tx.meta?.err != null) continue;
+    const first = tx.transaction.message.accountKeys[0];
+    const payer = typeof first === 'string' ? first : first?.pubkey;
+    if (payer !== deployer) continue;
+    const instructions = [...tx.transaction.message.instructions, ...(tx.meta?.innerInstructions ?? []).flatMap((group) => group.instructions)];
+    for (const item of instructions) {
+      const parsed = (item as { parsed?: { type?: string; info?: { mint?: string } } } | null)?.parsed;
+      if ((parsed?.type === 'initializeMint' || parsed?.type === 'initializeMint2') && parsed.info?.mint) mints.add(parsed.info.mint);
+    }
+  }
+}
+
+interface DeployerMintScan {
+  mints: Set<string>;
+  complete: boolean;
+}
+
 /**
- * The issuing wallet is the mint-authority signer when the mint exposes one. Launchpads often use a program or PDA
- * authority, so fall back to the fee payer of the oldest transaction; that is the wallet that paid to create the mint.
+ * Prior mints paid for by the deployer. Uses Helius chronological tx queries (both newest and oldest) so active
+ * serial launchers with >5,000 signatures are still caught without timing out.
  */
-/** Prior mints paid for by the deployer, from a bounded walk to the start of its history. */
-async function deployerMints(rpc: SolanaRpc, deployer: string | null, now: Date): Promise<Set<string> | null> {
+async function deployerMints(rpc: SolanaRpc, deployer: string | null): Promise<DeployerMintScan | null> {
   if (!deployer) return null;
   try {
-    const { oldestFirst, complete } = await oldestSignatures(rpc, deployer, 5, LAUNCH_EVIDENCE_LIMITS.pageSize);
-    if (!complete) return null;
     const mints = new Set<string>();
-    for (const signature of oldestFirst.slice(0, 50)) {
-      const tx = await parsedTransaction(rpc, signature);
-      await sleep(10);
-      if (!tx || tx.meta?.err != null) continue;
-      const first = tx.transaction.message.accountKeys[0];
-      const payer = typeof first === 'string' ? first : first?.pubkey;
-      if (payer !== deployer) continue;
-      const instructions = [...tx.transaction.message.instructions, ...(tx.meta?.innerInstructions ?? []).flatMap((group) => group.instructions)];
-      for (const item of instructions) {
-        const parsed = (item as { parsed?: { type?: string; info?: { mint?: string } } } | null)?.parsed;
-        if ((parsed?.type === 'initializeMint' || parsed?.type === 'initializeMint2') && parsed.info?.mint) mints.add(parsed.info.mint);
+    if (typeof rpc.getTransactionsForAddress === 'function') {
+      try {
+        let token: string | undefined;
+        let complete = false;
+        for (let page = 0; page < LAUNCH_EVIDENCE_LIMITS.txMaxPages; page++) {
+          const res = await rpc.getTransactionsForAddress(deployer, {
+            sortOrder: 'desc',
+            limit: LAUNCH_EVIDENCE_LIMITS.txPageLimit,
+            status: 'succeeded',
+            ...(token ? { paginationToken: token } : {}),
+          });
+          extractCreatedMints(res.data, deployer, mints);
+          if (!res.paginationToken) {
+            complete = true;
+            break;
+          }
+          token = res.paginationToken;
+        }
+        if (!complete) {
+          const oldest = await rpc.getTransactionsForAddress(deployer, {
+            sortOrder: 'asc',
+            limit: 50,
+            status: 'succeeded',
+          });
+          extractCreatedMints(oldest.data, deployer, mints);
+        }
+        return { mints, complete };
+      } catch (error) {
+        if (!isUnsupportedRpcMethod(error)) throw error;
       }
     }
-    return mints;
+
+    const { oldestFirst, complete } = await oldestSignatures(rpc, deployer, 5, LAUNCH_EVIDENCE_LIMITS.pageSize);
+    if (!complete) return null;
+    const txs: (ParsedTx | null)[] = [];
+    for (const signature of oldestFirst.slice(0, 50)) {
+      txs.push(await parsedTransaction(rpc, signature));
+      await sleep(10);
+    }
+    extractCreatedMints(txs, deployer, mints);
+    return { mints, complete: true };
   } catch {
     return null;
   }
@@ -270,9 +343,34 @@ function findDeployer(txs: readonly ParsedTx[], mint: string): DeployerEvidence 
   return null;
 }
 
-/** Full bounded scan. Returns UNKNOWN rather than a partial clean result when the start of history is out of reach. */
-export async function scanLaunch(db: PrismaClient, rpc: SolanaRpc, mint: string, now: Date): Promise<LaunchEvidence> {
+async function fetchOldestLaunchTxs(
+  rpc: SolanaRpc,
+  mint: string,
+): Promise<{ complete: boolean; items: { tx: ParsedTx; signature: string; blockTime: number | null }[] }> {
   const L = LAUNCH_EVIDENCE_LIMITS;
+  if (typeof rpc.getTransactionsForAddress === 'function') {
+    try {
+      const items: { tx: ParsedTx; signature: string; blockTime: number | null }[] = [];
+      let paginationToken: string | undefined;
+      for (let page = 0; page < L.txMaxPages; page++) {
+        const res = await rpc.getTransactionsForAddress(mint, {
+          sortOrder: 'asc',
+          limit: L.txPageLimit,
+          status: 'succeeded',
+          ...(paginationToken ? { paginationToken } : {}),
+        });
+        for (const tx of res.data) {
+          items.push({ tx, signature: tx.transaction.signatures?.[0] ?? '', blockTime: tx.blockTime ?? null });
+        }
+        if (!res.paginationToken || items.length >= L.maxTransactions) break;
+        paginationToken = res.paginationToken;
+      }
+      return { complete: true, items };
+    } catch (error) {
+      if (!isUnsupportedRpcMethod(error)) throw error;
+    }
+  }
+
   const signatures: { signature: string; failed: boolean; blockTime: number | null }[] = [];
   let before: string | undefined;
   let complete = false;
@@ -283,6 +381,22 @@ export async function scanLaunch(db: PrismaClient, rpc: SolanaRpc, mint: string,
     before = rows[rows.length - 1]!.signature;
     await sleep(10);
   }
+  if (!complete) return { complete: false, items: [] };
+
+  const oldest = signatures.filter((s) => !s.failed).slice(-L.maxTransactions).reverse();
+  const items: { tx: ParsedTx; signature: string; blockTime: number | null }[] = [];
+  for (const signature of oldest) {
+    const tx = await parsedTransaction(rpc, signature.signature);
+    await sleep(10);
+    if (tx) items.push({ tx, signature: signature.signature, blockTime: signature.blockTime });
+  }
+  return { complete: true, items };
+}
+
+/** Full bounded scan. Returns UNKNOWN rather than a partial clean result when the start of history is out of reach. */
+export async function scanLaunch(db: PrismaClient, rpc: SolanaRpc, mint: string, now: Date): Promise<LaunchEvidence> {
+  const L = LAUNCH_EVIDENCE_LIMITS;
+  const { complete, items } = await fetchOldestLaunchTxs(rpc, mint);
 
   const base = {
     mint, source: 'helius-rpc' as const, observedAt: now.toISOString(),
@@ -293,35 +407,31 @@ export async function scanLaunch(db: PrismaClient, rpc: SolanaRpc, mint: string,
       detail: `history did not reach the launch within ${L.maxPages * L.pageSize} signatures` };
   }
 
-  const oldest = signatures.filter((s) => !s.failed).slice(-L.maxTransactions).reverse();
   const buys: LaunchBuy[] = [];
   const oldestTxs: ParsedTx[] = [];
-  for (const signature of oldest) {
-    const tx = await parsedTransaction(rpc, signature.signature);
-    await sleep(10);
-    if (!tx) continue;
+  for (const { tx, signature, blockTime } of items) {
     oldestTxs.push(tx);
     const buyer = earlyBuyer(tx, mint);
     if (!buyer) continue;
     const amountRaw = tokenDelta(tx, mint, buyer);
-    const at = tx.blockTime ?? signature.blockTime;
+    const at = tx.blockTime ?? blockTime;
     if (amountRaw <= 0n || at == null) continue;
-    buys.push({ wallet: buyer, signature: signature.signature, slot: tx.slot ?? null, at, amountRaw });
+    buys.push({ wallet: buyer, signature, slot: tx.slot ?? null, at, amountRaw });
     if (buys.length >= L.maxBuyers) break;
   }
 
   const deployer = findDeployer(oldestTxs, mint);
-  const [supplyRaw, history, onChainMints] = await Promise.all([
+  const [supplyRaw, history, onChainScan] = await Promise.all([
     rpc.getTokenSupplyRaw(mint),
     deployerHistory(db, deployer?.address ?? null, mint, now),
-    deployerMints(rpc, deployer?.address ?? null, now),
+    deployerMints(rpc, deployer?.address ?? null),
   ]);
   if (deployer) await db.token.updateMany({ where: { mint, deployer: null }, data: { deployer: deployer.address } });
-  const priorMints = onChainMints ? [...onChainMints].filter((prior) => prior !== mint) : [];
+  const priorMints = onChainScan ? [...onChainScan.mints].filter((prior) => prior !== mint) : [];
   // On-chain mints we have never stored cannot be judged for a rug, so the deployer verdict stays UNKNOWN.
-  const unknownPriorMints = onChainMints ? priorMints.filter((prior) => !history.mints.includes(prior)) : [];
-  const deployerPriorTokens = onChainMints ? Math.max(history.priorTokens ?? 0, priorMints.length) : history.priorTokens;
-  const deployerPriorRugs = onChainMints && unknownPriorMints.length === 0 ? history.priorRugs : null;
+  const unknownPriorMints = onChainScan ? priorMints.filter((prior) => !history.mints.includes(prior)) : [];
+  const deployerPriorTokens = onChainScan ? Math.max(history.priorTokens ?? 0, priorMints.length) : history.priorTokens;
+  const deployerPriorRugs = onChainScan?.complete && unknownPriorMints.length === 0 ? history.priorRugs : null;
 
   const metrics = launchMetrics(buys, supplyRaw);
   let insiderPct: number | null = null;
@@ -329,22 +439,26 @@ export async function scanLaunch(db: PrismaClient, rpc: SolanaRpc, mint: string,
   if (deployer?.address) {
     const sample = buys.slice(0, L.maxFundingWallets);
     const funders = await Promise.all(sample.map((b) => funderOf(db, rpc, b.wallet, now)));
-    if (funders.some((f) => f.status === 'INCOMPLETE')) {
-      insiderPct = null;
-    } else {
+    const resolvedEntries = sample
+      .map((buy, i) => ({ buy, funder: funders[i]! }))
+      .filter((entry) => entry.funder.status !== 'INCOMPLETE');
+    const minResolved = Math.min(2, sample.length);
+    if (sample.length > 0 && resolvedEntries.length >= minResolved) {
       const groups = new Map<string, bigint>();
-      for (let i = 0; i < sample.length; i++) {
-        const funder = funders[i]!.funder;
-        if (funder) groups.set(funder, (groups.get(funder) ?? 0n) + sample[i]!.amountRaw);
-      }
       const perFunder = new Map<string, number>();
-      for (const funder of funders) if (funder.funder) perFunder.set(funder.funder, (perFunder.get(funder.funder) ?? 0) + 1);
+      for (const { buy, funder } of resolvedEntries) {
+        if (!funder.funder) continue;
+        groups.set(funder.funder, (groups.get(funder.funder) ?? 0n) + buy.amountRaw);
+        perFunder.set(funder.funder, (perFunder.get(funder.funder) ?? 0) + 1);
+      }
       let insiderRaw = 0n;
       for (const [funder, amount] of groups) {
-        if (funder === deployer?.address || (perFunder.get(funder) ?? 0) >= 2) insiderRaw += amount;
+        if (funder === deployer.address || (perFunder.get(funder) ?? 0) >= 2) insiderRaw += amount;
       }
       insiderPct = pct(insiderRaw, supplyRaw);
-      insiderDetail = `insider sample ${sample.length}/${L.maxFundingWallets}`;
+      insiderDetail = `insider sample ${resolvedEntries.length}/${sample.length}`;
+    } else if (sample.length > 0) {
+      insiderDetail = `insider sample ${resolvedEntries.length}/${sample.length} incomplete`;
     }
   }
 

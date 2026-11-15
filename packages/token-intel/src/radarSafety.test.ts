@@ -114,6 +114,13 @@ describe('radar safety gate', () => {
     expect(evaluateRadarSafety({ ...base, profile: 'trencher', devHoldingPct: 11 }, NOW).blockers).toContain('DEV_HOLDING');
   });
 
+  it('allows up to 2 prior deployer tokens when rugs are 0 and blocks 3 or more', () => {
+    expect(evaluateRadarSafety({ ...base, deployerPriorTokens: 2, deployerPriorRugs: 0 }, NOW).status).toBe('PASS');
+    const blocked = evaluateRadarSafety({ ...base, deployerPriorTokens: 3, deployerPriorRugs: 0 }, NOW);
+    expect(blocked.status).toBe('BLOCK');
+    expect(blocked.blockers).toContain('DEPLOYER_HISTORY');
+  });
+
   it('fails closed when critical evidence is missing or stale', () => {
     const cases: Array<[Partial<RadarSafetyFacts>, string]> = [
       [{ devHoldingPct: null }, 'DEV_HOLDING'],
@@ -139,9 +146,34 @@ describe('radar safety gate', () => {
   });
 
   it('does not let a warning block a call, but keeps it in the snapshot', () => {
-    const r = evaluateRadarSafety({ ...base, priceGrowth1hPct: 75, volume24hUsd: 50_000 * 31, uniqueBuyers24h: 100 }, NOW);
+    const r = evaluateRadarSafety({ ...base, priceGrowth1hPct: 10, volume24hUsd: 50_000 * 31, uniqueBuyers24h: 100 }, NOW);
     expect(r.status).toBe('PASS');
-    expect(r.warnings).toEqual(expect.arrayContaining(['PRICE_ALREADY_EXTENDED', 'WASH_TURNOVER_HIGH']));
+    expect(r.warnings).toEqual(expect.arrayContaining(['AUTHORITY_NOT_PROVEN', 'WASH_TURNOVER_HIGH']));
+  });
+
+  it('blocks extended 1h/3h price runs and deep pre-alert drawdowns', () => {
+    const ext1h = evaluateRadarSafety({ ...base, priceGrowth1hPct: 65 }, NOW);
+    expect(ext1h.status).toBe('BLOCK');
+    expect(ext1h.blockers).toContain('PRICE_ALREADY_EXTENDED');
+
+    const ext3h = evaluateRadarSafety({ ...base, priceGrowth3hPct: 120 }, NOW);
+    expect(ext3h.status).toBe('BLOCK');
+    expect(ext3h.blockers).toContain('PRICE_ALREADY_EXTENDED_3H');
+
+    const peakDump = evaluateRadarSafety({ ...base, drawdownFromPeakPct: 65 }, NOW);
+    expect(peakDump.status).toBe('BLOCK');
+    expect(peakDump.blockers).toContain('PRICE_DRAWDOWN');
+
+    const drop1h = evaluateRadarSafety({ ...base, priceGrowth1hPct: -45 }, NOW);
+    expect(drop1h.status).toBe('BLOCK');
+    expect(drop1h.blockers).toContain('PRICE_DRAWDOWN');
+
+    const drop3h = evaluateRadarSafety({ ...base, priceGrowth3hPct: -55 }, NOW);
+    expect(drop3h.status).toBe('BLOCK');
+    expect(drop3h.blockers).toContain('PRICE_DRAWDOWN');
+
+    const healthy = evaluateRadarSafety({ ...base, drawdownFromPeakPct: 15 }, NOW);
+    expect(healthy.status).toBe('PASS');
   });
 
   it('gives a confirmed blocker precedence over missing evidence', () => {

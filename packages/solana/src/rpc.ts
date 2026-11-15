@@ -37,6 +37,7 @@ const ParsedTxResult = z.object({
   slot: z.number().int().nonnegative().nullish(),
   blockTime: z.number().nullish(),
   transaction: z.object({
+    signatures: z.array(z.string()).optional(),
     message: z.object({
       accountKeys: z.array(z.union([z.string(), z.object({ pubkey: z.string() }).passthrough()])),
       instructions: z.array(Instruction),
@@ -49,6 +50,11 @@ const ParsedTxResult = z.object({
     postTokenBalances: z.array(TokenBalance).nullish(),
   }).passthrough().nullish(),
 }).passthrough().nullable();
+
+const TransactionsForAddressResult = z.object({
+  data: z.array(ParsedTxResult),
+  paginationToken: z.string().nullable().optional(),
+});
 
 const RawAccountSchema = z.object({ lamports: z.number().int().nonnegative(), owner: z.string(), data: z.tuple([z.string(), z.literal('base64')]) }).passthrough();
 const MultipleAccountsResult = z.object({ value: z.array(RawAccountSchema.nullable()) });
@@ -134,6 +140,40 @@ export class SolanaRpc {
     // 1, not 0: Helius now returns version-1 transactions. A lower ceiling makes the node reject those outright
     // ("Transaction version (1) is not supported"), which silently drops the token from buyer scanning.
     return this.call('getTransaction', [signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 1, commitment: 'confirmed' }], ParsedTxResult);
+  }
+
+  /**
+   * Helius-indexed transaction history for an address with chronological sorting (`asc` or `desc`),
+   * server-side status filtering, and full parsed transaction payloads in a single RPC call.
+   */
+  async getTransactionsForAddress(
+    address: string,
+    opts: {
+      sortOrder?: 'asc' | 'desc';
+      limit?: number;
+      paginationToken?: string;
+      status?: 'succeeded' | 'failed';
+      tokenAccounts?: 'balanceChanged' | 'all';
+    } = {},
+  ): Promise<{ data: ParsedTx[]; paginationToken: string | null }> {
+    const limit = Math.min(100, Math.max(1, Math.floor(opts.limit ?? 100)));
+    const filters: Record<string, unknown> = {};
+    if (opts.status) filters.status = opts.status;
+    if (opts.tokenAccounts) filters.tokenAccounts = opts.tokenAccounts;
+    const params: Record<string, unknown> = {
+      transactionDetails: 'full',
+      encoding: 'jsonParsed',
+      maxSupportedTransactionVersion: 1,
+      sortOrder: opts.sortOrder ?? 'desc',
+      limit,
+      ...(opts.paginationToken ? { paginationToken: opts.paginationToken } : {}),
+      ...(Object.keys(filters).length ? { filters } : {}),
+    };
+    const r = await this.call('getTransactionsForAddress', [address, params], TransactionsForAddressResult);
+    return {
+      data: r.data.filter((tx): tx is ParsedTx => tx !== null),
+      paginationToken: r.paginationToken ?? null,
+    };
   }
 
   /** Several accounts at once, in the order asked. A null entry means the account does not exist. */

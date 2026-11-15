@@ -194,8 +194,9 @@ const CODE_LABELS: Record<string, { block?: string; unknown?: string; warn?: str
   RUGGED: { block: 'Token flagged as rugged' },
   MINT_AUTHORITY_ACTIVE: { block: 'Mint authority still active' },
   FREEZE_AUTHORITY_ACTIVE: { block: 'Freeze authority still active' },
-  PRICE_ALREADY_EXTENDED: { warn: 'Price already up ≥50% (1h)' },
-  PRICE_ALREADY_EXTENDED_3H: { warn: 'Price already up ≥100% (3h)' },
+  PRICE_ALREADY_EXTENDED: { block: 'Price already up ≥50% (1h)', warn: 'Price already up ≥50% (1h)' },
+  PRICE_ALREADY_EXTENDED_3H: { block: 'Price already up ≥100% (3h)', warn: 'Price already up ≥100% (3h)' },
+  PRICE_DRAWDOWN: { block: 'Price already dumped from peak' },
   WASH_TURNOVER_HIGH: { warn: 'Very high 24h turnover' },
 };
 
