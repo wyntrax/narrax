@@ -126,4 +126,22 @@ describe('opportunity score', () => {
     expect(meetsFloors({ ...good, holders: 49 })).toBe(false);
     expect(meetsFloors({ ...good, relation: 'SUSPICIOUS' })).toBe(false);
   });
+  it('redistributes missing smart-money coverage without penalizing fundamentals and uses top10ExLpPct + launch/drawdown evidence', () => {
+    const penalized = opportunityScore({ ...good, smartMoneyScore: 0 });
+    const redistributed = opportunityScore({ ...good, smartMoneyScore: 0, hasSmartMoneyConsensus: false });
+    expect(redistributed.smartMoney).toBe(0);
+    expect(redistributed.score).toBeGreaterThan(penalized.score + 15);
+    expect(redistributed.score).toBeGreaterThan(80);
+
+    const lpSkewed = opportunityScore({ ...good, top10Pct: 75 });
+    const exLpClean = opportunityScore({ ...good, top10Pct: 75, top10ExLpPct: 20 });
+    expect(exLpClean.risk).toBeLessThan(lpSkewed.risk);
+
+    const bundled = opportunityScore({ ...good, bundlePct: 25, sniperPct: 15, insiderPct: 10 });
+    expect(bundled.risk).toBeGreaterThan(opportunityScore(good).risk + 15);
+
+    const dumped = opportunityScore({ ...good, drawdownFromPeakPct: 70 });
+    expect(dumped.score).toBeLessThanOrEqual(55);
+    expect(dumped.caps).toContain('EXTREME_DRAWDOWN');
+  });
 });

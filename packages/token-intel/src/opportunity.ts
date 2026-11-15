@@ -5,6 +5,8 @@ export interface OpportunityInputs {
   narrativeScore: number;
   /** Latest smart money consensus score, or 0 when no qualifying wallet has bought. */
   smartMoneyScore: number;
+  /** False when no smart money consensus record exists yet so missing coverage is not scored as bearish (defaults true for legacy callers). */
+  hasSmartMoneyConsensus?: boolean;
   liquidityUsd: number;
   holders: number;
   priceGrowth1hPct: number | null;
@@ -12,9 +14,15 @@ export interface OpportunityInputs {
   relation: TokenRelation;
   divergence: DivergenceLabel;
   top10Pct: number | null;
+  /** Top-10 concentration excluding known LP pools; preferred over raw top10Pct when available. */
+  top10ExLpPct?: number | null;
   devHoldingPct: number | null;
   tokenAgeMinutes: number | null;
   narrativeManipulationRisk: number | null;
+  bundlePct?: number | null;
+  sniperPct?: number | null;
+  insiderPct?: number | null;
+  drawdownFromPeakPct?: number | null;
 }
 
 export interface OpportunityScores {
@@ -48,17 +56,30 @@ export function opportunityScore(i: OpportunityInputs): OpportunityScores {
   const liquidity = clamp(((Math.log10(Math.max(i.liquidityUsd, 1)) - Math.log10(20_000)) / (Math.log10(1_000_000) - Math.log10(20_000))) * 100);
   const momentum = i.priceGrowth1hPct == null ? 50 : clamp(50 + clamp(i.priceGrowth1hPct, -30, 40) * 1.25);
 
+  const effectiveTop10 = i.top10ExLpPct ?? i.top10Pct;
+  const launchClusterPct = (i.bundlePct ?? 0) + (i.sniperPct ?? 0) + (i.insiderPct ?? 0);
+  const launchPenalty = (i.bundlePct != null || i.sniperPct != null || i.insiderPct != null)
+    ? clamp((launchClusterPct - 10) / 40, 0, 1) * 20
+    : 0;
+  const drawdownPenalty = i.drawdownFromPeakPct != null && i.drawdownFromPeakPct > 25
+    ? clamp((i.drawdownFromPeakPct - 25) / 45, 0, 1) * 15
+    : 0;
+
   const unknown = 0.5;
   const risk = clamp(100 * (
-    0.25 * (i.top10Pct == null ? unknown : clamp((i.top10Pct - 20) / 50, 0, 1)) +
+    0.25 * (effectiveTop10 == null ? unknown : clamp((effectiveTop10 - 20) / 50, 0, 1)) +
     0.20 * (i.devHoldingPct == null ? unknown : clamp(i.devHoldingPct / 20, 0, 1)) +
     0.20 * (1 - liquidity / 100) +
     0.15 * (i.narrativeManipulationRisk == null ? unknown : i.narrativeManipulationRisk / 100) +
     0.10 * (i.tokenAgeMinutes == null ? unknown : clamp(1 - i.tokenAgeMinutes / 60, 0, 1)) +
     0.10 * (i.relation === 'SUSPICIOUS' ? 1 : 0)
-  ));
+  ) + launchPenalty + drawdownPenalty);
 
-  let score = 0.30 * i.narrativeScore + 0.25 * i.smartMoneyScore + 0.15 * liquidity + 0.10 * momentum + 0.10 * i.ogScore + 0.10 * (100 - risk);
+  const hasConsensus = i.hasSmartMoneyConsensus ?? true;
+  const baseWeightSum = 0.75; // 0.30 + 0.15 + 0.10 + 0.10 + 0.10
+  let score = hasConsensus
+    ? 0.30 * i.narrativeScore + 0.25 * i.smartMoneyScore + 0.15 * liquidity + 0.10 * momentum + 0.10 * i.ogScore + 0.10 * (100 - risk)
+    : (0.30 * i.narrativeScore + 0.15 * liquidity + 0.10 * momentum + 0.10 * i.ogScore + 0.10 * (100 - risk)) / baseWeightSum;
   if (i.divergence === 'STRONG_POSITIVE') score += 5;
 
   const caps: string[] = [];
@@ -66,7 +87,8 @@ export function opportunityScore(i: OpportunityInputs): OpportunityScores {
   if (i.relation === 'SUSPICIOUS') cap(40, 'SUSPICIOUS_TOKEN');
   if (i.liquidityUsd < MIN_LIQUIDITY_USD) cap(50, 'THIN_LIQUIDITY');
   if (risk >= 80) cap(55, 'HIGH_RISK');
+  if (i.drawdownFromPeakPct != null && i.drawdownFromPeakPct >= 65) cap(55, 'EXTREME_DRAWDOWN');
   if (i.divergence === 'NEGATIVE_SATURATED') cap(60, 'PRICE_RAN_AHEAD');
 
-  return { score: r1(clamp(score)), narrative: r1(i.narrativeScore), smartMoney: r1(i.smartMoneyScore), liquidity: r1(liquidity), momentum: r1(momentum), og: r1(i.ogScore), risk: r1(risk), caps };
+  return { score: r1(clamp(score)), narrative: r1(i.narrativeScore), smartMoney: r1(hasConsensus ? i.smartMoneyScore : 0), liquidity: r1(liquidity), momentum: r1(momentum), og: r1(i.ogScore), risk: r1(risk), caps };
 }
