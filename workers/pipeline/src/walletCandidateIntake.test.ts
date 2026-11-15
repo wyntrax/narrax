@@ -22,3 +22,25 @@ it('respects remaining capacity and stops admission at the discovered-wallet cap
 it('does not reactivate existing tracked addresses or bypass a rejected candidate',async()=>{
  const f=fixture(0,[addresses[0]!],[addresses[1]!]);expect(await intakeEmergingWallets(f.db,now)).toMatchObject({added:0});expect(f.createMany).not.toHaveBeenCalled();
 });
+it('evicts stale low-score PROVISIONAL wallets when capacity is full and new candidates await admission',async()=>{
+ const createMany=vi.fn(async(args:{data:unknown[]})=>({count:args.data.length}));
+ const updateMany=vi.fn(async(args:{where:{id:{in:string[]}}})=>({count:args.where.id.in.length}));
+ const upsert=vi.fn(async()=>({}));
+ let findCalls=0;
+ const tx={
+  $executeRaw:vi.fn(async()=>0),
+  systemSetting:{findUnique:async()=>({value:{checkedAt:now.toISOString(),items:addresses.map(address=>({address,scannedTokens:3}))}}),upsert},
+  trackedWallet:{
+   count:async()=>200,
+   findMany:async()=>{findCalls++;return findCalls===1?[]:[{id:'stale-low',profile:{score:22}},{id:'stale-unscored',profile:null}];},
+   updateMany,
+   createMany,
+  },
+  walletCandidate:{findMany:async()=>[]},
+ };
+ const db={$transaction:async(fn:(tx:unknown)=>unknown)=>fn(tx)} as unknown as PrismaClient;
+ const res=await intakeEmergingWallets(db,now);
+ expect(res).toMatchObject({evicted:2,capacity:2,added:2,reason:'EVALUATION_ONLY'});
+ expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['stale-unscored','stale-low']}},data:{active:false}});
+ expect(createMany).toHaveBeenCalledTimes(1);
+});

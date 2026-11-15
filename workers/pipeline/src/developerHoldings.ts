@@ -46,6 +46,9 @@ export function makeDeveloperHoldingSource(db: PrismaClient, rpc: Rpc): Develope
       await db.systemSetting.upsert({ where: { key }, create: { key, value }, update: { value } });
     }
     if (!wallet || !signature) return null;
+    if (typeof db.token?.updateMany === 'function') {
+      await db.token.updateMany({ where: { mint, deployer: null }, data: { deployer: wallet } });
+    }
     const [balance, supply] = await Promise.all([rpc.getTokenBaseUnits(wallet, mint), rpc.getTokenSupplyRaw(mint)]);
     if (supply <= 0n || balance > supply) return null;
     return { wallet, signature, source: 'INITIAL_MINT_AUTHORITY', holdingPct: Number(balance * 1_000_000n / supply) / 10_000 };

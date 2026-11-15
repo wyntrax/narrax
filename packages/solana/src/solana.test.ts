@@ -25,6 +25,7 @@ describe('parseHeliusSwaps', () => {
     ]);
     expect(r.events).toHaveLength(0);
     expect(r.skipped).toBe(5);
+    expect(parseHeliusSwaps([{ signature: SIG, timestamp: 1, feePayer: WALLET, transactionError: 'InstructionError', events: {} }])).toEqual({ events: [], skipped: 0 });
     expect(parseHeliusSwaps({ not: 'an array' })).toEqual({ events: [], skipped: 0 });
   });
 });

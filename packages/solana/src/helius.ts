@@ -71,7 +71,8 @@ export function parseHeliusSwaps(payload: unknown): ParseResult {
 
   for (const item of items) {
     const parsed = HeliusTx.safeParse(item);
-    if(parsed.success&&parsed.data.transactionError!=null){skipped++;continue;}
+    // Failed on-chain swaps did not trade anything; ignore them without poisoning `skipped`.
+    if(parsed.success&&parsed.data.transactionError!=null)continue;
     const swap = parsed.success ? parsed.data.events?.swap : undefined;
     if (!parsed.success || !swap) { const fallback=transferSwap(item);if(fallback)events.push(fallback);else skipped++;continue; }
     const tx = parsed.data;

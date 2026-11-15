@@ -27,6 +27,7 @@ it('probes market evidence through the SystemSetting primary key instead of a no
   expect(result).toEqual({ rows: [], nextCursor: null });
   expect(sql).toContain('LEFT JOIN LATERAL (SELECT ev."key", ev."value" FROM "SystemSetting" ev');
   expect(sql).toContain('ev."key" = \'research.market.\' || t."id"');
+  expect(sql).toContain('m."id" IS NOT NULL OR t."firstSeenAt" >=');
   // The flat, non-sargable form that produced the runaway nested loop must not come back.
   expect(sql).not.toMatch(/LEFT JOIN "SystemSetting" evidence ON/);
 });
