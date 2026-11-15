@@ -66,9 +66,13 @@ export interface ChainPorts {
   getTokenBaseUnits(address: string, mint: string): Promise<string | null>;
 }
 
-export function makeExecutionStore(db: Db, ports: ChainPorts, now: () => Date = () => new Date(), paperPorts: PaperPorts = makePaperPorts(db)): Pick<ExecutionDeps, 'loadPreTradeState' | 'recordRisk'> {
+export type ExecutionStore = Pick<ExecutionDeps, 'recordRisk'> & {
+  loadPreTradeState(job: ExecutionJob, opts?: { requireSignals?: boolean }): Promise<PreTradeState>;
+};
+
+export function makeExecutionStore(db: Db, ports: ChainPorts, now: () => Date = () => new Date(), paperPorts: PaperPorts = makePaperPorts(db)): ExecutionStore {
   return {
-    async loadPreTradeState(job: ExecutionJob): Promise<PreTradeState> {
+    async loadPreTradeState(job: ExecutionJob, opts?: { requireSignals?: boolean }): Promise<PreTradeState> {
       const at = now();
       const dayStart = startOfUtcDay(at);
 
@@ -85,7 +89,8 @@ export function makeExecutionStore(db: Db, ports: ChainPorts, now: () => Date = 
       const metric = token?.metrics[0];
       const opportunity = token?.opportunities[0];
       const consensus = token?.consensus[0];
-      if (!token || !metric || !opportunity || !consensus) throw new MissingInputError('Token metrics or signals are missing');
+      const requireSignals = opts?.requireSignals ?? true;
+      if (!token || !metric || (requireSignals && (!opportunity || !consensus))) throw new MissingInputError('Token metrics or signals are missing');
 
       const controls = await loadSystemControls(db);
       const isBuy = job.decision.action === 'BUY';
@@ -139,7 +144,7 @@ export function makeExecutionStore(db: Db, ports: ChainPorts, now: () => Date = 
           systemPaused: controls.pause.paused,
           idempotencyKey: job.idempotencyKey,
           token: { mint: job.mint, blacklisted: token.blacklisted, liquidityUsd: num(metric.liquidityUsd) },
-          signals: { opportunityScore: opportunity.score, consensusScore: consensus.score },
+          signals: { opportunityScore: opportunity?.score ?? 0, consensusScore: consensus?.score ?? 0 },
           portfolio: {
             totalValueSol: totalValue, walletBalanceSol: balance, openPositions, hasPositionInToken: !!tokenPosition,
             tokenExposureSol: num(exposure._sum.sizeSol), allocatedTodaySol: num(allocated._sum.sizeSol),

@@ -145,6 +145,8 @@ describe('execution store', () => {
     await expect(makeExecutionStore(noUser.db, ports(), () => NOW).loadPreTradeState(JOB())).rejects.toThrow(MissingInputError);
     const noSignals = execDb({ token: { findUnique: vi.fn(async () => ({ id: 't1', blacklisted: false, metrics: [{ liquidityUsd: D(1) }], opportunities: [], consensus: [] })) } });
     await expect(makeExecutionStore(noSignals.db, ports(), () => NOW).loadPreTradeState(JOB())).rejects.toThrow('missing');
+    const manualState = await makeExecutionStore(noSignals.db, ports(), () => NOW).loadPreTradeState(JOB(), { requireSignals: false });
+    expect(manualState.context.signals).toEqual({ opportunityScore: 0, consensusScore: 0 });
     const failingPort = execDb();
     await expect(makeExecutionStore(failingPort.db, ports({ getSolBalance: async () => { throw new Error('rpc down'); } }), () => NOW).loadPreTradeState(JOB())).rejects.toThrow('rpc down');
   });

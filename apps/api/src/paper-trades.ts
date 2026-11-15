@@ -44,42 +44,48 @@ export function registerPaperTradeRoutes(app:FastifyInstance,deps:Pick<AccountDe
   if(position?.baseUnits==null&&request.side==='SELL')fail('PAPER_AMOUNT_UNKNOWN');
   const token=position?.token??await tx.token.findUnique({where:{mint:request.side==='BUY'?request.mint:''}});if(!token)fail('NOT_FOUND',404);
   const evidence=request.side==='BUY'?await tx.agentDecision.findFirst({where:{analysis:{opportunity:{tokenId:token.id}},OR:[{userId:null},{userId}]},orderBy:[{createdAt:'desc'},{id:'desc'}]}):null;
-  let decision:AgentDecision;
+  let decision:AgentDecision,decisionId:string|null=null;
   if(request.side==='BUY'){
    const parsed=AgentDecisionSchema.safeParse(evidence?.payload);
-   if(!evidence||evidence.action!=='BUY'||!parsed.success||parsed.data.action!=='BUY'||evidence.createdAt>at||+at-+evidence.createdAt>MAX_DECISION_AGE_MS)fail('PAPER_BUY_EVIDENCE_REQUIRED');
-   decision={...parsed.data,confidence:Math.min(parsed.data.confidence,evidence.confidence)};
+   const freshBuy=!!evidence&&evidence.action==='BUY'&&parsed.success&&parsed.data.action==='BUY'&&evidence.createdAt<=at&&+at-+evidence.createdAt<=MAX_DECISION_AGE_MS;
+   if(freshBuy){
+    decision={...parsed.data,confidence:Math.min(parsed.data.confidence,evidence.confidence)};
+    decisionId=evidence.id;
+   }else{
+    decision={action:'BUY',confidence:0,reasonCodes:['MANUAL_PAPER'],positiveSignals:[],negativeSignals:[],risks:[],suggestedPositionSizePct:0,entry:{maxSlippageBps:300,maxPriceImpactPct:3},exit:{stopLossPct:null,takeProfitPct:null,trailingStopPct:null},invalidationConditions:[],summary:'User-requested manual paper entry'};
+   }
   }else{
    // Exit-only governor branches do not consume confidence. This is not an AI recommendation.
    decision={action:request.fractionPct===100?'SELL':'REDUCE',confidence:0,reasonCodes:['MANUAL_PAPER'],positiveSignals:[],negativeSignals:[],risks:[],suggestedPositionSizePct:request.fractionPct,entry:{maxSlippageBps:300,maxPriceImpactPct:3},exit:{stopLossPct:null,takeProfitPct:null,trailingStopPct:null},invalidationConditions:[],summary:'User-requested paper exit'};
   }
   const job={userId,idempotencyKey:key,mint:token.mint,decision};
   let pre:PreTradeState;
-  try{pre=await makeExecutionStore(tx,noChain,()=>at).loadPreTradeState(job);}catch{fail('PAPER_INPUTS_UNAVAILABLE');}
+  try{pre=await makeExecutionStore(tx,noChain,()=>at).loadPreTradeState(job,{requireSignals:false});}catch{fail('PAPER_INPUTS_UNAVAILABLE');}
   if(pre.context.mode!=='PAPER')fail('PAPER_ONLY');
   const metric=await tx.tokenMetric.findFirst({where:{tokenId:token.id},orderBy:{at:'desc'}});
   if(!metric||!positive(num(metric.priceUsd))||metric.at>at||+at-+metric.at>INPUT_MAX_AGE_MS)fail('PAPER_PRICE_UNAVAILABLE');
   if(request.side==='BUY'){
-   const [opportunity,consensus,existing]=await Promise.all([
-    tx.opportunity.findFirst({where:{tokenId:token.id},orderBy:{createdAt:'desc'}}),tx.consensusSignal.findFirst({where:{tokenId:token.id},orderBy:{at:'desc'}}),tx.position.findFirst({where:{userId,tokenId:token.id,status:'OPEN'}}),
+   const [existing,holders,riskMetric]=await Promise.all([
+    tx.position.findFirst({where:{userId,tokenId:token.id,status:'OPEN'}}),
+    tx.tokenHolderMetric.findFirst({where:{tokenId:token.id},orderBy:{at:'desc'}}),
+    tx.tokenRiskMetric.findFirst({where:{tokenId:token.id},orderBy:{at:'desc'}}),
    ]);
    if(existing)fail('PAPER_POSITION_EXISTS');
-   const holders=await tx.tokenHolderMetric.findFirst({where:{tokenId:token.id},orderBy:{at:'desc'}});
    if(!holders||holders.at>at||+at-+holders.at>HOLDER_MAX_AGE_MS)fail('PAPER_INPUTS_UNAVAILABLE');
    if(holders.holders<MIN_HOLDERS)fail('HOLDERS_TOO_LOW');
-   if(!opportunity||!consensus||opportunity.createdAt>at||consensus.at>at||+at-+opportunity.createdAt>MAX_DECISION_AGE_MS||+at-+consensus.at>INPUT_MAX_AGE_MS)fail('PAPER_INPUTS_UNAVAILABLE');
+   if(riskMetric?.flags.some(f=>f==='HONEYPOT'||f==='RUGGED'))fail('PAPER_TOKEN_UNSAFE');
    if(!positive(pre.context.portfolio.totalValueSol))fail('PAPER_INPUTS_UNAVAILABLE');
    decision.suggestedPositionSizePct=request.sizeSol/pre.context.portfolio.totalValueSol*100;
    if(decision.suggestedPositionSizePct>100)fail('INSUFFICIENT_BALANCE');
    pre.context.portfolio.walletBalanceSol-=PAPER_FEE_SOL;
   }
-  return {token,position,decision,decisionId:evidence?.id??null,pre,priceUsd:num(metric.priceUsd)};
+  return {token,position,decision,decisionId,pre,priceUsd:num(metric.priceUsd)};
  }
  async function reviewed(tx:PrismaClient,userId:string,request:Request,key:string){
   if(!deps.quotes)fail('PAPER_QUOTES_UNAVAILABLE',503);
   const s=await state(tx,userId,request,key,now());
   const check=(quote:{priceImpactPct:number;expectedSlippageBps:number})=>{
-   const risk=evaluateRisk(s.decision,{...s.pre.context,quote},s.pre.limits,s.pre.systemLimits);
+   const risk=evaluateRisk(s.decision,{...s.pre.context,quote},s.pre.limits,s.pre.systemLimits,request.side==='BUY'?{manualEntry:true}:undefined);
    if(!risk.approved||risk.route!=='SIMULATE')fail(risk.violations[0]?.code??'PAPER_RISK_REJECTED');return risk;
   };
   const first=check({priceImpactPct:0,expectedSlippageBps:0});

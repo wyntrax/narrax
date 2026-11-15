@@ -56,6 +56,18 @@ describe('Risk Governor', () => {
     expect(r.sizeSol).toBe(0);
   });
 
+  it('allows manualEntry option to skip AI signal floors while still enforcing capital, liquidity, and untrusted decision guards', () => {
+    const untrusted = evaluateRisk(decision({ confidence: 0, reasonCodes: ['MANUAL_PAPER'] }), ctx({ signals: { opportunityScore: 0, consensusScore: 0 } }), P);
+    expect(codes(untrusted)).toEqual(expect.arrayContaining(['CONFIDENCE_TOO_LOW', 'OPPORTUNITY_TOO_LOW', 'CONSENSUS_TOO_LOW']));
+
+    const manualOk = evaluateRisk(decision({ confidence: 0, reasonCodes: ['MANUAL_PAPER'] }), ctx({ mode: 'PAPER', signals: { opportunityScore: 0, consensusScore: 0 } }), P, undefined, { manualEntry: true });
+    expect(manualOk.approved).toBe(true);
+    expect(manualOk.route).toBe('SIMULATE');
+
+    const manualThin = evaluateRisk(decision({ confidence: 0 }), ctx({ mode: 'PAPER', signals: { opportunityScore: 0, consensusScore: 0 }, token: { mint: '7xKqExampleMintAddress1111111111111111111', blacklisted: false, liquidityUsd: 1000 } }), P, undefined, { manualEntry: true });
+    expect(codes(manualThin)).toEqual(['LIQUIDITY_TOO_LOW']);
+  });
+
   it('never lets user limits exceed system limits', () => {
     const greedy = { ...P, maxPerTradeSol: 50, minConfidence: 0.1 };
     const r = evaluateRisk(decision({ confidence: 0.5, suggestedPositionSizePct: 50 }), ctx(), greedy);

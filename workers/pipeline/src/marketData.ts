@@ -5,6 +5,7 @@ import type { DeveloperHoldingSource } from './developerHoldings';
 import {refreshTokenMetadata,type MetadataSource} from './tokenMetadata';
 import {discoveryPriceCandidates} from './walletDiscovery';
 import { storeMarketSnapshot } from './marketSnapshot';
+import { pruneExpiredMetricProvenance } from './metricRetention';
 import { SOL_HISTORY_PREFIX } from './walletResearchEvidence';
 import { COVERAGE_LIMITS, readSocialPriority, saveResearchDiagnostics, SOCIAL_INFO_CURSOR_KEY } from './researchDiagnostics';
 import {refreshHolderFallback,type HolderFailureReasons} from './holderFallback';
@@ -514,6 +515,7 @@ export async function refreshMarketData(
   if (lastGeneral) await writeCursor(db, GENERAL_PRICE_CURSOR_KEY, lastGeneral.id);
   const lastSocial = social.filter(t => attempted.has(t.mint)).at(-1);
   if (lastSocial) await writeCursor(db, SOCIAL_PRICE_CURSOR_KEY, lastSocial.id);
+  await pruneExpiredMetricProvenance(db, now);
   await saveResearchDiagnostics(db, 'market', now, out);
   return out;
 }

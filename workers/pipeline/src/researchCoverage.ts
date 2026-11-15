@@ -23,7 +23,7 @@ export async function researchCoverage(db: PrismaClient, now: Date = new Date())
     } }),
     readResearchDiagnostics(db, now),
   ]);
-  const evidence = await db.systemSetting.findMany({ where: { key: { in: tokens.flatMap(t => t.metrics.map(m => `research.marketMetric.${m.id}`)) } } });
+  const evidence = await db.systemSetting.findMany({ where: { key: { in: tokens.flatMap(t => [`research.market.${t.id}`, ...t.metrics.map(m => `research.marketMetric.${m.id}`)]) } } });
   const sources = new Map(evidence.map(row => [row.key, row.value]));
   const coverage = emptyCoverage();
   // Disjoint groups within the scanned sample. A historical narrative link is not current candidate qualification.
@@ -32,7 +32,9 @@ export async function researchCoverage(db: PrismaClient, now: Date = new Date())
   for (const token of tokens) {
     const m = token.metrics[0];
     const h = classify(token.holders[0]?.at, now, 60 * 60_000);
-    const src = Evidence.safeParse(m && sources.get(`research.marketMetric.${m.id}`));
+    const exactSrc = Evidence.safeParse(m && sources.get(`research.marketMetric.${m.id}`));
+    const latestSrc = Evidence.safeParse(m && sources.get(`research.market.${token.id}`));
+    const src = exactSrc.success ? exactSrc : latestSrc;
     const verified = m && src.success && src.data.metricId === m.id && Date.parse(src.data.at) === +m.at && Number.isFinite(Number(m.priceUsd)) && Number(m.priceUsd) > 0;
     const state = !m ? 'missing' : !verified ? 'unverified' : classify(m.at, now, 15 * 60_000);
     for (const group of [coverage, socialSet.has(token.id) ? cohorts.recentSocial : cohorts.narrativeOnly]) {

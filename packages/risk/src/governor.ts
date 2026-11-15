@@ -5,6 +5,11 @@ import type { Adjustment, RiskContext, RiskLimits, RiskResult, Route, Violation 
 const round = (n: number, dp = 6) => Number(n.toFixed(dp));
 const secondsSince = (now: Date, then: Date | null) => (then ? (now.getTime() - then.getTime()) / 1000 : Infinity);
 
+export interface EvaluateRiskOptions {
+  /** Trusted-caller override for user-initiated manual paper entries that bypass autonomous AI signal gates. */
+  manualEntry?: boolean;
+}
+
 /**
  * Deterministic Risk Governor. Pure function: no I/O, no clock, no randomness.
  * The AI decision is treated as untrusted input. The model can ask for stricter execution
@@ -15,6 +20,7 @@ export function evaluateRisk(
   ctx: RiskContext,
   userLimits: Partial<RiskLimits> = {},
   globalLimits?: RiskLimits,
+  options?: EvaluateRiskOptions,
 ): RiskResult {
   const limits = mergeLimits(userLimits, globalLimits);
   const violations: Violation[] = [];
@@ -71,14 +77,16 @@ export function evaluateRisk(
 
   // Entry-only checks.
   if (ctx.token.blacklisted) fail('TOKEN_BLACKLISTED', 'This token is blacklisted.');
-  if (decision.confidence < limits.minConfidence) {
-    fail('CONFIDENCE_TOO_LOW', `Confidence ${decision.confidence} is below ${limits.minConfidence}.`);
-  }
-  if (ctx.signals.opportunityScore < limits.minOpportunityScore) {
-    fail('OPPORTUNITY_TOO_LOW', `Opportunity score ${ctx.signals.opportunityScore} is below ${limits.minOpportunityScore}.`);
-  }
-  if (ctx.signals.consensusScore < limits.minConsensusScore) {
-    fail('CONSENSUS_TOO_LOW', `Smart money consensus ${ctx.signals.consensusScore} is below ${limits.minConsensusScore}.`);
+  if (!options?.manualEntry) {
+    if (decision.confidence < limits.minConfidence) {
+      fail('CONFIDENCE_TOO_LOW', `Confidence ${decision.confidence} is below ${limits.minConfidence}.`);
+    }
+    if (ctx.signals.opportunityScore < limits.minOpportunityScore) {
+      fail('OPPORTUNITY_TOO_LOW', `Opportunity score ${ctx.signals.opportunityScore} is below ${limits.minOpportunityScore}.`);
+    }
+    if (ctx.signals.consensusScore < limits.minConsensusScore) {
+      fail('CONSENSUS_TOO_LOW', `Smart money consensus ${ctx.signals.consensusScore} is below ${limits.minConsensusScore}.`);
+    }
   }
   if (ctx.token.liquidityUsd < limits.minLiquidityUsd) {
     fail('LIQUIDITY_TOO_LOW', `Liquidity $${ctx.token.liquidityUsd} is below $${limits.minLiquidityUsd}.`);
