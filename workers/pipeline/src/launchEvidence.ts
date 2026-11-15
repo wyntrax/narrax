@@ -85,8 +85,11 @@ const SETTING_PREFIX = 'research.launchEvidence.';
 const FUNDER_PREFIX = 'research.walletFunder.';
 const cacheKey = (mint: string): string => `${SETTING_PREFIX}${mint}`;
 
-const pct = (amount: bigint, supply: bigint): number =>
-  supply > 0n ? Number((amount * 1_000_000n) / supply) / 10_000 : 0;
+const pct = (amount: bigint, supply: bigint): number => {
+  if (supply <= 0n || amount <= 0n) return 0;
+  if (amount >= supply) return 100;
+  return Number((amount * 1_000_000n) / supply) / 10_000;
+};
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -428,10 +431,15 @@ export async function scanLaunch(db: PrismaClient, rpc: SolanaRpc, mint: string,
   ]);
   if (deployer) await db.token.updateMany({ where: { mint, deployer: null }, data: { deployer: deployer.address } });
   const priorMints = onChainScan ? [...onChainScan.mints].filter((prior) => prior !== mint) : [];
-  // On-chain mints we have never stored cannot be judged for a rug, so the deployer verdict stays UNKNOWN.
+  // On-chain mints we have never stored cannot be judged for a rug, so an unblemished count stays UNKNOWN unless rugs are already known.
   const unknownPriorMints = onChainScan ? priorMints.filter((prior) => !history.mints.includes(prior)) : [];
   const deployerPriorTokens = onChainScan ? Math.max(history.priorTokens ?? 0, priorMints.length) : history.priorTokens;
-  const deployerPriorRugs = onChainScan?.complete && unknownPriorMints.length === 0 ? history.priorRugs : null;
+  const deployerPriorRugs =
+    (history.priorRugs ?? 0) > 0
+      ? history.priorRugs
+      : onChainScan?.complete && unknownPriorMints.length === 0
+        ? history.priorRugs
+        : null;
 
   const metrics = launchMetrics(buys, supplyRaw);
   let insiderPct: number | null = null;
