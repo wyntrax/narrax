@@ -19,10 +19,14 @@ export interface OpportunityFacts {
   liquidityUsd: number | null;
   holders: number | null;
   top10Pct: number | null;
+  top10ExLpPct?: number | null;
   devHoldingPct: number | null;
+  drawdownFromPeakPct?: number | null;
   tokenAgeMinutes: number | null;
   narrative: { stage: string; score: number; velocity: number; acceleration: number; organicScore: number; saturationRisk: number } | null;
   smartMoney: { score: number; walletCount: number; independentEntities: number; leaderCount: number; netFlowSol: number } | null;
+  launchEvidence?: { status: string; bundlePct: number | null; sniperPct: number | null; insiderPct: number | null; deployerPriorTokens: number | null; deployerPriorRugs: number | null } | null;
+  tradeability?: { priceImpactPct: number; ticketUsd: number; source: string; sourceAt: string } | null;
 }
 
 /** Facts for the position review: our own numbers and the monitor's deterministic result. */

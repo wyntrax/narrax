@@ -128,7 +128,15 @@ export async function analyzeOpportunity(deps: { llm: LlmProvider; config: AiCon
     build: (retryNote) => buildUserMessage(stage, { facts: input.facts, untrusted: input.untrusted, retryNote }),
   });
   const [bullCall, bearCall, riskCall] = await Promise.all([role('bull'), role('bear'), role('risk')]);
-  const bull = bullCall.value as ArgumentOutput | null, bear = bearCall.value as ArgumentOutput | null, risk = riskCall.value as RiskOutput | null;
+  let bull = bullCall.value as ArgumentOutput | null;
+  let bear = bearCall.value as ArgumentOutput | null;
+  let risk = riskCall.value as RiskOutput | null;
+  // Recover from transient concurrency/rate-limit glitches by serially retrying failed roles once if at least one sibling succeeded.
+  if (bull || bear || risk) {
+    if (!bull) bull = (await role('bull')).value as ArgumentOutput | null;
+    if (!bear) bear = (await role('bear')).value as ArgumentOutput | null;
+    if (!risk) risk = (await role('risk')).value as RiskOutput | null;
+  }
   const parts = { fast, bull, bear, risk, deep: true };
   if (!bull || !bear || !risk) return result(plainDecision(cfg, 'WATCH', ['DEEP_ANALYSIS_INCOMPLETE'], 'One of the review roles failed, so this stays on watch.', 0), parts);
 

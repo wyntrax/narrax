@@ -2,6 +2,8 @@ import type { Prisma, PrismaClient } from '@narra/database';
 import { AiConfigSchema, analyzeOpportunity, defaultAiConfig, type AiConfig, type LlmProvider, type OpportunityFacts } from '@narra/ai';
 import { sanitizeUntrusted, wrapUntrusted, type UntrustedField } from '@narra/shared';
 import { attentionPriceDivergence } from '@narra/token-intel';
+import { recentPriceDynamics } from './earlyRadarTracking';
+import { readCachedTokenEvidence } from './tokenEvidenceCache';
 
 const num = (v: { toString(): string } | null | undefined) => (v == null ? null : Number(v.toString()));
 const startOfUtcDay = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -58,16 +60,42 @@ export async function collectFacts(db: PrismaClient, opportunityId: string): Pro
   const m = o.token.metrics[0], h = o.token.holders[0], c = o.token.consensus[0];
   const created = o.token.createdOnChainAt;
   const d = attentionPriceDivergence(o.attentionGrowth, o.priceGrowth);
+  const cached = await readCachedTokenEvidence(db, o.token.mint);
+  const priceUsd = num(m?.priceUsd);
+  const drawdownFromPeakPct = priceUsd != null && priceUsd > 0
+    ? (await recentPriceDynamics(db, o.tokenId, priceUsd, m?.at ?? new Date())).drawdownFromPeakPct
+    : null;
 
   const facts: OpportunityFacts = {
     opportunityScore: o.score,
     scores: { narrative: o.narrativeScore, smartMoney: o.smartMoneyScore, liquidity: o.liquidityScore, momentum: o.momentumScore, og: o.ogScore, risk: o.riskScore },
     relation: rel?.relation ?? null, ogScore: rel?.ogScore ?? null, ogConfidence: rel?.confidence ?? null,
     divergence: { label: d.label, attentionGrowthPct: d.attentionGrowthPct, priceGrowthPct: d.priceGrowthPct },
-    liquidityUsd: num(m?.liquidityUsd), holders: h?.holders ?? null, top10Pct: h?.top10Pct ?? null, devHoldingPct: h?.devHoldingPct ?? null,
+    liquidityUsd: num(m?.liquidityUsd), holders: h?.holders ?? null, top10Pct: h?.top10Pct ?? null,
+    top10ExLpPct: cached.safety?.top10ExLpPct ?? null,
+    devHoldingPct: h?.devHoldingPct ?? cached.safety?.devHoldingPct ?? null,
+    drawdownFromPeakPct,
     tokenAgeMinutes: created ? Math.round((Date.now() - created.getTime()) / 60_000) : null,
     narrative: o.narrative ? { stage: o.narrative.stage, score: o.narrative.score, velocity: o.narrative.velocity, acceleration: o.narrative.acceleration, organicScore: o.narrative.organicScore, saturationRisk: o.narrative.saturationRisk } : null,
     smartMoney: c ? { score: c.score, walletCount: c.walletCount, independentEntities: c.independentEntities, leaderCount: c.leaderCount, netFlowSol: num(c.netFlowSol) ?? 0 } : null,
+    launchEvidence: cached.launch
+      ? {
+          status: cached.launch.status,
+          bundlePct: cached.launch.bundlePct,
+          sniperPct: cached.launch.sniperPct,
+          insiderPct: cached.launch.insiderPct,
+          deployerPriorTokens: cached.launch.deployerPriorTokens,
+          deployerPriorRugs: cached.launch.deployerPriorRugs,
+        }
+      : null,
+    tradeability: cached.tradeability
+      ? {
+          priceImpactPct: cached.tradeability.priceImpactPct,
+          ticketUsd: cached.tradeability.ticketUsdc,
+          source: cached.tradeability.source,
+          sourceAt: cached.tradeability.sourceAt,
+        }
+      : null,
   };
   const untrusted = [
     wrapUntrusted('token.symbol', o.token.symbol, 32), wrapUntrusted('token.name', o.token.name, 80),
@@ -108,13 +136,28 @@ export async function runAiAnalysis(db: PrismaClient, deps: { llm: LlmProvider |
 
   const limit = opts.limit ?? 10;
   const cooldown = (opts.cooldownMinutes ?? 60) * 60_000;
-  const rows = await db.opportunity.findMany({
+  const freshCutoff = new Date(now.getTime() - 15 * 60_000);
+  const rawRows = await db.opportunity.findMany({
     where: {
-      ...(opts.opportunityIds ? { id: { in: opts.opportunityIds } } : { createdAt: { gte: new Date(now.getTime() - (opts.maxAgeMinutes ?? 60) * 60_000) } }),
+      ...(opts.opportunityIds
+        ? { id: { in: opts.opportunityIds } }
+        : {
+            createdAt: { gte: new Date(now.getTime() - (opts.maxAgeMinutes ?? 60) * 60_000) },
+            token: { blacklisted: false, marketQuoteFailures: { lt: 2 }, metrics: { some: { priceUsd: { gt: 0 } } } },
+          }),
       score: { gte: opts.minScore ?? 50 }, analyses: { none: {} },
     },
-    orderBy: [{ score: 'desc' }, { createdAt: 'desc' }], take: limit * 4, select: { id: true, tokenId: true },
+    orderBy: [{ score: 'desc' }, { createdAt: 'desc' }], take: limit * 4,
+    select: { id: true, tokenId: true, token: { select: { metrics: { orderBy: { at: 'desc' }, take: 1, select: { at: true } } } } },
   });
+  // Prioritize opportunities backed by a live (<15m) price metric so outcome tracking has a valid entry price without starving legacy/test fixtures.
+  const rows = opts.opportunityIds
+    ? rawRows
+    : [...rawRows].sort((a, b) => {
+        const aFresh = a.token.metrics[0]?.at && a.token.metrics[0].at >= freshCutoff ? 1 : 0;
+        const bFresh = b.token.metrics[0]?.at && b.token.metrics[0].at >= freshCutoff ? 1 : 0;
+        return bFresh - aFresh;
+      });
 
   const seen = new Set<string>();
   for (const row of rows) {

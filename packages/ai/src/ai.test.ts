@@ -82,6 +82,21 @@ describe('pipeline flow', () => {
     const badDecision = llm(happy({ decision: DECISION({ confidence: 4, action: 'YOLO' }) }));
     expect((await run(badDecision)).decision).toMatchObject({ action: 'WATCH', reasonCodes: ['MODEL_OUTPUT_INVALID'] });
   });
+  it('serially retries a role that fails transiently during the parallel review wave', async () => {
+    let bullAttempts = 0;
+    const base = happy();
+    const flaky: LlmProvider = {
+      async complete(req) {
+        const stage = JSON.parse(req.user).stage as string;
+        if (stage === 'bull' && ++bullAttempts === 1) throw new LlmError('429 rate limit');
+        return { text: base(stage, req, 1), inputTokens: 100, outputTokens: 50 };
+      },
+    };
+    const r = await analyzeOpportunity({ llm: flaky, config: cfg }, { facts: facts(), untrusted: [] });
+    expect(bullAttempts).toBe(2);
+    expect(r.deep).toBe(true);
+    expect(r.decision.action).toBe('BUY');
+  });
   it('turns a provider outage into WATCH instead of throwing', async () => {
     const down: LlmProvider = { complete: async () => { throw new LlmError('down'); } };
     const r = await analyzeOpportunity({ llm: down, config: cfg }, { facts: facts(), untrusted: [] });

@@ -4,6 +4,7 @@ import type { RadarSafetyEvidence, RadarSafetySource } from './radarSafetyEviden
 import type { LaunchEvidence, LaunchEvidenceSource } from './launchEvidence';
 import type { TradeabilityEvidence, TradeabilitySource } from './tradeabilityEvidence';
 import { socialOpportunityEvidence } from './socialOpportunity';
+import { readCachedTokenEvidence } from './tokenEvidenceCache';
 import { saveResearchDiagnostics } from './researchDiagnostics';
 import {holderGrowthBaseline} from './holderHistory';
 import {
@@ -137,6 +138,9 @@ export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?
 
       const divergence = attentionPriceDivergence(n.velocity, growth3h);
 
+      let safetyEvidence: RadarSafetyEvidence | null = null;
+      let launchEvidence: LaunchEvidence | null = null;
+
       // Early radar lane (research only): small tokens under the market cap ceiling are judged on their own floors,
       // because the main opportunity floors (20K liquidity, 50 holders) would hide most of them. It writes alerts, never
       // opportunities, orders or decisions, so the trading path and its floors are unchanged.
@@ -150,9 +154,7 @@ export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?
           divergence: divergence.label, priceGrowth1hPct: growth1h, riskFlags: t.risk[0]?.flags ?? [],
         });
         const early = earlyInput(h.devHoldingPct ?? null);
-        let safetyEvidence: RadarSafetyEvidence | null = null;
         let tradeability: TradeabilityEvidence | null = null;
-        let launchEvidence: LaunchEvidence | null = null;
         // Enrich publication candidates for the separate safety gate; preserve the attention score and its inputs.
         if ([early.trencher, early.holder].some(e => e.eligible && (e.tier === 'WATCH' || e.tier === 'STRONG'))) {
           if (deps.safety) safetyEvidence = await deps.safety.get(t.mint, at);
@@ -190,10 +192,30 @@ export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?
 
       // Ranking needs real liquidity and holders. Until then it stays a watched candidate (or an early-radar alert above).
       if (!meetsFloors({ liquidityUsd, holders: h.holders, relation: r.relation })) continue;
+      if (!safetyEvidence || !launchEvidence) {
+        const cached = await readCachedTokenEvidence(db, t.mint);
+        safetyEvidence ??= cached.safety;
+        launchEvidence ??= cached.launch;
+      }
       const sc = opportunityScore({
-        narrativeScore: n.score, smartMoneyScore: t.consensus[0]?.score ?? 0, liquidityUsd, holders: h.holders, priceGrowth1hPct: growth1h, ogScore: r.ogScore,
-        relation: r.relation, divergence: divergence.label, top10Pct: h.top10Pct, devHoldingPct: h.devHoldingPct ?? null,
-        tokenAgeMinutes: t.createdOnChainAt ? (now.getTime() - t.createdOnChainAt.getTime()) / 60_000 : null, narrativeManipulationRisk: n.metrics[0]?.manipulationRisk ?? null,
+        narrativeScore: n.score,
+        smartMoneyScore: t.consensus[0]?.score ?? 0,
+        hasSmartMoneyConsensus: Boolean(t.consensus[0]),
+        liquidityUsd,
+        holders: h.holders,
+        priceGrowth1hPct: growth1h,
+        ogScore: r.ogScore,
+        relation: r.relation,
+        divergence: divergence.label,
+        top10Pct: h.top10Pct,
+        top10ExLpPct: safetyEvidence?.top10ExLpPct ?? null,
+        devHoldingPct: h.devHoldingPct ?? safetyEvidence?.devHoldingPct ?? null,
+        tokenAgeMinutes: t.createdOnChainAt ? (now.getTime() - t.createdOnChainAt.getTime()) / 60_000 : null,
+        narrativeManipulationRisk: n.metrics[0]?.manipulationRisk ?? null,
+        bundlePct: launchEvidence?.bundlePct ?? null,
+        sniperPct: launchEvidence?.sniperPct ?? null,
+        insiderPct: launchEvidence?.insiderPct ?? safetyEvidence?.insiderPct ?? null,
+        drawdownFromPeakPct,
       });
 
       // History without noise: write when nothing exists, or when it moved at least 2 points (or an hour passed).
