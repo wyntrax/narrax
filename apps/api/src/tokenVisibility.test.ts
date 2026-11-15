@@ -32,4 +32,17 @@ describe('token visibility', () => {
     const future = new Date(+now + 60_000);
     expect(tokenMarketStatus({ marketQuoteFailures: 2, firstSeenAt: old }, future, now)).toBe('NO_MARKET');
   });
+
+  it('excludes unpriced WalletTrade-only dust tokens outside the grace window without active narratives', () => {
+    const where = visibleTokenWhere(now);
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { metrics: { some: {} } },
+          { narratives: { some: { narrative: { stage: { not: 'DEAD' } } } } },
+          { firstSeenAt: { gte: tokenVisibilityCutoff(now) } },
+        ],
+      },
+    ]);
+  });
 });

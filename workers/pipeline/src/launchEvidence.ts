@@ -512,7 +512,13 @@ export function makeLaunchEvidenceSource(db: PrismaClient, rpc: SolanaRpc | null
       if (cached && typeof cached.observedAt === 'string') {
         const age = +now - Date.parse(cached.observedAt);
         const ttl = cached.status === 'UNKNOWN' ? unknownTtlMs : cacheTtlMs;
-        if (Number.isFinite(age) && age >= 0 && age <= ttl) return cached as unknown as LaunchEvidence;
+        if (Number.isFinite(age) && age >= 0 && age <= ttl) {
+          const cachedDeployer = (cached as { deployer?: unknown }).deployer;
+          if (typeof cachedDeployer === 'string' && cachedDeployer.length > 0 && typeof db.token?.updateMany === 'function') {
+            await db.token.updateMany({ where: { mint, deployer: null }, data: { deployer: cachedDeployer } });
+          }
+          return cached as unknown as LaunchEvidence;
+        }
       }
       if (used >= maxPerRun) return null;
       used++;

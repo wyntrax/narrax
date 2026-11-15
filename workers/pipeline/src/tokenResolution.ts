@@ -94,6 +94,34 @@ export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?
       continue;
     }
 
+    if (typeof db.systemSetting?.findMany === 'function') {
+      const missingDeployer = matched.filter(({ t }) => !t.deployer);
+      if (missingDeployer.length) {
+        const cacheRows = await db.systemSetting.findMany({
+          where: {
+            key: {
+              in: missingDeployer.flatMap(({ t }) => [`research.launchEvidence.${t.mint}`, `research.developer.${t.mint}`]),
+            },
+          },
+        });
+        const cachedByKey = new Map(cacheRows.map((row) => [row.key, row.value as Record<string, unknown> | null]));
+        for (const { t } of missingDeployer) {
+          const launch = cachedByKey.get(`research.launchEvidence.${t.mint}`);
+          const dev = cachedByKey.get(`research.developer.${t.mint}`);
+          const resolved = typeof launch?.deployer === 'string' && launch.deployer
+            ? launch.deployer
+            : typeof dev?.wallet === 'string' && dev.wallet
+              ? dev.wallet
+              : null;
+          if (!resolved) continue;
+          t.deployer = resolved;
+          if (typeof db.token?.updateMany === 'function') {
+            await db.token.updateMany({ where: { id: t.id, deployer: null }, data: { deployer: resolved } });
+          }
+        }
+      }
+    }
+
     const candidates: Candidate[] = [];
     for (const { t, match } of matched) {
       let deployerRecent: number | null = null;

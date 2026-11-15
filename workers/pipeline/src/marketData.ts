@@ -319,7 +319,7 @@ export async function refreshMarketData(
          { metrics: { some: { at: { gte: new Date(now.getTime() - L.activeWindowMs) } } } },
          // Resolving a wallet token's name must not remove it from market-price collection.
          { walletTrades: { some: { at: { gte: new Date(now.getTime() - L.activeWindowMs) } } } },
-        { narratives: { some: {} } }, { positions: { some: {} } },
+        { narratives: { some: { narrative: { stage: { not: 'DEAD' } } } } }, { positions: { some: { status: 'OPEN' } } },
       ] }],
     };
   const unknownWhere: Prisma.TokenWhereInput = { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenIds }, symbol: 'UNKNOWN' };
