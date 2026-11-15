@@ -67,7 +67,7 @@ describe('radar safety gate', () => {
 
   it('blocks concentration, active controls, dev supply, LP, bundle, organic manipulation, wash and impact', () => {
     const cases: Array<[Partial<RadarSafetyFacts>, string]> = [
-      [{ top10Pct: RADAR_SAFETY_POLICY.maxTop10Pct }, 'TOP10_CONCENTRATION'],
+      [{ top10Pct: RADAR_SAFETY_POLICY.maxTop10Pct, top10ExLpPct: null }, 'TOP10_CONCENTRATION'],
       [{ top10ExLpPct: RADAR_SAFETY_POLICY.maxTop10ExLpPct }, 'TOP10_EX_LP'],
       [{ devHoldingPct: 11 }, 'DEV_HOLDING'],
       [{ riskFlags: ['MINT_AUTHORITY_ACTIVE'] }, 'MINT_AUTHORITY_ACTIVE'],
@@ -145,11 +145,18 @@ describe('radar safety gate', () => {
   });
 
   it('gives a confirmed blocker precedence over missing evidence', () => {
-    const r = evaluateRadarSafety({ ...base, top10Pct: 40, devHoldingPct: null }, NOW);
+    const r = evaluateRadarSafety({ ...base, top10ExLpPct: null, top10Pct: 40, devHoldingPct: null }, NOW);
     expect(r.status).toBe('BLOCK');
     expect(r.blockers).toContain('TOP10_CONCENTRATION');
     expect(r.unknowns).toContain('DEV_HOLDING');
     expect(r.wouldBlock).toBe(true);
+  });
+
+  it('does not block on raw top-10 when top-10 excluding LP is known and below the cap', () => {
+    const r = evaluateRadarSafety({ ...base, top10Pct: 55, top10ExLpPct: 18 }, NOW);
+    expect(r.status).toBe('PASS');
+    expect(r.blockers).not.toContain('TOP10_CONCENTRATION');
+    expect(r.checks.find((c) => c.code === 'TOP10_CONCENTRATION')).toMatchObject({ status: 'PASS', value: 55 });
   });
 
   it('treats an invalid or absent mode as shadow', () => {

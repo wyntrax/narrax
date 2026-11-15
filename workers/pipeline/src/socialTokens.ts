@@ -3,7 +3,7 @@ import { sanitizeUntrusted } from '@narra/shared';
 import { SOCIAL_RULES, computeNarrativeMetrics, groupBuzz, qualifiedBuzz, type BuzzGroup } from '@narra/narrative';
 import { EARLY_RULES, RADAR_EVIDENCE_LIMITS, attentionPriceDivergence, evaluateEarlyBoth, isRadarEvidenceCandidate, radarEvidenceIssue, recordRadarEvidenceSkip, type RadarEvidenceSkips } from '@narra/token-intel';
 import { WSOL_MINT, type MarketQuoteSource } from '@narra/market-data';
-import { createEarlyRadarAlert } from './earlyRadarTracking';
+import { buildRadarSafetyContext, createEarlyRadarAlert } from './earlyRadarTracking';
 import type { RadarSafetyEvidence, RadarSafetySource } from './radarSafetyEvidence';
 import type { LaunchEvidence, LaunchEvidenceSource } from './launchEvidence';
 import type { TradeabilityEvidence, TradeabilitySource } from './tradeabilityEvidence';
@@ -210,16 +210,11 @@ export async function scanSocialTokens(db: PrismaClient, deps: { quotes: MarketQ
       if (deps.tradeability) tradeability = await deps.tradeability.get(t.mint, at);
       if (deps.launchEvidence) launchEvidence = await deps.launchEvidence.get(t.mint, at);
     }
-    const safetyContext = {
+    const safetyContext = buildRadarSafetyContext({
       priceGrowth1hPct: growth1h, priceGrowth3hPct: growth3h,
       narrativeManipulationRisk: c.organicKnown ? c.manipulationRisk : null,
-      ...(safetyEvidence ?? {}),
-      ...(launchEvidence ? {
-        bundlePct: launchEvidence.bundlePct, sniperPct: launchEvidence.sniperPct, insiderPct: launchEvidence.insiderPct,
-        sameSlotBuyers: launchEvidence.sameSlotBuyers, deployerPriorRugs: launchEvidence.deployerPriorRugs, deployerPriorTokens: launchEvidence.deployerPriorTokens,
-      } : {}),
-      ...(tradeability ? {priceImpactPct: tradeability.priceImpactPct, tradeabilityAt: tradeability.sourceAt,tradeability} : {}),
-    };
+      safetyEvidence, launchEvidence, tradeability,
+    });
 
     let counted = false;
     for (const profile of ['trencher', 'holder'] as const) {

@@ -105,7 +105,7 @@ export interface RadarSafetyCheck {
 }
 
 export interface RadarSafetySnapshot {
-  policyVersion: string;
+  policyVersion: typeof RADAR_SAFETY_POLICY.version;
   mode: Exclude<RadarSafetyMode, 'off'>;
   status: RadarSafetyStatus;
   /** True when enforcement would suppress this call. In shadow mode this is advisory only. */
@@ -244,6 +244,9 @@ export function evaluateRadarSafety(i: RadarSafetyFacts, now: Date = new Date())
 
   if (!finite(i.top10Pct)) {
     checks.push(check('TOP10_CONCENTRATION', 'CRITICAL', 'UNKNOWN', null, `<= ${policy.maxTop10Pct}%`, 'top-10 share missing'));
+  } else if (finite(i.top10ExLpPct)) {
+    // Raw top-10 includes the liquidity pool and known lockers; only fall back to blocking on it when ex-LP is absent.
+    checks.push(check('TOP10_CONCENTRATION', 'CRITICAL', 'PASS', i.top10Pct, `< ${policy.maxTop10Pct}%`, 'raw top-10 includes pool; TOP10_EX_LP governs'));
   } else if (i.top10Pct >= policy.maxTop10Pct) {
     checks.push(check('TOP10_CONCENTRATION', 'CRITICAL', 'BLOCK', i.top10Pct, `< ${policy.maxTop10Pct}%`, 'reported top-10 concentration is too high'));
   } else {

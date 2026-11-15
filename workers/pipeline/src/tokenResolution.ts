@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@narra/database';
-import { createEarlyRadarAlert } from './earlyRadarTracking';
+import { buildRadarSafetyContext, createEarlyRadarAlert } from './earlyRadarTracking';
 import type { RadarSafetyEvidence, RadarSafetySource } from './radarSafetyEvidence';
 import type { LaunchEvidence, LaunchEvidenceSource } from './launchEvidence';
 import type { TradeabilityEvidence, TradeabilitySource } from './tradeabilityEvidence';
@@ -165,16 +165,11 @@ export async function resolveTokens(db: PrismaClient, at?: Date, deps: { safety?
           if (deps.tradeability) tradeability = await deps.tradeability.get(t.mint, at);
           if (deps.launchEvidence) launchEvidence = await deps.launchEvidence.get(t.mint, at);
         }
-        const safetyContext = {
+        const safetyContext = buildRadarSafetyContext({
           priceGrowth1hPct: growth1h, priceGrowth3hPct: growth3h,
           narrativeManipulationRisk: n.metrics[0]?.manipulationRisk ?? null,
-          ...(safetyEvidence ?? {}),
-          ...(launchEvidence ? {
-            bundlePct: launchEvidence.bundlePct, sniperPct: launchEvidence.sniperPct, insiderPct: launchEvidence.insiderPct,
-            sameSlotBuyers: launchEvidence.sameSlotBuyers, deployerPriorRugs: launchEvidence.deployerPriorRugs, deployerPriorTokens: launchEvidence.deployerPriorTokens,
-          } : {}),
-          ...(tradeability ? {priceImpactPct: tradeability.priceImpactPct, tradeabilityAt: tradeability.sourceAt,tradeability} : {}),
-        };
+          safetyEvidence, launchEvidence, tradeability,
+        });
         let counted = false;
         for (const profile of ['trencher', 'holder'] as const) {
           const e = early[profile];
