@@ -70,4 +70,35 @@ describe('SolanaRpc', () => {
     const hang = ((_u: string, init: RequestInit) => new Promise((_r, rej) => init.signal?.addEventListener('abort', () => rej(new Error('x'))))) as unknown as typeof fetch;
     await expect(new SolanaRpc({ url: 'http://x', fetch: hang, timeoutMs: 20 }).getBalanceLamports(OWNER)).rejects.toThrow(RpcError);
   });
+
+  it('fetches chronological full transactions via getTransactionsForAddress', async () => {
+    let body: { method?: string; params?: unknown[] } = {};
+    const tx = {
+      slot: 100,
+      blockTime: 1_700_000_000,
+      transaction: { signatures: ['sig-1'], message: { accountKeys: [OWNER], instructions: [] } },
+      meta: { err: null, innerInstructions: [], preTokenBalances: [], postTokenBalances: [] },
+    };
+    const f = (async (_u: string, init: RequestInit) => {
+      body = JSON.parse(init.body as string);
+      return new Response(JSON.stringify({ result: { data: [tx, null], paginationToken: '100:1' } }));
+    }) as unknown as typeof fetch;
+    const result = await new SolanaRpc({ url: 'http://x', fetch: f }).getTransactionsForAddress(OWNER, {
+      sortOrder: 'asc',
+      limit: 50,
+      status: 'succeeded',
+    });
+    expect(body.method).toBe('getTransactionsForAddress');
+    expect(body.params).toEqual([OWNER, {
+      transactionDetails: 'full',
+      encoding: 'jsonParsed',
+      maxSupportedTransactionVersion: 1,
+      sortOrder: 'asc',
+      limit: 50,
+      filters: { status: 'succeeded' },
+    }]);
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]?.transaction.signatures).toEqual(['sig-1']);
+    expect(result.paginationToken).toBe('100:1');
+  });
 });

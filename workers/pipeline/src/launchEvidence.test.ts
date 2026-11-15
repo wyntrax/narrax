@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PrismaClient } from '@narra/database';
-import type { ParsedTx, SolanaRpc } from '@narra/solana';
+import { RpcError, type ParsedTx, type SolanaRpc } from '@narra/solana';
 import { initialIssuingWallet } from './developerHoldings';
 import { deployerHistory, launchMetrics, makeLaunchEvidenceSource, tokenDelta, type LaunchBuy } from './launchEvidence';
 
@@ -164,5 +164,114 @@ describe('launch evidence source', () => {
     source.begin();
     const evidence = await source.get(MINT, NOW);
     expect(evidence).toMatchObject({ status: 'UNKNOWN', historyComplete: false, bundlePct: null, sameSlotBuyers: null });
+  });
+
+  it('uses getTransactionsForAddress to reach launch on busy mints, detect recent serial deployers, and retain partial insider resolution', async () => {
+    settings.clear();
+    const priorMint1 = 'Prior111111111111111111111111111111111111111';
+    const priorMint2 = 'Prior222222222222222222222222222222222222222';
+    const priorMint3 = 'Prior333333333333333333333333333333333333333';
+    const indexedRpc = {
+      getTokenSupplyRaw: async () => 1_000_000n,
+      getTransactionsForAddress: async (address: string, opts: { sortOrder?: 'asc' | 'desc'; limit?: number; paginationToken?: string } = {}) => {
+        if (address === MINT && opts.sortOrder === 'asc') {
+          if (!opts.paginationToken) {
+            return {
+              data: [creation, buy(BUYER_A, 100, 1_000, '100000')],
+              paginationToken: '100:1',
+            };
+          }
+          return {
+            data: [buy(BUYER_B, 100, 1_000, '50000')],
+            paginationToken: null,
+          };
+        }
+        if (address === DEPLOYER && opts.sortOrder === 'desc' && !opts.paginationToken) {
+          return {
+            data: [priorMint1, priorMint2, priorMint3].map((m, idx) => tx({
+              payer: DEPLOYER,
+              slot: 200 + idx,
+              blockTime: 1_100 + idx,
+              instructions: [{ programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', parsed: { type: 'initializeMint2', info: { mint: m } } }],
+            })),
+            paginationToken: '200:1',
+          };
+        }
+        if (address === DEPLOYER && opts.sortOrder === 'asc') {
+          return { data: [creation], paginationToken: null };
+        }
+        if (address === BUYER_A) return { data: [funding(BUYER_A)], paginationToken: null };
+        if (address === BUYER_B) {
+          // Simulates a bot buyer whose first 25 txs contain no qualifying SOL transfer and has more pages.
+          return { data: [buy(BUYER_B, 90, 900, '1')], paginationToken: '90:1' };
+        }
+        return { data: [], paginationToken: null };
+      },
+      getSignaturesForAddress: async () => { throw new Error('fallback should not be called'); },
+      getParsedTransaction: async () => { throw new Error('fallback should not be called'); },
+    } as unknown as SolanaRpc;
+
+    const source = makeLaunchEvidenceSource(db, indexedRpc, { cacheTtlMs: 0, unknownTtlMs: 0 })!;
+    source.begin();
+    const evidence = await source.get(MINT, NOW);
+    expect(evidence).toMatchObject({
+      status: 'FLAGGED',
+      historyComplete: true,
+      bundlePct: 15,
+      sameSlotBuyers: 2,
+      deployer: DEPLOYER,
+      deployerPriorTokens: 3,
+      deployerPriorRugs: null,
+    });
+    expect(evidence!.detail).toContain('insider sample 1/2 incomplete');
+  });
+
+  it('computes insiderPct from resolved sample buyers even when one buyer history is incomplete', async () => {
+    settings.clear();
+    const BUYER_C = 'BuyerC11111111111111111111111111111111111111';
+    const partialRpc = {
+      getTokenSupplyRaw: async () => 1_000_000n,
+      getTransactionsForAddress: async (address: string, opts: { sortOrder?: 'asc' | 'desc' } = {}) => {
+        if (address === MINT && opts.sortOrder === 'asc') {
+          return {
+            data: [
+              creation,
+              buy(BUYER_A, 100, 1_000, '40000'),
+              buy(BUYER_B, 101, 1_001, '40000'),
+              buy(BUYER_C, 105, 1_010, '20000'),
+            ],
+            paginationToken: null,
+          };
+        }
+        if (address === DEPLOYER) return { data: [creation], paginationToken: null };
+        if (address === BUYER_A) return { data: [funding(BUYER_A)], paginationToken: null };
+        if (address === BUYER_B) return { data: [funding(BUYER_B)], paginationToken: null };
+        if (address === BUYER_C) return { data: [buy(BUYER_C, 90, 900, '1')], paginationToken: '90:1' };
+        return { data: [], paginationToken: null };
+      },
+    } as unknown as SolanaRpc;
+
+    const source = makeLaunchEvidenceSource(db, partialRpc, { cacheTtlMs: 0, unknownTtlMs: 0 })!;
+    source.begin();
+    const evidence = await source.get(MINT, NOW);
+    expect(evidence).toMatchObject({
+      status: 'CLEAN',
+      insiderPct: 8,
+      deployerPriorTokens: 0,
+      deployerPriorRugs: 0,
+    });
+    expect(evidence!.detail).toContain('insider sample 2/3');
+  });
+
+  it('falls back to getSignaturesForAddress when getTransactionsForAddress is unsupported', async () => {
+    settings.clear();
+    const fallbackRpc = {
+      ...rpc,
+      getTransactionsForAddress: async () => { throw new RpcError('getTransactionsForAddress error: Method not found'); },
+    } as unknown as SolanaRpc;
+    const source = makeLaunchEvidenceSource(db, fallbackRpc, { cacheTtlMs: 0, unknownTtlMs: 0 })!;
+    source.begin();
+    const evidence = await source.get(MINT, NOW);
+    expect(evidence).toMatchObject({ status: 'FLAGGED', bundlePct: 15, insiderPct: 15, deployer: DEPLOYER });
   });
 });
