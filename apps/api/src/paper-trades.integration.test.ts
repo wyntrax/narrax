@@ -96,10 +96,16 @@ it.each(['stale','wrongMint','wrongAmount','noMinimum','impact'] as const)('reje
  modifier=q=>({...q,...(kind==='stale'?{fetchedAt:new Date(+at-6000)}:kind==='wrongMint'?{inputMint:mint}:kind==='wrongAmount'?{inAmount:'1'}:kind==='noMinimum'?{otherAmountThreshold:null}:{priceImpactPct:90})});
  expect((await req('preview',{side:'BUY',mint,sizeSol:.1})).statusCode).not.toBe(200);expect(await db.order.count({where:{userId}})).toBe(0);
 });
-it('fails closed on missing/stale evidence and holders below the unchanged floor',async()=>{
- await db.agentDecision.update({where:{id:decisionId},data:{createdAt:new Date(+at-601000)}});expect((await req('preview',{side:'BUY',mint,sizeSol:.1})).json().error).toBe('PAPER_BUY_EVIDENCE_REQUIRED');
- await db.agentDecision.update({where:{id:decisionId},data:{createdAt:at}});await db.tokenHolderMetric.updateMany({where:{tokenId},data:{holders:49}});expect((await req('preview',{side:'BUY',mint,sizeSol:.1})).json().error).toBe('HOLDERS_TOO_LOW');
- expect(quotes.getQuote).not.toHaveBeenCalled();
+it('allows manual paper buys on fresh market/holder inputs without AI BUY decisions or smart-money consensus, while failing closed on low holders or honeypots',async()=>{
+ await db.agentDecision.deleteMany({where:{id:decisionId}});
+ await db.consensusSignal.deleteMany({where:{tokenId}});
+ await db.opportunity.deleteMany({where:{tokenId}});
+ const manualOk=await preview({side:'BUY',mint,sizeSol:.1});expect(manualOk.sizeSol).toBe(.1);
+ await db.tokenRiskMetric.create({data:{tokenId,riskScore:100,flags:['HONEYPOT'],at}});
+ expect((await req('preview',{side:'BUY',mint,sizeSol:.1})).json().error).toBe('PAPER_TOKEN_UNSAFE');
+ await db.tokenRiskMetric.deleteMany({where:{tokenId}});
+ await db.tokenHolderMetric.updateMany({where:{tokenId},data:{holders:49}});expect((await req('preview',{side:'BUY',mint,sizeSol:.1})).json().error).toBe('HOLDERS_TOO_LOW');
+ expect(quotes.getQuote).toHaveBeenCalledTimes(1);
 });
 it('shows a risk-clamped size in the review, never silently fills the requested larger amount',async()=>{const p=await preview({side:'BUY',mint,sizeSol:1});expect(p.sizeSol).toBe(.25);expect(p.requestedSizeSol).toBe(1);expect((await confirm(p.previewId)).statusCode).toBe(200);expect((await db.order.findFirstOrThrow({where:{userId}})).sizeSol.toString()).toBe('0.25');});
 it('concurrent distinct tickets cannot open duplicate positions',async()=>{const a=await preview({side:'BUY',mint,sizeSol:.1}),b=await preview({side:'BUY',mint,sizeSol:.1});const results=await Promise.all([confirm(a.previewId),confirm(b.previewId)]);expect(results.map(r=>r.statusCode).sort()).toEqual([200,409]);expect(await db.position.count({where:{userId}})).toBe(1);});

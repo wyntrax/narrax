@@ -142,6 +142,7 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   // Use an interactive transaction so publication gets an explicit budget.
   // Prisma's array form only accepts isolationLevel and otherwise uses its 5s
   // default, which is too short for 200+ wallet/profile/setting writes.
+  const consensusToWrite = await filterConsensusWrites(db, consensusSignals, now);
   const publicationOperations=await db.$transaction(async tx=>{
     const ops:Prisma.PrismaPromise<unknown>[]=[];
     ops.push(...bulkSettings(tx,settings),...bulkProfiles(tx,profiles));
@@ -157,10 +158,74 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
     if (rel.length) {
       ops.push(tx.walletRelationship.createMany({ data: rel.map((e) => ({ fromId: e.a, toId: e.b, kind: 'TIMING', confidence: e.confidence, evidence: { sharedTokens: e.sharedTokens } })) }));
     }
-    for (const signal of consensusSignals) ops.push(tx.consensusSignal.create({ data: signal }));
+    for (const signal of consensusToWrite) ops.push(tx.consensusSignal.create({ data: signal }));
     for (const op of ops) await op;
     return ops.length;
   },{timeout:30_000,maxWait:10_000});
+  await pruneExpiredConsensusSignals(db, now);
   return { walletsScored: scored, walletsUnscored: unscored.length, clusters: clusterCount, consensusSignals: signals, tradesUsed: trades.length,
     readPages:pages,loadMs:Math.round(loaded-started),computeMs:Math.round(prepared-loaded),publishMs:Math.round(performance.now()-prepared),publicationOperations };
+}
+
+/** Skip duplicate unchanged ConsensusSignal writes inside this window while preserving hourly heartbeats. */
+export const CONSENSUS_HEARTBEAT_MS = 60 * 60_000;
+export const CONSENSUS_RETENTION_MS = 14 * 86_400_000;
+export const CONSENSUS_PRUNE_BATCH = 5_000;
+
+type ConsensusSnapshotRow = {
+  tokenId: string;
+  score: number;
+  walletCount: number;
+  independentEntities: number;
+  leaderCount: number;
+  netFlowSol: unknown;
+  timingConcentration: number | null;
+  at: Date;
+};
+
+function consensusMateriallyChanged(prev: ConsensusSnapshotRow, next: Prisma.ConsensusSignalUncheckedCreateInput): boolean {
+  return (
+    prev.score !== next.score ||
+    prev.walletCount !== next.walletCount ||
+    prev.independentEntities !== next.independentEntities ||
+    prev.leaderCount !== next.leaderCount ||
+    Math.abs(Number(prev.netFlowSol) - Number(next.netFlowSol ?? 0)) >= 0.05 ||
+    Math.abs((prev.timingConcentration ?? 0) - (next.timingConcentration ?? 0)) >= 0.01
+  );
+}
+
+/** Deduplicates unchanged consensus rows within `CONSENSUS_HEARTBEAT_MS` while still writing changes immediately. */
+export async function filterConsensusWrites(
+  db: PrismaClient,
+  candidates: Prisma.ConsensusSignalUncheckedCreateInput[],
+  now: Date,
+): Promise<Prisma.ConsensusSignalUncheckedCreateInput[]> {
+  if (!candidates.length || typeof db.consensusSignal?.findMany !== 'function') return candidates;
+  const existing = (await db.consensusSignal.findMany({
+    where: { tokenId: { in: candidates.map((c) => c.tokenId) } },
+    orderBy: [{ tokenId: 'asc' }, { at: 'desc' }],
+    distinct: ['tokenId'],
+  })) as ConsensusSnapshotRow[];
+  const latestByToken = new Map(existing.map((row) => [row.tokenId, row]));
+  return candidates.filter((candidate) => {
+    const prev = latestByToken.get(candidate.tokenId);
+    if (!prev) return true;
+    if (+prev.at > +now || +now - +prev.at >= CONSENSUS_HEARTBEAT_MS) return true;
+    return consensusMateriallyChanged(prev, candidate);
+  });
+}
+
+/** Deletes expired ConsensusSignal rows in indexed bounded batches. */
+export async function pruneExpiredConsensusSignals(db: PrismaClient, now: Date): Promise<number> {
+  if (typeof db.consensusSignal?.findMany !== 'function' || typeof db.consensusSignal?.deleteMany !== 'function') return 0;
+  const cutoff = new Date(now.getTime() - CONSENSUS_RETENTION_MS);
+  const stale = await db.consensusSignal.findMany({
+    where: { at: { lt: cutoff } },
+    orderBy: { at: 'asc' },
+    take: CONSENSUS_PRUNE_BATCH,
+    select: { id: true },
+  });
+  if (!stale.length) return 0;
+  await db.consensusSignal.deleteMany({ where: { id: { in: stale.map((r) => r.id) } } });
+  return stale.length;
 }
