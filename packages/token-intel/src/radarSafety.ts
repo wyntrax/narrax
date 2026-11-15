@@ -31,9 +31,13 @@ export const RADAR_SAFETY_POLICY = {
   /** Top-10 excluding the pool, burn and known infrastructure. This is the one that matters for supply overhang. */
   maxTop10ExLpPct: 35,
   maxDevHoldingPct: { trencher: 10, holder: 5 } as const,
-  maxBundleSniperInsiderPct: 20,
-  /** Distinct wallets buying in the same launch slot. More than two is a bundle signature. */
-  maxSameSlotBuyers: 2,
+  maxBundlePct: 25,
+  maxInsiderPct: 10,
+  maxBundleSniperInsiderPct: 35,
+  /** Distinct wallets buying in the same launch slot. Five or more with elevated slot volume is a bundle signature. */
+  maxSameSlotBuyers: 4,
+  /** Low first-3-slot share threshold under which many same-slot buyers indicates public MEV snipers rather than a single creator bundle. */
+  maxSameSlotWarnBundlePct: 15,
   /** A deployer with more prior launches than this (>= 3) is treated as a serial launcher. */
   maxDeployerPriorTokens: 2,
   minLpBurnedPct: 80,
@@ -45,7 +49,7 @@ export const RADAR_SAFETY_POLICY = {
   maxRiskAgeMs: 60 * 60_000,
   priceExtension1hPct: 50,
   priceExtension3hPct: 100,
-  maxDrawdownFromPeakPct: 50,
+  maxDrawdownFromPeakPct: 25,
   maxDrop1hPct: -40,
   maxDrop3hPct: -50,
   maxPriceImpactPct: 3,
@@ -294,29 +298,33 @@ export function evaluateRadarSafety(i: RadarSafetyFacts, now: Date = new Date())
   const missingSupply = supplyParts.filter(([, value]) => !finite(value)).map(([name]) => name);
   const knownSupply = supplyParts.reduce((sum, [, value]) => finite(value) ? sum + value : sum, 0);
   const hasKnownSupply = supplyParts.some(([, value]) => finite(value));
-  const supplyThreshold = `<= ${policy.maxBundleSniperInsiderPct}% combined`;
+  const supplyThreshold = `bundle <= ${policy.maxBundlePct}%, insider <= ${policy.maxInsiderPct}%, combined <= ${policy.maxBundleSniperInsiderPct}%`;
   const knownSupplyDetail = supplyParts
     .flatMap(([name, value]) => finite(value) ? [`${name} ${value.toFixed(2)}%`] : [])
     .join(', ');
-  if (missingSupply.length) {
+  const bundleOver = finite(i.bundlePct) && i.bundlePct > policy.maxBundlePct;
+  const insiderOver = finite(i.insiderPct) && i.insiderPct > policy.maxInsiderPct;
+  const combinedOver = knownSupply > policy.maxBundleSniperInsiderPct;
+  if (bundleOver || insiderOver || combinedOver) {
+    const reasons = [
+      bundleOver ? `bundle ${i.bundlePct!.toFixed(2)}% > ${policy.maxBundlePct}%` : null,
+      insiderOver ? `insider ${i.insiderPct!.toFixed(2)}% > ${policy.maxInsiderPct}%` : null,
+      combinedOver ? `combined ${knownSupply.toFixed(2)}% > ${policy.maxBundleSniperInsiderPct}%` : null,
+    ].filter(Boolean).join('; ');
+    const prefix = missingSupply.length && knownSupplyDetail ? `known ${knownSupplyDetail}; ` : '';
+    checks.push(check('BUNDLE_SNIPER_INSIDER', 'CRITICAL', 'BLOCK', knownSupply, supplyThreshold, `${prefix}${reasons}`));
+  } else if (missingSupply.length) {
     const missing = missingSupply.length === 3
       ? 'bundle, sniper and insider supply evidence is not available'
       : `${missingSupply.join(' and ')} supply evidence is not available`;
     const detail = [missing, knownSupplyDetail ? `known ${knownSupplyDetail}` : null].filter(Boolean).join('; ');
-    // A known component already over the combined cap is conclusive even when the other components are unknown.
-    if (knownSupply > policy.maxBundleSniperInsiderPct) {
-      checks.push(check('BUNDLE_SNIPER_INSIDER', 'CRITICAL', 'BLOCK', knownSupply, supplyThreshold,
-        `${detail}; known evidence already exceeds the threshold`));
-    } else {
-      checks.push(check('BUNDLE_SNIPER_INSIDER', 'CRITICAL', 'UNKNOWN', hasKnownSupply ? knownSupply : null, supplyThreshold, detail));
-    }
+    checks.push(check('BUNDLE_SNIPER_INSIDER', 'CRITICAL', 'UNKNOWN', hasKnownSupply ? knownSupply : null, supplyThreshold, detail));
   } else {
-    const combined = knownSupply;
     checks.push(check(
       'BUNDLE_SNIPER_INSIDER',
       'CRITICAL',
-      combined > policy.maxBundleSniperInsiderPct ? 'BLOCK' : 'PASS',
-      combined,
+      'PASS',
+      knownSupply,
       supplyThreshold,
     ));
   }
@@ -324,7 +332,13 @@ export function evaluateRadarSafety(i: RadarSafetyFacts, now: Date = new Date())
   if (!finite(i.sameSlotBuyers)) {
     checks.push(check('LAUNCH_BUNDLE', 'CRITICAL', 'UNKNOWN', null, `<= ${policy.maxSameSlotBuyers} distinct buyers`, 'same-slot buyer evidence is not available'));
   } else if (i.sameSlotBuyers > policy.maxSameSlotBuyers) {
-    checks.push(check('LAUNCH_BUNDLE', 'CRITICAL', 'BLOCK', i.sameSlotBuyers, `<= ${policy.maxSameSlotBuyers} distinct buyers`, 'multiple wallets bought in the same launch slot'));
+    if (finite(i.bundlePct) && i.bundlePct <= policy.maxSameSlotWarnBundlePct) {
+      checks.push(check('LAUNCH_BUNDLE', 'WARN', 'WARN', i.sameSlotBuyers,
+        `<= ${policy.maxSameSlotBuyers} distinct buyers`,
+        `${i.sameSlotBuyers} first-slot buyers with low ${i.bundlePct.toFixed(2)}% bundle share (likely public MEV snipers)`));
+    } else {
+      checks.push(check('LAUNCH_BUNDLE', 'CRITICAL', 'BLOCK', i.sameSlotBuyers, `<= ${policy.maxSameSlotBuyers} distinct buyers`, 'multiple wallets bought in the same launch slot'));
+    }
   } else {
     checks.push(check('LAUNCH_BUNDLE', 'CRITICAL', 'PASS', i.sameSlotBuyers, `<= ${policy.maxSameSlotBuyers} distinct buyers`));
   }
@@ -367,10 +381,16 @@ export function evaluateRadarSafety(i: RadarSafetyFacts, now: Date = new Date())
   if (finite(i.deployerPriorTokens) && i.deployerPriorTokens > policy.maxDeployerPriorTokens) {
     checks.push(check('DEPLOYER_HISTORY', 'CRITICAL', 'BLOCK', i.deployerPriorTokens,
       `<= ${policy.maxDeployerPriorTokens} prior tokens`, 'deployer is a serial launcher'));
-  } else if (i.deployerPriorRugs == null) {
-    checks.push(check('DEPLOYER_HISTORY', 'CRITICAL', 'UNKNOWN', null, '0 prior rugs', 'deployer history is not available'));
-  } else if (i.deployerPriorRugs > 0) {
+  } else if (i.deployerPriorRugs != null && i.deployerPriorRugs > 0) {
     checks.push(check('DEPLOYER_HISTORY', 'CRITICAL', 'BLOCK', i.deployerPriorRugs, '0 prior rugs', 'deployer has a prior rug'));
+  } else if (i.deployerPriorRugs == null) {
+    if (finite(i.deployerPriorTokens) && i.deployerPriorTokens > 0) {
+      checks.push(check('DEPLOYER_HISTORY', 'WARN', 'WARN', i.deployerPriorTokens,
+        `<= ${policy.maxDeployerPriorTokens} prior tokens`,
+        `${i.deployerPriorTokens} untracked prior mint(s); 0 known rugs`));
+    } else {
+      checks.push(check('DEPLOYER_HISTORY', 'CRITICAL', 'UNKNOWN', null, '0 prior rugs', 'deployer history is not available'));
+    }
   } else {
     checks.push(check('DEPLOYER_HISTORY', 'CRITICAL', 'PASS', 0, '0 prior rugs'));
   }

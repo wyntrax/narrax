@@ -37,7 +37,7 @@ export interface SocialScanSummary {
 
 const HOUR = 3_600_000;
 /** Higher chatter floor before social buzz can emit an Early Radar alert (discovery still uses SOCIAL_RULES). */
-export const EARLY_SOCIAL_FLOOR = { minCreators: 5, minMentions: 8 } as const;
+export const EARLY_SOCIAL_FLOOR = { minCreators: 6, minMentions: 10 } as const;
 export const meetsEarlySocialFloor = (group: Pick<BuzzGroup, 'creators' | 'points'>): boolean =>
   group.creators >= EARLY_SOCIAL_FLOOR.minCreators && group.points.length >= EARLY_SOCIAL_FLOOR.minMentions;
 /** Bound for the per-scan quote top-up. The market job's 150-token rotation also serves launches, discovery and narratives. */

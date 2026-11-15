@@ -67,6 +67,17 @@ describe('launch metrics', () => {
     expect([...r.sniperWallets]).toEqual(['d']);
   });
 
+  it('clamps launch share percentages at 100 when current post-burn supply is smaller than launch buys', () => {
+    const buys: LaunchBuy[] = [
+      { wallet: 'a', signature: 'a', slot: 10, at: 1_000, amountRaw: 500_000n },
+      { wallet: 'b', signature: 'b', slot: 15, at: 1_010, amountRaw: 250_000n },
+    ];
+    const r = launchMetrics(buys, 5_000n);
+    expect(r.bundlePct).toBe(100);
+    expect(r.sniperPct).toBe(100);
+    expect(r.firstBuyersPct).toBe(100);
+  });
+
   it('returns nulls rather than a clean result without buys or supply', () => {
     expect(launchMetrics([], 1_000_000n)).toMatchObject({ bundlePct: null, sniperPct: null, sameSlotBuyers: null, firstBuyersPct: null });
     expect(launchMetrics([{ wallet: 'a', signature: 'a', slot: 1, at: 1, amountRaw: 1n }], 0n)).toMatchObject({ bundlePct: null, sameSlotBuyers: null });
@@ -273,5 +284,47 @@ describe('launch evidence source', () => {
     source.begin();
     const evidence = await source.get(MINT, NOW);
     expect(evidence).toMatchObject({ status: 'FLAGGED', bundlePct: 15, insiderPct: 15, deployer: DEPLOYER });
+  });
+
+  it('preserves known prior rugs even when another on-chain mint is untracked', async () => {
+    settings.clear();
+    const day = 86_400_000;
+    const rugDb = {
+      ...db,
+      token: {
+        ...db.token,
+        findMany: async () => [
+          { id: '1', mint: 'KnownRug111111111111111111111111111111111111', createdOnChainAt: new Date(+NOW - 2 * day), marketQuoteFailures: 0, metrics: [{ marketCapUsd: 500, at: new Date(+NOW - day) }] },
+        ],
+      },
+    } as unknown as PrismaClient;
+    const priorRugMint = 'KnownRug111111111111111111111111111111111111';
+    const untrackedMint = 'Untracked11111111111111111111111111111111111';
+    const mixedRpc = {
+      getTokenSupplyRaw: async () => 1_000_000n,
+      getTransactionsForAddress: async (address: string, opts: { sortOrder?: 'asc' | 'desc' } = {}) => {
+        if (address === MINT && opts.sortOrder === 'asc') {
+          return { data: [creation, buy(BUYER_A, 100, 1_000, '10000')], paginationToken: null };
+        }
+        if (address === DEPLOYER && opts.sortOrder === 'desc') {
+          return {
+            data: [priorRugMint, untrackedMint].map((m, idx) => tx({
+              payer: DEPLOYER,
+              slot: 200 + idx,
+              blockTime: 1_100 + idx,
+              instructions: [{ programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', parsed: { type: 'initializeMint2', info: { mint: m } } }],
+            })),
+            paginationToken: null,
+          };
+        }
+        if (address === DEPLOYER) return { data: [creation], paginationToken: null };
+        if (address === BUYER_A) return { data: [funding(BUYER_A)], paginationToken: null };
+        return { data: [], paginationToken: null };
+      },
+    } as unknown as SolanaRpc;
+    const source = makeLaunchEvidenceSource(rugDb, mixedRpc, { cacheTtlMs: 0, unknownTtlMs: 0 })!;
+    source.begin();
+    const evidence = await source.get(MINT, NOW);
+    expect(evidence).toMatchObject({ deployerPriorTokens: 2, deployerPriorRugs: 1 });
   });
 });

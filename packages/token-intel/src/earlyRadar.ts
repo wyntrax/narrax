@@ -21,7 +21,7 @@ export const EARLY_RULES = {
   /** The ceiling the owner asked for. At or above this a token is out of the early lane. */
   maxMarketCapUsd: 100_000,
   /** Below this the cap is dust and the price data is too easy to distort to rank. */
-  minMarketCapUsd: 10_000,
+  minMarketCapUsd: 20_000,
   /** Daily volume over this multiple of market cap is flagged as possible wash trading. */
   washTurnover: 30,
   trencher: { minLiquidityUsd: 6_000, minHolders: 75, maxTop10Pct: 70, maxDevPct: 15, minAgeMinutes: 10, maxAgeMinutes: 72 * 60, minLiquidityToCap: 0.05 },

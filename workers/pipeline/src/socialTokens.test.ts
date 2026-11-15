@@ -19,10 +19,10 @@ const pt = (i: number) => ({
 
 describe('early social floor and price dynamics', () => {
   it('requires at least EARLY_SOCIAL_FLOOR accounts and posts for social alerts', () => {
-    expect(EARLY_SOCIAL_FLOOR).toEqual({ minCreators: 5, minMentions: 8 });
-    expect(meetsEarlySocialFloor({ creators: 4, points: Array.from({ length: 10 }, (_, i) => pt(i)) })).toBe(false);
-    expect(meetsEarlySocialFloor({ creators: 5, points: Array.from({ length: 7 }, (_, i) => pt(i)) })).toBe(false);
-    expect(meetsEarlySocialFloor({ creators: 5, points: Array.from({ length: 8 }, (_, i) => pt(i)) })).toBe(true);
+    expect(EARLY_SOCIAL_FLOOR).toEqual({ minCreators: 6, minMentions: 10 });
+    expect(meetsEarlySocialFloor({ creators: 5, points: Array.from({ length: 12 }, (_, i) => pt(i)) })).toBe(false);
+    expect(meetsEarlySocialFloor({ creators: 6, points: Array.from({ length: 9 }, (_, i) => pt(i)) })).toBe(false);
+    expect(meetsEarlySocialFloor({ creators: 6, points: Array.from({ length: 10 }, (_, i) => pt(i)) })).toBe(true);
   });
 
   it('computes 1h/3h growth and peak drawdown from TokenMetric rows', async () => {

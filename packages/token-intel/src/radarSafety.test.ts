@@ -75,8 +75,11 @@ describe('radar safety gate', () => {
       [{ riskFlags: ['RUGGED'] }, 'RUGGED'],
       [{ lpLocked: false }, 'LP_CONTROL'],
       [{ lpBurnedPct: 79, lpLocked: null }, 'LP_CONTROL'],
-      [{ bundlePct: 10, sniperPct: 8, insiderPct: 5 }, 'BUNDLE_SNIPER_INSIDER'],
-      [{ sameSlotBuyers: 3 }, 'LAUNCH_BUNDLE'],
+      [{ bundlePct: 26, sniperPct: 0, insiderPct: 0 }, 'BUNDLE_SNIPER_INSIDER'],
+      [{ bundlePct: 0, sniperPct: 0, insiderPct: 11 }, 'BUNDLE_SNIPER_INSIDER'],
+      [{ bundlePct: 18, sniperPct: 18, insiderPct: 0 }, 'BUNDLE_SNIPER_INSIDER'],
+      [{ sameSlotBuyers: 5, bundlePct: 16 }, 'LAUNCH_BUNDLE'],
+      [{ drawdownFromPeakPct: 25 }, 'PRICE_DRAWDOWN'],
       [{ narrativeManipulationRisk: 60 }, 'ORGANIC_EVIDENCE'],
       [{ volume24hUsd: 50_000 * 31, uniqueBuyers24h: 10 }, 'WASH_VOLUME'],
       [{ priceImpactPct: 3.1,tradeability:testTradeability(base.mint,NOW,3.1) }, 'TRADEABILITY'],
@@ -99,13 +102,34 @@ describe('radar safety gate', () => {
   });
 
   it('keeps known partial supply evidence explicit without treating it as a pass', () => {
-    const r = evaluateRadarSafety({ ...base, bundlePct: null, sniperPct: null, insiderPct: 17.18 }, NOW);
+    const r = evaluateRadarSafety({ ...base, bundlePct: null, sniperPct: null, insiderPct: 7.18 }, NOW);
     expect(r.status).toBe('UNKNOWN');
     expect(r.unknowns).toContain('BUNDLE_SNIPER_INSIDER');
-    expect(r.checks.find((c) => c.code === 'BUNDLE_SNIPER_INSIDER')).toMatchObject({ status: 'UNKNOWN', value: 17.18 });
+    expect(r.checks.find((c) => c.code === 'BUNDLE_SNIPER_INSIDER')).toMatchObject({ status: 'UNKNOWN', value: 7.18 });
     expect(r.checks.find((c) => c.code === 'BUNDLE_SNIPER_INSIDER')?.detail).toBe(
-      'bundle and sniper supply evidence is not available; known insider 17.18%',
+      'bundle and sniper supply evidence is not available; known insider 7.18%',
     );
+  });
+
+  it('passes organic MEV-sniped launches with low bundle share and warns on 1-2 untracked deployer mints', () => {
+    const apuLike = evaluateRadarSafety({
+      ...base,
+      bundlePct: 8.9,
+      sniperPct: 17.5,
+      insiderPct: 0,
+      sameSlotBuyers: 10,
+      drawdownFromPeakPct: 24,
+      deployerPriorTokens: 2,
+      deployerPriorRugs: null,
+    }, NOW);
+    expect(apuLike.status).toBe('PASS');
+    expect(apuLike.blockers).toEqual([]);
+    expect(apuLike.unknowns).toEqual([]);
+    expect(apuLike.warnings).toEqual(expect.arrayContaining(['LAUNCH_BUNDLE', 'DEPLOYER_HISTORY']));
+
+    const missingDeployer = evaluateRadarSafety({ ...base, deployerPriorTokens: 0, deployerPriorRugs: null }, NOW);
+    expect(missingDeployer.status).toBe('UNKNOWN');
+    expect(missingDeployer.unknowns).toContain('DEPLOYER_HISTORY');
   });
 
   it('uses the profile-specific dev cap', () => {
