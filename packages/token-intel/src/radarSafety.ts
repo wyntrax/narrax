@@ -34,8 +34,8 @@ export const RADAR_SAFETY_POLICY = {
   maxBundleSniperInsiderPct: 20,
   /** Distinct wallets buying in the same launch slot. More than two is a bundle signature. */
   maxSameSlotBuyers: 2,
-  /** A deployer with more prior launches than this is treated as a serial launcher. */
-  maxDeployerPriorTokens: 3,
+  /** A deployer with more prior launches than this (>= 3) is treated as a serial launcher. */
+  maxDeployerPriorTokens: 2,
   minLpBurnedPct: 80,
   washTurnover: 30,
   minWashUniqueBuyers24h: 50,

@@ -114,6 +114,13 @@ describe('radar safety gate', () => {
     expect(evaluateRadarSafety({ ...base, profile: 'trencher', devHoldingPct: 11 }, NOW).blockers).toContain('DEV_HOLDING');
   });
 
+  it('allows up to 2 prior deployer tokens when rugs are 0 and blocks 3 or more', () => {
+    expect(evaluateRadarSafety({ ...base, deployerPriorTokens: 2, deployerPriorRugs: 0 }, NOW).status).toBe('PASS');
+    const blocked = evaluateRadarSafety({ ...base, deployerPriorTokens: 3, deployerPriorRugs: 0 }, NOW);
+    expect(blocked.status).toBe('BLOCK');
+    expect(blocked.blockers).toContain('DEPLOYER_HISTORY');
+  });
+
   it('fails closed when critical evidence is missing or stale', () => {
     const cases: Array<[Partial<RadarSafetyFacts>, string]> = [
       [{ devHoldingPct: null }, 'DEV_HOLDING'],
