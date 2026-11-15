@@ -21,10 +21,10 @@ export const EARLY_RULES = {
   /** The ceiling the owner asked for. At or above this a token is out of the early lane. */
   maxMarketCapUsd: 100_000,
   /** Below this the cap is dust and the price data is too easy to distort to rank. */
-  minMarketCapUsd: 2_000,
+  minMarketCapUsd: 10_000,
   /** Daily volume over this multiple of market cap is flagged as possible wash trading. */
   washTurnover: 30,
-  trencher: { minLiquidityUsd: 3_000, minHolders: 30, maxTop10Pct: 70, maxDevPct: 15, minAgeMinutes: 10, maxAgeMinutes: 72 * 60, minLiquidityToCap: 0.05 },
+  trencher: { minLiquidityUsd: 6_000, minHolders: 75, maxTop10Pct: 70, maxDevPct: 15, minAgeMinutes: 10, maxAgeMinutes: 72 * 60, minLiquidityToCap: 0.05 },
   holder: { minLiquidityUsd: 8_000, minHolders: 150, maxTop10Pct: 45, maxDevPct: 5, minAgeMinutes: 12 * 60, maxAgeMinutes: 30 * 24 * 60, minLiquidityToCap: 0.08 },
   /** Weights per profile, each set sums to 100. */
   weights: {
@@ -90,6 +90,16 @@ const clamp = (x: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, x));
 const r1 = (x: number) => Math.round(x * 10) / 10;
 const finite = (x: number | null): x is number => x != null && Number.isFinite(x);
 
+/** Peaks on steady +0%..+20% 1h moves and decays to zero on falling knives (<=-25%) and extended chases (>=+50%). */
+function momentumScore(growth1h: number | null): number {
+  if (!finite(growth1h)) return 0.5;
+  if (growth1h <= -25) return 0;
+  if (growth1h < 0) return clamp((growth1h + 25) / 50);
+  if (growth1h <= 20) return clamp(0.5 + (growth1h / 20) * 0.5);
+  if (growth1h < 50) return clamp(1 - (growth1h - 20) / 30);
+  return 0;
+}
+
 export function evaluateEarly(profile: EarlyProfile, i: EarlyInputs, rules: typeof EARLY_RULES = EARLY_RULES): EarlyResult {
   const p = rules[profile];
   const reasons: string[] = [];
@@ -140,7 +150,7 @@ export function evaluateEarly(profile: EarlyProfile, i: EarlyInputs, rules: type
   const community = 0.45 * holderCount + 0.3 * growth + 0.25 * smart;
   const roomToRun = clamp((rules.maxMarketCapUsd - i.marketCapUsd) / (rules.maxMarketCapUsd - rules.minMarketCapUsd));
   const divergence = DIVERGENCE_VALUE[i.divergence];
-  const momentum = i.priceGrowth1hPct == null ? 0.5 : clamp((clamp(i.priceGrowth1hPct, -30, 60) + 30) / 90);
+  const momentum = momentumScore(i.priceGrowth1hPct);
   const structure = (
     0.35 * clamp((p.maxTop10Pct - i.top10Pct!) / (p.maxTop10Pct - 15)) +
     0.25 * (i.devHoldingPct == null ? 0.5 : clamp((p.maxDevPct - i.devHoldingPct) / p.maxDevPct)) +

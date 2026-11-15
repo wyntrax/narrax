@@ -16,8 +16,10 @@ describe('early radar', () => {
       expect(r.reasons).toContain('ABOVE_MARKET_CAP_CEILING');
     }
   });
-  it('excludes dust caps, honeypots, active authorities and suspicious copies', () => {
-    expect(evaluateEarly('trencher', { ...base, marketCapUsd: 500, liquidityUsd: 4_000 }).reasons).toContain('BELOW_MARKET_CAP_FLOOR');
+  it('excludes dust caps, thin trencher floors, honeypots, active authorities and suspicious copies', () => {
+    for (const cap of [500, 8_000]) expect(evaluateEarly('trencher', { ...base, marketCapUsd: cap, liquidityUsd: 6_000 }).reasons).toContain('BELOW_MARKET_CAP_FLOOR');
+    expect(evaluateEarly('trencher', { ...base, liquidityUsd: 5_000 }).reasons).toContain('LIQUIDITY_TOO_LOW');
+    expect(evaluateEarly('trencher', { ...base, holders: 50 }).reasons).toContain('TOO_FEW_HOLDERS');
     for (const flag of ['HONEYPOT', 'MINT_AUTHORITY_ACTIVE', 'FREEZE_AUTHORITY_ACTIVE']) expect(evaluateEarly('trencher', { ...base, riskFlags: [flag] }).reasons).toContain(flag);
     expect(evaluateEarly('trencher', { ...base, relation: 'SUSPICIOUS' }).reasons).toContain('SUSPICIOUS_COPY');
   });
@@ -82,5 +84,13 @@ describe('early radar', () => {
     expect(r.flags).toContain('TICKER_MATCH_ONLY');
     expect(r.score).toBeLessThanOrEqual(60);
     expect(evaluateEarly('trencher', strong).score).toBeGreaterThan(70);
+  });
+  it('rewards steady 1h momentum instead of chasing vertical pumps or falling knives', () => {
+    const steady = evaluateEarly('trencher', { ...base, priceGrowth1hPct: 15 }).components.momentum;
+    const chasing = evaluateEarly('trencher', { ...base, priceGrowth1hPct: 60 }).components.momentum;
+    const knife = evaluateEarly('trencher', { ...base, priceGrowth1hPct: -30 }).components.momentum;
+    expect(steady).toBeGreaterThan(chasing);
+    expect(chasing).toBe(0);
+    expect(knife).toBe(0);
   });
 });

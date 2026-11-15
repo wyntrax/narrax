@@ -3,7 +3,7 @@ import { sanitizeUntrusted } from '@narra/shared';
 import { SOCIAL_RULES, computeNarrativeMetrics, groupBuzz, qualifiedBuzz, type BuzzGroup } from '@narra/narrative';
 import { EARLY_RULES, RADAR_EVIDENCE_LIMITS, attentionPriceDivergence, evaluateEarlyBoth, isRadarEvidenceCandidate, radarEvidenceIssue, recordRadarEvidenceSkip, type RadarEvidenceSkips } from '@narra/token-intel';
 import { WSOL_MINT, type MarketQuoteSource } from '@narra/market-data';
-import { buildRadarSafetyContext, createEarlyRadarAlert } from './earlyRadarTracking';
+import { buildRadarSafetyContext, createEarlyRadarAlert, recentPriceDynamics } from './earlyRadarTracking';
 import type { RadarSafetyEvidence, RadarSafetySource } from './radarSafetyEvidence';
 import type { LaunchEvidence, LaunchEvidenceSource } from './launchEvidence';
 import type { TradeabilityEvidence, TradeabilitySource } from './tradeabilityEvidence';
@@ -36,6 +36,10 @@ export interface SocialScanSummary {
 }
 
 const HOUR = 3_600_000;
+/** Higher chatter floor before social buzz can emit an Early Radar alert (discovery still uses SOCIAL_RULES). */
+export const EARLY_SOCIAL_FLOOR = { minCreators: 5, minMentions: 8 } as const;
+export const meetsEarlySocialFloor = (group: Pick<BuzzGroup, 'creators' | 'points'>): boolean =>
+  group.creators >= EARLY_SOCIAL_FLOOR.minCreators && group.points.length >= EARLY_SOCIAL_FLOOR.minMentions;
 /** Bound for the per-scan quote top-up. The market job's 150-token rotation also serves launches, discovery and narratives. */
 const MAX_EVIDENCE_QUOTES_PER_RUN = 60;
 const QUOTE_BATCH = 30;
@@ -183,11 +187,10 @@ export async function scanSocialTokens(db: PrismaClient, deps: { quotes: MarketQ
 
     const liquidityUsd = num(m.liquidityUsd) ?? NaN;
     const price = num(m.priceUsd) ?? 0;
-    const priceAt = async (hoursAgo: number) => num((await db.tokenMetric.findFirst({ where: { tokenId, at: { lte: new Date(now.getTime() - hoursAgo * HOUR) } }, orderBy: { at: 'desc' }, select: { priceUsd: true } }))?.priceUsd);
-    const [p1, p3] = await Promise.all([priceAt(1), priceAt(3)]);
-    const growth = (then: number | null) => (then && then > 0 ? (price / then - 1) * 100 : null);
-    const growth1h = growth(p1), growth3h = growth(p3);
-    const holdersThen=await holderGrowthBaseline(db,tokenId,h.id,new Date(now.getTime()-3*HOUR));
+    const [{ growth1h, growth3h, drawdownFromPeakPct }, holdersThen] = await Promise.all([
+      recentPriceDynamics(db, tokenId, price, now),
+      holderGrowthBaseline(db, tokenId, h.id, new Date(now.getTime() - 3 * HOUR)),
+    ]);
 
     // The chatter about this one token is scored like a narrative: velocity, organic quality (copy-paste and burst checks) and stage.
     const c = computeNarrativeMetrics(group.points, now);
@@ -201,6 +204,7 @@ export async function scanSocialTokens(db: PrismaClient, deps: { quotes: MarketQ
       riskFlags: t.risk[0]?.flags ?? [],
     });
     const early = earlyInput(h.devHoldingPct ?? null);
+    if (!meetsEarlySocialFloor(group)) continue;
     let safetyEvidence: RadarSafetyEvidence | null = null;
     let tradeability: TradeabilityEvidence | null = null;
     let launchEvidence: LaunchEvidence | null = null;
@@ -211,7 +215,7 @@ export async function scanSocialTokens(db: PrismaClient, deps: { quotes: MarketQ
       if (deps.launchEvidence) launchEvidence = await deps.launchEvidence.get(t.mint, at);
     }
     const safetyContext = buildRadarSafetyContext({
-      priceGrowth1hPct: growth1h, priceGrowth3hPct: growth3h,
+      priceGrowth1hPct: growth1h, priceGrowth3hPct: growth3h, drawdownFromPeakPct,
       narrativeManipulationRisk: c.organicKnown ? c.manipulationRisk : null,
       safetyEvidence, launchEvidence, tradeability,
     });
