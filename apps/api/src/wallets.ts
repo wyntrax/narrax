@@ -36,17 +36,74 @@ export function registerWalletAdminRoutes(app: FastifyInstance, deps: WalletAdmi
   const sync = async () => { if (!deps.requestSync) return false; try { await deps.requestSync(); return true; } catch { return false; } };
 
   app.get('/v1/admin/wallets', opts, async (req, reply) => {
-    const q = Paging.extend({ source: z.enum(['MANUAL', 'IMPORT', 'DISCOVERED']).optional(), active: z.enum(['true', 'false']).optional() }).safeParse(req.query);
+    const q = Paging.extend({
+      source: z.enum(['MANUAL', 'IMPORT', 'DISCOVERED']).optional(),
+      active: z.enum(['true', 'false']).optional(),
+      sort: z.enum(['id', 'recommended']).default('id'),
+      readyOnly: z.enum(['true', 'false']).optional(),
+    }).safeParse(req.query);
     if (!q.success) return reply.code(400).send(bad());
+    const where = { ...(q.data.source ? { source: q.data.source } : {}), ...(q.data.active ? { active: q.data.active === 'true' } : {}) };
+    const include = { profile: { select: { score: true, style: true, leaderScore: true } }, cluster: { select: { id: true, label: true, confidence: true } }, funding: { select: { status: true, funder: true, fundedAt: true } } } as const;
+    const isRecommended = q.data.sort === 'recommended' || q.data.readyOnly === 'true';
+    const formatItem = (w: { id: string; address: string; label: string | null; source: string; active: boolean; createdAt: Date; researchReview: string; researchReviewReason: string | null; profile: { score: number; style: string; leaderScore: number } | null; cluster: { id: string; label: string | null; confidence: unknown } | null; funding: { status: string; funder: string | null; fundedAt: Date | null } | null }, qual: NonNullable<ReturnType<Awaited<ReturnType<typeof walletQualifications>>['get']>>) => ({
+      address: w.address,
+      label: w.label,
+      source: w.source,
+      active: w.active,
+      createdAt: w.createdAt,
+      score: w.profile?.score ?? null,
+      style: w.profile?.style ?? null,
+      leaderScore: w.profile?.leaderScore ?? null,
+      cluster: w.cluster,
+      funding: w.funding,
+      researchReview: w.researchReview,
+      researchReviewReason: w.researchReviewReason,
+      readyToApprove: w.researchReview === 'PROVISIONAL' && qual.reasons.length === 1 && qual.reasons[0] === 'REVIEW_REQUIRED',
+      qualification: qual,
+    });
+
+    if (isRecommended) {
+      let offset = 0;
+      if (q.data.cursor) {
+        if (!/^off:\d+$/.test(q.data.cursor)) return reply.code(400).send(bad());
+        offset = Number(q.data.cursor.slice(4));
+      }
+      const rows = await db.trackedWallet.findMany({ where, orderBy: { id: 'asc' }, take: 500, include });
+      const qualifications = await walletQualifications(db, rows, new Date());
+      const ranked = rows.map((w) => {
+        const qual = qualifications.get(w.id)!;
+        const item = formatItem(w, qual);
+        const sample = qual.sample as { pnlSol?: number | null } | null | undefined;
+        const tier = item.readyToApprove ? 3 : qual.eligible ? 2 : item.score != null ? 1 : 0;
+        return { id: w.id, item, tier, reasonCount: qual.reasons.length, pnl: sample?.pnlSol ?? -1e9 };
+      });
+      const filtered = q.data.readyOnly === 'true'
+        ? ranked.filter((r) => r.item.readyToApprove || r.item.qualification.eligible)
+        : ranked;
+      filtered.sort((a, b) =>
+        b.tier - a.tier ||
+        a.reasonCount - b.reasonCount ||
+        (b.item.score ?? -1) - (a.item.score ?? -1) ||
+        b.pnl - a.pnl ||
+        a.id.localeCompare(b.id),
+      );
+      const slice = filtered.slice(offset, offset + q.data.limit);
+      return {
+        items: slice.map((r) => r.item),
+        nextCursor: offset + q.data.limit < filtered.length ? `off:${offset + q.data.limit}` : null,
+      };
+    }
+
     const rows = await db.trackedWallet.findMany({
-      where: { ...(q.data.source ? { source: q.data.source } : {}), ...(q.data.active ? { active: q.data.active === 'true' } : {}) },
+      where,
       orderBy: { id: 'asc' }, take: q.data.limit + 1, ...(q.data.cursor ? { cursor: { id: q.data.cursor }, skip: 1 } : {}),
-      include: { profile: { select: { score: true } }, cluster: { select: { id: true, label: true, confidence: true } }, funding: { select: { status: true, funder: true, fundedAt: true } } },
+      include,
     });
     const page = rows.slice(0, q.data.limit);
-    const qualifications = await walletQualifications(db,page,new Date());
+    const qualifications = await walletQualifications(db, page, new Date());
     return {
-      items: page.map((w) => ({ address: w.address, label: w.label, source: w.source, active: w.active, createdAt: w.createdAt, score: w.profile?.score ?? null, cluster: w.cluster, funding: w.funding, researchReview: w.researchReview, researchReviewReason: w.researchReviewReason, qualification: qualifications.get(w.id) })),
+      items: page.map((w) => formatItem(w, qualifications.get(w.id)!)),
       nextCursor: rows.length > q.data.limit ? page[page.length - 1]!.id : null,
     };
   });

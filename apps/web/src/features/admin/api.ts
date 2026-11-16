@@ -9,7 +9,12 @@ export function createAdminApi(getToken: () => Promise<string | null>, base = pr
   const request = createTransport(base, getToken, fetcher, getIdentityToken);
   const user = (id: string) => `/v1/admin/users/${encodeURIComponent(id)}/entitlements`;
   return {
-    researchWallets:(cursor?:string)=>request(`/v1/admin/wallets?limit=25${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`,ResearchWalletsSchema),
+    researchWallets:(cursor?:string,opts?:{sort?:'id'|'recommended';readyOnly?:boolean})=>{
+      const p=new URLSearchParams({limit:'25',sort:opts?.sort??'recommended'});
+      if(cursor)p.set('cursor',cursor);
+      if(opts?.readyOnly)p.set('readyOnly','true');
+      return request(`/v1/admin/wallets?${p.toString()}`,ResearchWalletsSchema);
+    },
     researchHealth:()=>request('/v1/admin/wallet-research/health',ResearchHealthSchema),
     walletCandidates:(cursor?:string)=>request(`/v1/admin/wallet-candidates?limit=25${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`,CandidatesSchema),
     reviewResearch:(address:string,status:'APPROVED'|'REJECTED'|'PROVISIONAL',reason:string)=>request(`/v1/admin/wallets/${encodeURIComponent(address)}/research-review`,OkSchema,'POST',{status,reason}),
