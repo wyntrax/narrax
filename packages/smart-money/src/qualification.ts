@@ -3,7 +3,7 @@ import type { TradeRow, WalletStats } from './stats';
 /** Research admission rules, not a profitability guarantee or a change to walletScore.
  * Starting values require forward validation. Costs/transfers outside parsed swaps remain unknown. */
 export const RESEARCH_QUALIFICATION = {
-  version: 2, minClosedLegs: 20, minClosedTokens: 5, minObservedDays: 7,
+  version: 1, minClosedLegs: 20, minClosedTokens: 5, minObservedDays: 7,
   minScore: 70, maxProfileAgeMs: 45 * 60_000, maxHistoryAgeMs: 24 * 3_600_000,
   maxTradeAgeMs: 14 * 86_400_000,
   deepCappedMinClosedLegs: 100, deepCappedMinObservedDays: 21,
