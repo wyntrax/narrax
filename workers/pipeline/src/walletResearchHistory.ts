@@ -14,6 +14,7 @@ const Progress = z.object({ checkedAt: date, capped: z.boolean(), nextBefore: z.
 export const HISTORY_ATTEMPT_PREFIX='wallet.historyAttempt.';
 export const HISTORY_RETRY_MS=15*60_000;
 export const HISTORY_REFRESH_MS=12*3_600_000;
+export const HISTORY_RESUME_MAX_AGE_MS=7*86_400_000;
 const object=(v:unknown):Record<string,unknown>=>v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:{};
 const count=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0?v:0;
 const earliest=(...xs:(string|null|undefined)[])=>xs.filter((s):s is string=>typeof s==='string').sort()[0]??null;
@@ -43,7 +44,7 @@ export async function refreshResearchHistory(db: PrismaClient, apiKey: string, n
     const key=`wallet.history.${wallet.id}`,attemptKey=`${HISTORY_ATTEMPT_PREFIX}${wallet.id}`;
     const [previous,attemptRow]=await Promise.all([db.systemSetting.findUnique({where:{key}}),db.systemSetting.findUnique({where:{key:attemptKey}})]);
     const parsed=Progress.safeParse(previous?.value),previousScan=parsed.success?parsed.data:null,oldAttempt=object(attemptRow?.value);
-    const resume=previousScan?.capped&&previousScan.nextBefore&&Date.parse(previousScan.scanTo)<=+now?previousScan:null;
+    const resume=previousScan?.capped&&previousScan.nextBefore&&Date.parse(previousScan.scanTo)<=+now&&+now-Date.parse(previousScan.scanTo)<=HISTORY_RESUME_MAX_AGE_MS?previousScan:null;
     const complete=previousScan&&!previousScan.capped&&Date.parse(previousScan.coveredTo)<=+now?previousScan:null;
     const requestedTo=resume?.scanTo??now.toISOString(),requestedFrom=resume?.scanFrom??complete?.coveredTo??new Date(+now-30*86400000).toISOString();
     const attempts=count(oldAttempt.attempts)+1;

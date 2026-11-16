@@ -59,3 +59,13 @@ it('keeps the continuation checkpoint when storing a collected trade fails',asyn
  expect(collect.mock.calls[1]?.[1]).toMatchObject({before:'older'});
  expect(values.get('wallet.history.a')).toMatchObject({nextBefore:'next'});
 });
+it('restarts a fresh 30-day scan when an old capped checkpoint anchor is older than 7 days',async()=>{
+ const {db,values}=fixture([{id:'a',address:'A'}]);
+ await refreshResearchHistory(db,'secret',now,vi.fn().mockResolvedValue(partial));
+ const weekLater=new Date(+now+8*86400000);
+ const collect=vi.fn().mockResolvedValue({...partial,coveredFrom:new Date(+weekLater-30*86400000).toISOString(),coveredTo:weekLater.toISOString(),nextBefore:null,capped:false});
+ await refreshResearchHistory(db,'secret',weekLater,collect);
+ expect(collect).toHaveBeenCalledWith('A',{apiKey:'secret',now:weekLater,maxPages:3});
+ expect(collect.mock.calls[0]?.[1]).not.toHaveProperty('before');
+ expect(values.get('wallet.history.a')).toMatchObject({capped:false,coveredTo:weekLater.toISOString()});
+});
