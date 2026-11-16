@@ -34,3 +34,33 @@ export async function pruneExpiredMetricProvenance(
   `;
   return { deleted: Number(deleted) || 0 };
 }
+
+/**
+ * Deletes stale `research.tokenMetadata.<tokenId>` cache rows belonging to unpriced tokens
+ * with no narratives or positions (mostly historical `WalletTrade` dust), preserving `.cursor`.
+ */
+export async function pruneExpiredTokenMetadata(
+  db: PrismaClient,
+  now: Date = new Date(),
+  options: PruneProvenanceOptions = {},
+): Promise<{ deleted: number }> {
+  if (typeof db.$executeRaw !== 'function') return { deleted: 0 };
+  const retentionMs = options.retentionMs ?? METRIC_PROVENANCE_RETENTION_MS;
+  const batchSize = Math.max(1, Math.min(10_000, Math.trunc(options.batchSize ?? METRIC_PROVENANCE_PRUNE_BATCH)));
+  const cutoff = new Date(now.getTime() - retentionMs);
+  const deleted = await db.$executeRaw`
+    DELETE FROM "SystemSetting"
+    WHERE "key" IN (
+      SELECT s."key"
+      FROM "SystemSetting" s
+      WHERE s."key" LIKE 'research.tokenMetadata.%'
+        AND s."key" <> 'research.tokenMetadata.cursor'
+        AND s."updatedAt" < ${cutoff}
+        AND NOT EXISTS (SELECT 1 FROM "TokenMetric" tm WHERE tm."tokenId" = split_part(s."key", '.', 3))
+        AND NOT EXISTS (SELECT 1 FROM "NarrativeTokenRelation" nr WHERE nr."tokenId" = split_part(s."key", '.', 3))
+        AND NOT EXISTS (SELECT 1 FROM "Position" p WHERE p."tokenId" = split_part(s."key", '.', 3))
+      LIMIT ${batchSize}
+    )
+  `;
+  return { deleted: Number(deleted) || 0 };
+}

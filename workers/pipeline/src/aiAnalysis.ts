@@ -164,6 +164,22 @@ export async function runAiAnalysis(db: PrismaClient, deps: { llm: LlmProvider |
     if (out.analyzed >= limit) break;
     if (seen.has(row.tokenId)) continue; // several rows for one token: take the best
     seen.add(row.tokenId);
+    if (!opts.opportunityIds) {
+      const latestAt = row.token.metrics[0]?.at;
+      if (latestAt) {
+        const ageMs = now.getTime() - latestAt.getTime();
+        // Defer scheduled analysis when a quote is merely 15m-6h stale so outcome tracking won't write NO_ENTRY_PRICE; mark it for immediate priority refresh.
+        if (ageMs > 15 * 60_000 && ageMs < 6 * 3_600_000) {
+          if (typeof db.token?.updateMany === 'function') {
+            await db.token.updateMany({
+              where: { id: row.tokenId },
+              data: { marketPriorityUntil: new Date(now.getTime() + 30 * 60_000) },
+            });
+          }
+          continue;
+        }
+      }
+    }
     if (cooldown > 0 && (await db.agentAnalysis.count({ where: { opportunity: { tokenId: row.tokenId }, createdAt: { gte: new Date(now.getTime() - cooldown) } } })) > 0) continue;
     if (used >= cfg.tokenBudget) { out.skipped = 'budget'; break; }
 

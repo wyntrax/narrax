@@ -75,7 +75,7 @@ export async function runScreener(db: PrismaClient, q: ScreenerQuery, now: Date)
   // only incremented after a completed dead-pool read; a fresh metric restores them.
   const cutoff = tokenVisibilityCutoff(now);
   add(Prisma.sql`(t."marketQuoteFailures" < ${TOKEN_VISIBILITY.deadQuoteFailures} OR (m."at" >= ${cutoff} AND m."at" <= ${now}) OR t."firstSeenAt" >= ${cutoff})`);
-  add(Prisma.sql`(m."id" IS NOT NULL OR t."firstSeenAt" >= ${cutoff} OR EXISTS (SELECT 1 FROM "NarrativeTokenRelation" nr JOIN "Narrative" nn ON nn."id" = nr."narrativeId" WHERE nr."tokenId" = t."id" AND nn."stage"::text <> 'DEAD'))`);
+  add(Prisma.sql`(m."id" IS NOT NULL OR t."firstSeenAt" >= ${cutoff} AND NOT EXISTS (SELECT 1 FROM "WalletTrade" wt WHERE wt."tokenId" = t."id") OR EXISTS (SELECT 1 FROM "NarrativeTokenRelation" nr JOIN "Narrative" nn ON nn."id" = nr."narrativeId" WHERE nr."tokenId" = t."id" AND nn."stage"::text <> 'DEAD'))`);
   if(q.verifiedOnly==='true') add(Prisma.sql`evidence."key" IS NOT NULL AND m."at" >= ${new Date(+now-15*60000)} AND m."at" <= ${now}`);
   if(q.marketCapOnly==='true') add(Prisma.sql`evidence."value"->>'marketCapIsFdv' = 'false'`);
   if (q.q) {

@@ -165,4 +165,31 @@ describe('runAiAnalysis candidate filtering & freshness sorting', () => {
     });
     expect(analyzedIds).toEqual(['opp-fresh']);
   });
+
+  it('defers scheduled analysis and bumps marketPriorityUntil when a metric is 15m-6h stale', async () => {
+    const updateMany = vi.fn(async (_args?: unknown) => ({ count: 1 }));
+    const db = {
+      systemSetting: { findUnique: async () => null, findMany: async () => [] },
+      agentAnalysis: {
+        aggregate: async () => ({ _sum: { inputTokens: 0, outputTokens: 0 } }),
+        count: async () => 0,
+      },
+      positionEvaluation: { aggregate: async () => ({ _sum: { aiTokens: 0 } }) },
+      opportunity: {
+        findMany: vi.fn(async () => [
+          { id: 'opp-20m', tokenId: 'tok-20m', token: { metrics: [{ at: new Date(now.getTime() - 20 * 60_000) }] } },
+        ]),
+      },
+      token: { updateMany },
+    } as unknown as PrismaClient;
+
+    const complete = vi.fn();
+    const res = await runAiAnalysis(db, { llm: { complete } }, now, { limit: 1 });
+    expect(res.analyzed).toBe(0);
+    expect(complete).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'tok-20m' },
+      data: { marketPriorityUntil: new Date(now.getTime() + 30 * 60_000) },
+    });
+  });
 });

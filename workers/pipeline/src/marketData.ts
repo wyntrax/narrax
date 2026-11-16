@@ -5,7 +5,7 @@ import type { DeveloperHoldingSource } from './developerHoldings';
 import {refreshTokenMetadata,type MetadataSource} from './tokenMetadata';
 import {discoveryPriceCandidates} from './walletDiscovery';
 import { storeMarketSnapshot } from './marketSnapshot';
-import { pruneExpiredMetricProvenance } from './metricRetention';
+import { pruneExpiredMetricProvenance, pruneExpiredTokenMetadata } from './metricRetention';
 import { SOL_HISTORY_PREFIX } from './walletResearchEvidence';
 import { COVERAGE_LIMITS, readSocialPriority, saveResearchDiagnostics, SOCIAL_INFO_CURSOR_KEY } from './researchDiagnostics';
 import {refreshHolderFallback,type HolderFailureReasons} from './holderFallback';
@@ -282,6 +282,20 @@ export async function refreshMarketData(
       }
     }
     if (focus.length < focusBudget) {
+      addFocus(await db.token.findMany({
+        where: {
+          blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: [...takenBeforeFocus, ...focusIds] }, metrics: { none: { at: { gte: focusFreshCutoff } } },
+          AND: [quoteEligible, {
+            OR: [
+              { opportunities: { some: { score: { gte: 50 }, createdAt: { gte: new Date(now.getTime() - 3 * 3_600_000) } } } },
+              { opportunities: { some: { analyses: { some: { decisions: { some: { outcome: { isFinal: false } } } } } } } },
+            ],
+          }],
+        },
+        orderBy: { id: 'desc' }, take: focusBudget - focus.length, select: tokenSelect,
+      }));
+    }
+    if (focus.length < focusBudget) {
       const topNarratives = await db.narrative.findMany({
         where: { stage: { in: ['EMERGING', 'ACCELERATING'] }, updatedAt: { gte: new Date(now.getTime() - L.focusNarrativeWindowMs) } },
         orderBy: [{ score: 'desc' }, { velocity: 'desc' }], take: L.maxFocusNarratives, select: { id: true },
@@ -516,6 +530,7 @@ export async function refreshMarketData(
   const lastSocial = social.filter(t => attempted.has(t.mint)).at(-1);
   if (lastSocial) await writeCursor(db, SOCIAL_PRICE_CURSOR_KEY, lastSocial.id);
   await pruneExpiredMetricProvenance(db, now);
+  await pruneExpiredTokenMetadata(db, now);
   await saveResearchDiagnostics(db, 'market', now, out);
   return out;
 }

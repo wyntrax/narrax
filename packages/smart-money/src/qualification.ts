@@ -47,7 +47,10 @@ export function qualifyWallet(review: string, active: boolean, sampleValue: unkn
   if (!finite(s.closedTrades) || s.closedTrades < L.minClosedLegs) reasons.push('TOO_FEW_CLOSES');
   if (!finite(s.closedTokens) || s.closedTokens < L.minClosedTokens) reasons.push('TOO_FEW_TOKENS');
   if (!finite(s.observedDays) || s.observedDays < L.minObservedDays) reasons.push('SHORT_SAMPLE');
-  if (s.unmatchedSells !== 0 || s.excessSellUnits !== 0) reasons.push('INCOMPLETE_COST_BASIS');
+  const unmatchedLimit = finite(s.closedTrades) && s.closedTrades >= 100 ? Math.floor(s.closedTrades * 0.015) : 0;
+  const unmatched = finite(s.unmatchedSells) ? s.unmatchedSells : Infinity;
+  const excess = finite(s.excessSellUnits) ? s.excessSellUnits : Infinity;
+  if (unmatched < 0 || excess < 0 || Math.max(unmatched, excess) > unmatchedLimit) reasons.push('INCOMPLETE_COST_BASIS');
   if (!finite(s.score) || s.score < L.minScore) reasons.push('SCORE_BELOW_MINIMUM');
   if (!finite(s.pnlSol) || s.pnlSol <= 0 || !finite(s.medianRoi) || s.medianRoi <= 0) reasons.push('POSITIVE_RESULTS_REQUIRED');
   if (!fresh(s.lastTradeAt, now, L.maxTradeAgeMs)) reasons.push('ACTIVITY_STALE_OR_MISSING');

@@ -31,13 +31,13 @@ export function visibleTokenWhere(now: Date): Prisma.TokenWhereInput {
       // A newly seen token gets the full grace window before it can be hidden.
       { firstSeenAt: { gte: cutoff } },
     ],
-    // Exclude stale unpriced WalletTrade-only dust tokens that have no market metrics and no active narrative link.
+    // Exclude unpriced WalletTrade-only dust tokens that have no market metrics and no active narrative link.
     AND: [
       {
         OR: [
           { metrics: { some: {} } },
           { narratives: { some: { narrative: { stage: { not: 'DEAD' } } } } },
-          { firstSeenAt: { gte: cutoff } },
+          { AND: [{ firstSeenAt: { gte: cutoff } }, { walletTrades: { none: {} } }] },
         ],
       },
     ],
