@@ -145,6 +145,13 @@ describe.skipIf(!up)('tracked wallet admin routes (needs Postgres)', () => {
     expect(off.body.items.every((w: { active: boolean; source: string }) => !w.active && w.source === 'IMPORT')).toBe(true);
     expect((await call('GET', '/v1/admin/wallets?limit=0', admin)).status).toBe(400);
     expect((await call('GET', '/v1/admin/wallets?source=NOPE', admin)).status).toBe(400);
+    expect((await call('GET', '/v1/admin/wallets?sort=bad', admin)).status).toBe(400);
+
+    const rec = await call('GET', '/v1/admin/wallets?sort=recommended&limit=2', admin);
+    expect(rec.status).toBe(200);
+    expect(rec.body.items).toHaveLength(2);
+    expect(rec.body.items[0]).toHaveProperty('readyToApprove');
+    expect(rec.body.items[0]).toHaveProperty('style');
   });
 
   describe('candidates', () => {
