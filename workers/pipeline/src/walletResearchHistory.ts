@@ -54,7 +54,7 @@ export async function refreshResearchHistory(db: PrismaClient, apiKey: string, n
     await db.systemSetting.upsert({where:{key:attemptKey},create:{key:attemptKey,value:attempt,updatedAt:now},update:{value:attempt,updatedAt:now}});
     let phase:'COLLECT'|'STORE'='COLLECT';
     try{
-      const history=await collect(wallet.address,{apiKey,now:new Date(requestedTo),maxPages:3,
+      const history=await collect(wallet.address,{apiKey,now:new Date(requestedTo),maxPages:resume?6:3,
         ...(resume?{before:resume.nextBefore!,since:new Date(requestedFrom)}:complete?{since:new Date(requestedFrom)}:{})});
       phase='STORE';attempt.pagesRead=history.pagesRead??0;out.pagesRead+=attempt.pagesRead;
       attempt.searchHops=history.searchHops??0;out.searchHops+=attempt.searchHops;

@@ -37,7 +37,7 @@ it('resumes after a failed attempt without losing the successful checkpoint, the
  expect(values.get(HISTORY_ATTEMPT_PREFIX+'a')).toMatchObject({status:'FAILED',attempts:2,lastSuccessAt:now.toISOString(),consecutiveFailures:1,errorCode:'COLLECTION_FAILED'});
  expect(JSON.stringify([...values.values()])).not.toContain('api-key');
  await refreshResearchHistory(db,'secret',new Date(+now+1800000),collect);
- expect(collect.mock.calls[2]?.[1]).toMatchObject({before:'older',now,since:new Date(from)});
+ expect(collect.mock.calls[2]?.[1]).toMatchObject({before:'older',now,since:new Date(from),maxPages:6});
  expect(values.get('wallet.history.a')).toMatchObject({capped:false,scanned:302,skipped:1,coveredFrom:from,verifiedCoveredFrom:from,verifiedCoveredTo:now.toISOString(),pagesRead:4});
  expect(values.get(HISTORY_ATTEMPT_PREFIX+'a')).toMatchObject({status:'COMPLETE',attempts:3,consecutiveFailures:0,errorCode:null});
  await refreshResearchHistory(db,'secret',new Date(+now+13*3600000),collect);

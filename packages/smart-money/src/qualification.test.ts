@@ -29,4 +29,10 @@ describe('research qualification independent of historical score',()=>{
   expect(evidence.closedTokens).toBe(1);
   expect(qualifyWallet('APPROVED',true,evidence,history,now).reasons).toContain('INCOMPLETE_COST_BASIS');
  });
+ it('tolerates tiny (<=1.5%) pre-window unmatched sells on high-sample (>=100 trades) wallets while blocking large gaps',()=>{
+  const highSample={...sample,closedTrades:1000,closedTokens:200,unmatchedSells:10,excessSellUnits:10};
+  expect(qualifyWallet('APPROVED',true,highSample,history,now).eligible).toBe(true);
+  expect(qualifyWallet('APPROVED',true,{...highSample,unmatchedSells:20},history,now).reasons).toContain('INCOMPLETE_COST_BASIS');
+  expect(qualifyWallet('APPROVED',true,{...sample,closedTrades:99,unmatchedSells:1,excessSellUnits:0},history,now).reasons).toContain('INCOMPLETE_COST_BASIS');
+ });
 });
