@@ -10,6 +10,7 @@ import type { TradeabilityEvidence, TradeabilitySource } from './tradeabilityEvi
 import { storeMarketSnapshot } from './marketSnapshot';
 import { COVERAGE_LIMITS, saveSocialPriority, saveResearchDiagnostics } from './researchDiagnostics';
 import {holderGrowthBaseline} from './holderHistory';
+import { resolveUniqueCashtags } from './cashtagLookup';
 
 export interface SocialScanSummary {
   rowsRead: number;
@@ -81,24 +82,34 @@ export async function scanSocialTokens(db: PrismaClient, deps: { quotes: MarketQ
   if (!groups.length) return finish();
 
   // 1. Resolve each qualified reference to a token id. A mint wins over a cashtag for the same token.
+  const allMints = new Set<string>();
+  const cashtagRefs: string[] = [];
+  let cashtagBudget = 0;
+  for (const g of groups) {
+    if (g.kind === 'MINT') { if (g.ref !== WSOL_MINT) allMints.add(g.ref); }
+    else if (cashtagBudget++ < R.maxCashtagLookupsPerRun) cashtagRefs.push(g.ref);
+  }
+  const mintTokens = allMints.size
+    ? await db.token.findMany({ where: { mint: { in: [...allMints] } }, select: { id: true, mint: true, blacklisted: true } })
+    : [];
+  const byMint = new Map(mintTokens.map((t) => [t.mint, t]));
+  const cashtagMatches = await resolveUniqueCashtags(db, cashtagRefs, new Date(now.getTime() - 24 * HOUR));
+
   const resolved = new Map<string, { group: BuzzGroup; via: 'MINT' | 'CASHTAG' }>();
   const unknownMints: BuzzGroup[] = [];
   let cashtagLookups = 0;
   for (const g of groups) {
     if (g.kind === 'MINT') {
       if (g.ref === WSOL_MINT) continue;
-      const t = await db.token.findUnique({ where: { mint: g.ref }, select: { id: true, blacklisted: true } });
+      const t = byMint.get(g.ref);
       if (t?.blacklisted) continue;
       if (t) resolved.set(t.id, { group: g, via: 'MINT' }); else unknownMints.push(g);
     } else {
       if (cashtagLookups++ >= R.maxCashtagLookupsPerRun) continue;
-      const matches = await db.token.findMany({
-        where: { symbol: { equals: g.ref, mode: 'insensitive' }, blacklisted: false, metrics: { some: { at: { gte: new Date(now.getTime() - 24 * HOUR) } } } },
-        select: { id: true }, take: 2,
-      });
-      if (matches.length !== 1) { out.cashtagsAmbiguous++; continue; }
+      const match = cashtagMatches.get(g.ref.toUpperCase()) ?? null;
+      if (!match) { out.cashtagsAmbiguous++; continue; }
       out.cashtagsResolved++;
-      if (!resolved.has(matches[0]!.id)) resolved.set(matches[0]!.id, { group: g, via: 'CASHTAG' });
+      if (!resolved.has(match.id)) resolved.set(match.id, { group: g, via: 'CASHTAG' });
     }
   }
 

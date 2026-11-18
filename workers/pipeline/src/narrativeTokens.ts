@@ -2,6 +2,7 @@ import type { PrismaClient } from '@narra/database';
 import { SOCIAL_RULES, groupBuzzByNarrative } from '@narra/narrative';
 import { WSOL_MINT } from '@narra/market-data';
 import { matchScore, resolveCandidates, type Candidate } from '@narra/token-intel';
+import { resolveUniqueCashtags } from './cashtagLookup';
 
 export interface MentionTokenSummary {
   narrativesChecked: number;
@@ -55,6 +56,34 @@ export async function attributeNarrativeMentions(db: PrismaClient, now: Date = n
   const grouped = groupBuzzByNarrative(posts, mentions, ATTRIBUTION_RULES);
   for (const groups of grouped.values()) out.referencesQualified += groups.length;
 
+  const allMints = new Set<string>();
+  const allCashtags = new Set<string>();
+  for (const [narrativeId, groups] of grouped) {
+    if (!byId.has(narrativeId)) continue;
+    for (const g of groups) {
+      if (g.kind === 'MINT') { if (g.ref !== WSOL_MINT) allMints.add(g.ref); }
+      else allCashtags.add(g.ref);
+    }
+  }
+  const mintTokens = allMints.size
+    ? await db.token.findMany({
+        where: { mint: { in: [...allMints] } },
+        select: { id: true, mint: true, symbol: true, name: true, createdOnChainAt: true, deployer: true, blacklisted: true, holders: { orderBy: { at: 'desc' }, take: 1, select: { top10Pct: true, devHoldingPct: true } } },
+      })
+    : [];
+  const byMint = new Map(mintTokens.map((t) => [t.mint, t]));
+  const cashtagMatches = await resolveUniqueCashtags(db, [...allCashtags], cashtagSince);
+  const cashtagIds = [...new Set([...cashtagMatches.values()].flatMap((t) => (t ? [t.id] : [])))];
+  const cashtagHolders = cashtagIds.length && typeof db.tokenHolderMetric?.findMany === 'function'
+    ? await db.tokenHolderMetric.findMany({
+        where: { tokenId: { in: cashtagIds } },
+        distinct: ['tokenId'],
+        orderBy: [{ tokenId: 'asc' }, { at: 'desc' }],
+        select: { tokenId: true, top10Pct: true, devHoldingPct: true },
+      })
+    : [];
+  const holderByTokenId = new Map(cashtagHolders.map((h) => [h.tokenId, h]));
+
   for (const [narrativeId, groups] of grouped) {
     const n = byId.get(narrativeId);
     if (!n) continue;
@@ -72,17 +101,14 @@ export async function attributeNarrativeMentions(db: PrismaClient, now: Date = n
     for (const g of groups) {
       if (g.kind === 'MINT') {
         if (g.ref === WSOL_MINT) continue;
-        const t = await db.token.findUnique({ where: { mint: g.ref }, select: { id: true, symbol: true, name: true, createdOnChainAt: true, deployer: true, blacklisted: true, holders: { orderBy: { at: 'desc' }, take: 1, select: { top10Pct: true, devHoldingPct: true } } } });
+        const t = byMint.get(g.ref);
         if (!t || t.blacklisted) { out.unresolvedMints++; continue; }
         add(t.id, { symbol: t.symbol, name: t.name, createdAt: t.createdOnChainAt, deployer: t.deployer, top10Pct: t.holders[0]?.top10Pct ?? null, devHoldingPct: t.holders[0]?.devHoldingPct ?? null }, MINT_MATCH);
       } else {
-        const matches = await db.token.findMany({
-          where: { symbol: { equals: g.ref, mode: 'insensitive' }, blacklisted: false, metrics: { some: { at: { gte: cashtagSince } } } },
-          select: { id: true, symbol: true, name: true, createdOnChainAt: true, deployer: true, holders: { orderBy: { at: 'desc' }, take: 1, select: { top10Pct: true, devHoldingPct: true } } }, take: 2,
-        });
-        if (matches.length !== 1) { out.ambiguousCashtags++; continue; }
-        const t = matches[0]!;
-        add(t.id, { symbol: t.symbol, name: t.name, createdAt: t.createdOnChainAt, deployer: t.deployer, top10Pct: t.holders[0]?.top10Pct ?? null, devHoldingPct: t.holders[0]?.devHoldingPct ?? null }, CASHTAG_MATCH);
+        const t = cashtagMatches.get(g.ref.toUpperCase()) ?? null;
+        if (!t) { out.ambiguousCashtags++; continue; }
+        const h = holderByTokenId.get(t.id);
+        add(t.id, { symbol: t.symbol, name: t.name, createdAt: t.createdOnChainAt, deployer: t.deployer, top10Pct: h?.top10Pct ?? null, devHoldingPct: h?.devHoldingPct ?? null }, CASHTAG_MATCH);
       }
     }
     if (!tokens.size) continue;

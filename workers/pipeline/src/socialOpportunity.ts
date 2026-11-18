@@ -1,5 +1,6 @@
 import type {PrismaClient} from '@narra/database';
 import {SOCIAL_RULES,computeNarrativeMetrics,groupBuzzByNarrative,type MentionPoint} from '@narra/narrative';
+import {resolveUniqueCashtags} from './cashtagLookup';
 
 /** Fail closed on unknown authors, ambiguous tickers and too-small manipulation samples.
  * Related-token attribution intentionally has a lower bar and is left untouched. */
@@ -10,14 +11,17 @@ export async function socialOpportunityEvidence(db:PrismaClient,narrativeId:stri
   db.tokenMention.findMany({where:{at:{gte:since,lte:now},creatorId:{not:null},OR:tokens.flatMap(t=>[{refKind:'MINT',ref:t.mint},{refKind:'CASHTAG',ref:t.symbol.toUpperCase()}])},take:SOCIAL_RULES.maxRows}),
  ]);
  const groups=groupBuzzByNarrative(posts,mentions,{...SOCIAL_RULES,minCreators:0,minMentions:0}).get(narrativeId)??[];
+ const neededSymbols=new Set(tokens.map(t=>t.symbol.toUpperCase()));
+ const cashtagRefs=groups.filter(g=>g.kind==='CASHTAG'&&neededSymbols.has(g.ref)).map(g=>g.ref);
+ const cashtagMatches=await resolveUniqueCashtags(db,cashtagRefs,new Date(+now-24*3600000));
  const out=new Map<string,{accounts:number;posts:number;manipulationRisk:number}>();
  for(const t of tokens){
   const points=new Map<string,MentionPoint>();
   for(const g of groups){
    if(g.kind==='MINT'?g.ref!==t.mint:g.ref!==t.symbol.toUpperCase())continue;
    if(g.kind==='CASHTAG'){
-    const matches=await db.token.findMany({where:{symbol:{equals:g.ref,mode:'insensitive'},blacklisted:false,metrics:{some:{at:{gte:new Date(+now-24*3600000)}}}},select:{id:true},take:2});
-    if(matches.length!==1||matches[0]!.id!==t.id)continue;
+    const match=cashtagMatches.get(g.ref.toUpperCase())??null;
+    if(!match||match.id!==t.id)continue;
    }
    for(const p of g.points)points.set(`${p.platform}:${p.externalId}`,{...p,creator:`${p.platform}:${p.creator}`});
   }
