@@ -15,6 +15,13 @@ export async function walletQualifications(db: Db, wallets: { id: string; active
   return new Map(wallets.map(w => [w.id, { ...qualifyWallet(w.researchReview, w.active, byKey.get(`wallet.research.${w.id}`), byKey.get(`wallet.history.${w.id}`), now), sample: byKey.get(`wallet.research.${w.id}`) ?? null }]));
 }
 
+/** Weak timing-only links can transitively chain unrelated wallets into one mega-cluster; only stronger links collapse entities. */
+export function entityKeyForWallet(wallet: { id: string; clusterId: string | null; cluster?: { label: string | null; confidence: string } | null }): string {
+  if (!wallet.clusterId) return `wallet:${wallet.id}`;
+  if (wallet.cluster?.label === 'timing' && wallet.cluster?.confidence === 'LOW') return `wallet:${wallet.id}`;
+  return `cluster:${wallet.clusterId}`;
+}
+
 /** Research rows only; no Alert, AI job or order. Call after intelligence refresh. */
 export async function publishWalletResearch(db: PrismaClient, clock: () => Date = () => new Date()) {
   const L = WALLET_FLOW_LIMITS, start = clock();
@@ -27,7 +34,7 @@ export async function publishWalletResearch(db: PrismaClient, clock: () => Date 
       const token = await tx.token.findUnique({ where: { id: tokenId }, select: { blacklisted: true } });
       if (!token || token.blacklisted) return false;
       const last = await tx.walletResearchSignal.findFirst({ where: { tokenId }, orderBy: { createdAt: 'desc' } });
-      const trades = await tx.walletTrade.findMany({ where: { tokenId, wallet: { active: true, researchReview: 'APPROVED' }, at: { gte: new Date(Math.max(+now - L.windowMs, last ? +last.createdAt + 1 : 0)), lte: now } }, orderBy: [{ at: 'asc' }, { id: 'asc' }], take: L.maxTrades + 1, include: { wallet: true } });
+      const trades = await tx.walletTrade.findMany({ where: { tokenId, wallet: { active: true, researchReview: 'APPROVED' }, at: { gte: new Date(Math.max(+now - L.windowMs, last ? +last.createdAt + 1 : 0)), lte: now } }, orderBy: [{ at: 'asc' }, { id: 'asc' }], take: L.maxTrades + 1, include: { wallet: { include: { cluster: { select: { label: true, confidence: true } } } } } });
       if (!trades.length || trades.length > L.maxTrades) return false;
       const wallets = [...new Map(trades.map(t => [t.wallet.id,t.wallet])).values()];
       const qualifications = await walletQualifications(tx, wallets, now);
@@ -35,7 +42,7 @@ export async function publishWalletResearch(db: PrismaClient, clock: () => Date 
       if (!qualified.length || +now - +qualified.at(-1)!.at > L.newestTradeMs) return false;
       const entities = new Map<string, number>();
       for (const t of qualified) {
-        const key = t.wallet.clusterId ? `cluster:${t.wallet.clusterId}` : `wallet:${t.walletId}`;
+        const key = entityKeyForWallet(t.wallet);
         entities.set(key, (entities.get(key) ?? 0) + (t.side === 'BUY' ? 1 : -1) * Number(t.amountSol));
       }
       const net = [...entities.values()].reduce((sum,n) => sum+n,0);
