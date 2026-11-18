@@ -53,13 +53,13 @@ describe('helius admin form',()=>{
   expect(api.testHelius).toHaveBeenCalledWith({rpcFallbackUrls:['https://fallback.example/?api-key=fallback']});
   expect(api.saveHelius).not.toHaveBeenCalled();
  });
- it('keeps secret inputs blank after saving',async()=>{
+ it('keeps secret inputs blank after saving and sends multi-line api keys',async()=>{
   const {api}=setup();
-  fireEvent.change(screen.getByLabelText(en.helius.apiKey),{target:{value:'ready-api-key'}});
+  fireEvent.change(screen.getByLabelText(en.helius.apiKey),{target:{value:'ready-api-key\nsecond-api-key\n'}});
   fireEvent.change(screen.getByLabelText(en.helius.reason),{target:{value:'Rotate API key'}});
   fireEvent.click(screen.getByRole('button',{name:en.helius.save}));
-  await waitFor(()=>expect(api.saveHelius).toHaveBeenCalledOnce());
-  await waitFor(()=>expect((screen.getByLabelText(en.helius.apiKey) as HTMLInputElement).value).toBe(''));
+  await waitFor(()=>expect(api.saveHelius).toHaveBeenCalledWith({'integrations.helius.api_keys':['ready-api-key','second-api-key']},'Rotate API key'));
+  await waitFor(()=>expect((screen.getByLabelText(en.helius.apiKey) as HTMLTextAreaElement).value).toBe(''));
  });
  it('has matching EN and ID Helius message keys',()=>{
   expect(Object.keys(en.helius).sort()).toEqual(Object.keys(id.helius).sort());

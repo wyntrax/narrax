@@ -3,6 +3,7 @@ import { TOKEN_DISCOVERY_KEY_PREFIX, type InvestigationDiscoveryStatus } from '@
 import { SwapEventSchema } from '@narra/queue';
 import { parseHeliusSwaps } from '@narra/solana';
 import { collectWalletHistory } from './walletHistory';
+import { makeHeliusApiKeyPool, type HeliusApiKeyPool } from './heliusApiPool';
 import { makeWalletEventStore } from './prismaStores';
 
 /** Bounded provider work per token scan. These are collection limits, not evidence thresholds. */
@@ -73,15 +74,16 @@ export function selectDiscoveryCandidates(
     .slice(0, options.maxWallets ?? TOKEN_DISCOVERY_LIMITS.maxWalletsPerScan);
 }
 
-async function tokenPage(mint: string, apiKey: string, before: string | undefined, fetcher: Fetch): Promise<unknown[]> {
+async function tokenPage(mint: string, apiKey: string, before: string | undefined, fetcher: Fetch, rateLimitRetries = 2): Promise<unknown[]> {
   const url = new URL(`https://api-mainnet.helius-rpc.com/v0/addresses/${encodeURIComponent(mint)}/transactions`);
   url.searchParams.set('api-key', apiKey);
   url.searchParams.set('type', 'SWAP');
   url.searchParams.set('limit', String(TOKEN_DISCOVERY_LIMITS.pageSize));
   if (before) url.searchParams.set('before', before);
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const retries = Math.max(0, rateLimitRetries);
+  for (let attempt = 0; attempt <= retries; attempt++) {
     const response = await fetcher(url, { signal: AbortSignal.timeout(TOKEN_DISCOVERY_LIMITS.requestTimeoutMs) });
-    if (response.status === 429 && attempt < 2) { await new Promise(resolve => setTimeout(resolve, 1_000 * 2 ** attempt)); continue; }
+    if (response.status === 429 && attempt < retries) { await new Promise(resolve => setTimeout(resolve, 1_000 * 2 ** attempt)); continue; }
     if (!response.ok) throw new Error(`Token history returned HTTP ${response.status}`);
     const value: unknown = await response.json();
     if (!Array.isArray(value)) throw new Error('Token history returned an invalid payload');
@@ -95,13 +97,15 @@ async function tokenPage(mint: string, apiKey: string, before: string | undefine
  * trades, and a capped page count is reported rather than treated as complete token participation.
  */
 export async function scanTokenSwaps(
-  mint: string, options: { apiKey: string; fetch?: Fetch; maxPages?: number },
+  mint: string, options: { apiKey?: string; apiKeyPool?: HeliusApiKeyPool; fetch?: Fetch; maxPages?: number },
 ): Promise<TokenSwapSample> {
+  const pool = options.apiKeyPool ?? (options.apiKey ? makeHeliusApiKeyPool([options.apiKey]) : null);
+  if (!pool) throw new Error('A Helius API key is required');
   const fetcher = options.fetch ?? fetch, maxPages = Math.min(TOKEN_DISCOVERY_LIMITS.maxPages, Math.max(1, options.maxPages ?? TOKEN_DISCOVERY_LIMITS.maxPages));
   const participants = new Map<string, DiscoveryParticipant>(), signatures = new Set<string>();
   let pagesRead = 0, transactionsRead = 0, swapsRead = 0, capped = false, before: string | undefined;
   for (let page = 0; page < maxPages; page++) {
-    const items = await tokenPage(mint, options.apiKey, before, fetcher);
+    const items = await pool.run((apiKey, { rateLimitRetries }) => tokenPage(mint, apiKey, before, fetcher, rateLimitRetries));
     pagesRead++; transactionsRead += items.length;
     const sample = tokenParticipants(items, mint);
     swapsRead += sample.swaps;
@@ -129,14 +133,14 @@ export async function scanTokenSwaps(
 
 /** Runs one bounded token scan, adds untracked participants as provisional wallets, then backfills their recent swaps. */
 export async function discoverTokenWallets(db: PrismaClient, input: {
-  tokenId: string; mint: string; symbol: string; apiKey?: string; now?: Date; fetch?: Fetch; collect?: Collect;
+  tokenId: string; mint: string; symbol: string; apiKey?: string; apiKeyPool?: HeliusApiKeyPool | null; now?: Date; fetch?: Fetch; collect?: Collect;
 }): Promise<TokenDiscoverySummary> {
   const now = input.now ?? new Date(), key = `${TOKEN_DISCOVERY_KEY_PREFIX}${input.tokenId}`;
   const base = { version: 1 as const, requestedAt: now.toISOString(), startedAt: now.toISOString(), checkedAt: now.toISOString(), pagesRead: 0, transactionsRead: 0,
     swapsRead: 0, participantsSeen: 0, candidates: 0, newWallets: 0, backfilledWallets: 0, createdTrades: 0, capped: false };
   const save = (value: TokenDiscoverySummary) => db.systemSetting.upsert({ where: { key }, create: { key, value }, update: { value } });
-  const apiKey = input.apiKey;
-  if (!apiKey) {
+  const pool = input.apiKeyPool ?? (input.apiKey ? makeHeliusApiKeyPool([input.apiKey]) : null);
+  if (!pool) {
     // An operator can tell this apart from a provider outage, and the UI stops waiting instead of polling a no-op.
     const failed: TokenDiscoverySummary = { ...base, status: 'FAILED', error: 'NOT_CONFIGURED' };
     await save(failed);
@@ -144,7 +148,7 @@ export async function discoverTokenWallets(db: PrismaClient, input: {
   }
   await save({ ...base, status: 'RUNNING', error: null });
   try {
-    const sample = await scanTokenSwaps(input.mint, { apiKey, fetch: input.fetch });
+    const sample = await scanTokenSwaps(input.mint, { apiKeyPool: pool, ...(input.fetch ? { fetch: input.fetch } : {}) });
     const tracked = await db.trackedWallet.findMany({ where: { address: { in: sample.participants.map(p => p.address) } }, select: { address: true } });
     const eligible = selectDiscoveryCandidates(sample.participants, new Set(tracked.map(w => w.address)), { maxWallets: TOKEN_DISCOVERY_LIMITS.maxWalletsPerScan });
     const created = await db.$transaction(async tx => {
@@ -163,7 +167,10 @@ export async function discoverTokenWallets(db: PrismaClient, input: {
     let backfilledWallets = 0, createdTrades = 0, failures = 0;
     for (const wallet of created) {
       try {
-        const history = await collect(wallet.address, { apiKey, now, maxPages: TOKEN_DISCOVERY_LIMITS.maxHistoryPages });
+        const history = await pool.run((apiKey, { rateLimitRetries }) => collect(wallet.address, {
+          apiKey, now, maxPages: TOKEN_DISCOVERY_LIMITS.maxHistoryPages,
+          ...(pool.size > 1 ? { rateLimitRetries } : {}),
+        }));
         for (const event of history.events) if (await store.saveWalletTrade(event) === 'created') createdTrades++;
         const value = { checkedAt: now.toISOString(), scanned: history.scanned, accepted: history.events.length, skipped: history.skipped,
           capped: history.capped, nextBefore: history.nextBefore ?? null, scanFrom: history.coveredFrom, scanTo: history.coveredTo,

@@ -3,6 +3,7 @@ import type { HeliusSettings } from '@narra/shared';
 import type { SolanaRpc } from '@narra/solana';
 import { readHeliusSettings } from './heliusSettings';
 import { makeHeliusRpcPool, makeHeliusRpcTiers } from './rpcPool';
+import { makeHeliusApiKeyPool, type HeliusApiKeyPool } from './heliusApiPool';
 import { pooledHeliusMetadataSource, type MetadataSource } from './tokenMetadata';
 import { makeHolderRpcSource, type HolderRpcSource } from './holderRpc';
 import { holderRpcEndpointPools, makePooledHolderSource } from './holderRpcFailover';
@@ -28,6 +29,8 @@ export interface HeliusRuntime {
   metadataSource(): Promise<MetadataSource | null>;
   /** Dedicated holder pool, or the shared pool when no holder endpoint is set. */
   holderSource(): Promise<HolderRpcSource | null>;
+  /** Round-robin pool over configured Helius API keys, or null when none are configured. */
+  apiPool(): Promise<HeliusApiKeyPool | null>;
 }
 
 /**
@@ -51,10 +54,11 @@ export function createHeliusRuntime(
   let tierCache: { key: string; value: { primary: SolanaRpc | null; fallback: SolanaRpc | null } } | undefined;
   let metadataCache: { key: string; value: MetadataSource | null } | undefined;
   let holderCache: { key: string; value: HolderRpcSource | null } | undefined;
+  let apiKeyCache: { key: string; value: HeliusApiKeyPool | null } | undefined;
 
   const invalidate = () => {
     version++;
-    cache = undefined; rpcCache = undefined; tierCache = undefined; metadataCache = undefined; holderCache = undefined;
+    cache = undefined; rpcCache = undefined; tierCache = undefined; metadataCache = undefined; holderCache = undefined; apiKeyCache = undefined;
   };
 
   const read = async (): Promise<HeliusSettings> => {
@@ -119,6 +123,12 @@ export function createHeliusRuntime(
         };
       }
       return holderCache.value;
+    },
+    async apiPool() {
+      const settings = await read();
+      const cacheKey = settings.apiKeys.value.join('\n');
+      if (apiKeyCache?.key !== cacheKey) apiKeyCache = { key: cacheKey, value: makeHeliusApiKeyPool(settings.apiKeys.value, { now }) };
+      return apiKeyCache.value;
     },
   };
 }

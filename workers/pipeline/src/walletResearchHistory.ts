@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@narra/database';
 import { collectWalletHistory, WalletHistoryError } from './walletHistory';
+import type { HeliusApiKeyPool } from './heliusApiPool';
 import { makeWalletEventStore } from './prismaStores';
 import { z } from 'zod';
 
@@ -35,7 +36,7 @@ export async function selectResearchHistoryWallets(db:PrismaClient,now:Date){
     ORDER BY COALESCE(a."updatedAt",h."updatedAt",w."createdAt") ASC,w.id ASC LIMIT 2`;
 }
 
-export async function refreshResearchHistory(db: PrismaClient, apiKey: string, now = new Date(), collect = collectWalletHistory) {
+export async function refreshResearchHistory(db: PrismaClient, apiKeyOrPool: string | HeliusApiKeyPool, now = new Date(), collect = collectWalletHistory) {
   if(!Number.isFinite(+now))throw new Error('Invalid history scheduling date');
   const wallets=await selectResearchHistoryWallets(db,now);
   const out={scanned:0,created:0,capped:0,skipped:0,failures:0,resumed:0,pagesRead:0,searchHops:0};
@@ -55,8 +56,14 @@ export async function refreshResearchHistory(db: PrismaClient, apiKey: string, n
     await db.systemSetting.upsert({where:{key:attemptKey},create:{key:attemptKey,value:attempt,updatedAt:now},update:{value:attempt,updatedAt:now}});
     let phase:'COLLECT'|'STORE'='COLLECT';
     try{
-      const history=await collect(wallet.address,{apiKey,now:new Date(requestedTo),maxPages:3,
-        ...(resume?{before:resume.nextBefore!,since:new Date(requestedFrom)}:complete?{since:new Date(requestedFrom)}:{})});
+      const runCollect = (apiKey: string, rateLimitRetries?: number) => collect(wallet.address, {
+        apiKey, now: new Date(requestedTo), maxPages: 3,
+        ...(resume ? { before: resume.nextBefore!, since: new Date(requestedFrom) } : complete ? { since: new Date(requestedFrom) } : {}),
+        ...(rateLimitRetries !== undefined ? { rateLimitRetries } : {}),
+      });
+      const history = typeof apiKeyOrPool === 'string'
+        ? await runCollect(apiKeyOrPool)
+        : await apiKeyOrPool.run((apiKey, { rateLimitRetries }) => runCollect(apiKey, apiKeyOrPool.size > 1 ? rateLimitRetries : undefined));
       phase='STORE';attempt.pagesRead=history.pagesRead??0;out.pagesRead+=attempt.pagesRead;
       attempt.searchHops=history.searchHops??0;out.searchHops+=attempt.searchHops;
       for(const e of history.events)if(await store.saveWalletTrade(e)==='created')out.created++;

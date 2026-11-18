@@ -15,7 +15,7 @@ import { runTregJob } from './tregJob';
 import { trackEarlyRadarOutcomes } from './earlyRadarTracking';
 import { DexScreenerSource, GeckoTerminalSource } from '@narra/market-data';
 import { aiProviderFromEnv } from '@narra/ai';
-import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhook, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, discoverTokenWallets, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, createHeliusRuntime, type ChainPorts, type WalletEventDeps } from './index';
+import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhooks, webhookKeyHash, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, discoverTokenWallets, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, createHeliusRuntime, type ChainPorts, type WalletEventDeps } from './index';
 import { assertEnv } from '@narra/shared';
 import { makeDeveloperHoldingSource } from './developerHoldings';
 import { makeRadarSafetySource } from './radarSafetyEvidence';
@@ -147,11 +147,11 @@ async function main(): Promise<void> {
     // One recompute at a time: it rewrites profiles, clusters and consensus together.
     new Worker(QUEUE_NAMES.walletIntelligence, async () => {
       const research = process.env.SMART_MONEY_RESEARCH_ENABLED === 'true';
-      const current = await helius.read(), apiKey = current.apiKey.value;
-      const historyEnabled = process.env.SMART_MONEY_HISTORY_ENABLED === 'true', providerConfigured = !!apiKey;
+      const apiPool = await helius.apiPool();
+      const historyEnabled = process.env.SMART_MONEY_HISTORY_ENABLED === 'true', providerConfigured = !!apiPool;
       const intake = historyEnabled && providerConfigured ? await intakeEmergingWallets(db) : null;
       if (intake?.added) await queues.requestWalletSync();
-      const history = historyEnabled && apiKey ? await refreshResearchHistory(db, apiKey) : null;
+      const history = historyEnabled && apiPool ? await refreshResearchHistory(db, apiPool) : null;
       const intelligence = await recomputeWalletIntelligence(db);
       const pipeline = { checkedAt: new Date().toISOString(), historyEnabled, providerConfigured, intakeAdded: intake?.added ?? 0, scanned: history?.scanned ?? 0, failures: history?.failures ?? 0,
         intelligence: { readPages:intelligence.readPages,loadMs:intelligence.loadMs,computeMs:intelligence.computeMs,publishMs:intelligence.publishMs,publicationOperations:intelligence.publicationOperations,tradesUsed:intelligence.tradesUsed } };
@@ -184,8 +184,9 @@ async function main(): Promise<void> {
     }, { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletSync, async () => {
       const current = await helius.read();
-      if (!(current.apiKey.value && current.webhookUrl.value && current.webhookSecret.value)) return 'not configured';
-      return JSON.stringify(await syncWalletWebhook(db, new HeliusWebhooks({ apiKey: current.apiKey.value }), { webhookUrl: current.webhookUrl.value, authHeader: current.webhookSecret.value }));
+      if (!(current.apiKeys.value.length && current.webhookUrl.value && current.webhookSecret.value)) return 'not configured';
+      const clients = current.apiKeys.value.map((apiKey) => ({ keyHash: webhookKeyHash(apiKey), client: new HeliusWebhooks({ apiKey }) }));
+      return JSON.stringify(await syncWalletWebhooks(db, clients, { webhookUrl: current.webhookUrl.value, authHeader: current.webhookSecret.value }));
     }, { connection, concurrency: 1 }),
     new Worker(QUEUE_NAMES.walletFunding, async () => {
       const rpc = await helius.rpc(15_000);
@@ -202,7 +203,7 @@ async function main(): Promise<void> {
       const { mint } = TokenDiscoveryJobSchema.parse(job.data);
       const token = await db.token.findUnique({ where: { mint }, select: { id: true, mint: true, symbol: true, blacklisted: true } });
       if (!token || token.blacklisted) return 'token not found';
-      const summary = await discoverTokenWallets(db, { tokenId: token.id, mint: token.mint, symbol: token.symbol, apiKey: (await helius.read()).apiKey.value });
+      const summary = await discoverTokenWallets(db, { tokenId: token.id, mint: token.mint, symbol: token.symbol, apiKeyPool: await helius.apiPool() });
       if (summary.newWallets > 0) await queues.requestWalletSync();
       return JSON.stringify(summary);
     }, { connection, concurrency: 1 }),

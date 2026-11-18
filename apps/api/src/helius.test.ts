@@ -39,6 +39,7 @@ describe('admin helius settings',()=>{
    expect(response.json()).toMatchObject({
     rpcUrls:{configured:1,source:'environment'},
     apiKey:{configured:true,source:'environment'},
+    apiKeys:{configured:1,source:'environment'},
     webhookUrl:{value:'https://api.example.com/webhooks/helius',source:'environment'},
     webhookSecret:{configured:true,source:'environment'},
     ready:{rpc:true,webhook:true},
@@ -73,6 +74,12 @@ describe('admin helius settings',()=>{
    expect(cleared.statusCode).toBe(200);
    expect(cleared.json().rpcFallbackUrls).toEqual({configured:0,source:'database'});
    expect(rows.get('integrations.helius.rpc_fallback_urls')).toEqual([]);
+
+   const keyPool=await app.inject({url:'/v1/admin/helius',method:'PUT',headers:headers(),payload:{settings:{'integrations.helius.api_keys':['key-a','key-b','key-a']},reason:'Split webhooks across keys'}});
+   expect(keyPool.statusCode).toBe(200);
+   expect(keyPool.json().apiKeys).toEqual({configured:2,source:'database'});
+   expect(keyPool.body).not.toContain('key-a');
+   expect(audits.at(-1)?.detail).toMatchObject({key:'integrations.helius.api_keys',after:'3 key(s)'});
   }finally{await app.close();}
  });
  it('rejects a fallback without a primary, unknown keys and a missing reason',async()=>{

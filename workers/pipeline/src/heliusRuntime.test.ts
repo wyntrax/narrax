@@ -55,3 +55,16 @@ it('keeps the last good settings through a short database outage',async()=>{
  runtime.invalidate();
  await expect(runtime.read()).rejects.toThrow('database unavailable');
 });
+
+it('rebuilds the Helius API key pool when api_keys change',async()=>{
+ let rows=[{key:'integrations.helius.api_keys',value:['k1','k2']}];
+ const db={systemSetting:{findMany:async()=>rows}} as unknown as Pick<PrismaClient,'systemSetting'>;
+ let now=0;
+ const runtime=createHeliusRuntime(db,{},{ttlMs:100,now:()=>now});
+ const first=await runtime.apiPool();
+ expect(first?.size).toBe(2);
+ rows=[{key:'integrations.helius.api_keys',value:['k1','k2','k3']}];
+ now=101;
+ const second=await runtime.apiPool();
+ expect(second?.size).toBe(3);
+});
