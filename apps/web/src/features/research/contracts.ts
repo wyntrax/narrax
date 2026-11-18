@@ -29,7 +29,7 @@ export const OpportunitySchema=z.object({
  id:text,createdAt:date,score:number,
  scores:z.object({narrative:number,smartMoney:number,liquidity:number,momentum:number,og:number,risk:number}),
  attentionGrowth:nullable,priceGrowth:nullable,token:TokenSummary,narrative:NarrativeRef.nullable(),
- decision:z.object({action:z.enum(['BUY','WATCH','NO_TRADE','REDUCE','SELL','HOLD']),confidence:number.min(0).max(1)}).nullable()
+ decision:z.object({action:z.enum(['BUY','WATCH','NO_TRADE','IGNORE','REDUCE','SELL','HOLD']),confidence:number.min(0).max(1)}).nullable()
 });
 export type Opportunity=z.infer<typeof OpportunitySchema>;
 export const OpportunitiesSchema=pageOf(OpportunitySchema);

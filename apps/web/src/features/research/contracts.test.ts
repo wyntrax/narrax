@@ -5,6 +5,7 @@ describe('research data boundaries',()=>{
  it('accepts unlinked opportunities without discarding the overview or weakening narrative validation',()=>{
   const opportunity={id:'o',createdAt:'2026-10-15T12:00:00Z',score:42,scores:{narrative:0,smartMoney:42,liquidity:20,momentum:10,og:0,risk:30},attentionGrowth:null,priceGrowth:null,token:{mint:'mint',symbol:'TOKEN',name:'Token',priceUsd:null,marketCapUsd:null,liquidityUsd:null},narrative:null,decision:null};
   expect(OpportunitiesSchema.parse({items:[opportunity],nextCursor:null}).items[0]?.narrative).toBeNull();
+  expect(OpportunitiesSchema.parse({items:[{...opportunity,decision:{action:'IGNORE',confidence:0.2}}],nextCursor:null}).items[0]?.decision?.action).toBe('IGNORE');
   const overview={at:opportunity.createdAt,bar:{solUsd:null,narrativeHeat:65,smartMoneyNetFlowSol24h:null,smartMoneyTokens24h:0,counts:{activeNarratives:1,acceleratingNarratives:1,trackedWallets:0,opportunities24h:0}},locked:{overview:false,narratives:false,rotation:false,opportunities:false},strip:{topNarratives:[],hottestOpportunity:opportunity},rotation:null,brief:{generated:'rules',points:[]},me:{openPositions:0,pendingConfirmations:0,unreadAlerts:0}};
   const parsed=OverviewSchema.parse(overview);expect(parsed.bar?.narrativeHeat).toBe(65);expect(parsed.strip.hottestOpportunity?.narrative).toBeNull();
   for(const narrative of [undefined,{}, {name:'Broken',slug:'broken',stage:'INVALID'}])expect(()=>OpportunitiesSchema.parse({items:[{...opportunity,narrative}],nextCursor:null})).toThrow();
