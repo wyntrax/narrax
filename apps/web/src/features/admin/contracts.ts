@@ -44,6 +44,7 @@ export const HeliusSchema=z.object({
   rpcUrls:SecretPool,
   rpcFallbackUrls:SecretPool,
   apiKey:SecretStatus,
+  apiKeys:SecretPool.optional(),
   holderRpcUrls:SecretPool,
   holderRpcFallbackUrls:SecretPool,
   webhookUrl:SourcedText,

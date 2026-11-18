@@ -72,8 +72,21 @@ describe('helius settings',()=>{
   expect(HeliusSettingsInput.safeParse({'integrations.helius.webhook_secret':'a\nb'}).success).toBe(false);
   expect(HeliusSettingsInput.safeParse({'integrations.helius.unknown':'x'}).success).toBe(false);
  });
- it('marks every RPC endpoint and both credentials as write-only',()=>{
-  for(const key of ['integrations.helius.rpc_urls','integrations.helius.rpc_fallback_urls','integrations.helius.rpc_url','integrations.helius.rpc_fallback_url','integrations.helius.api_key','integrations.helius.holder_rpc_urls','integrations.helius.holder_rpc_fallback_urls','integrations.helius.holder_rpc_url','integrations.helius.holder_rpc_fallback_url','integrations.helius.webhook_secret'])expect(isSecretHeliusKey(key)).toBe(true);
-  expect(isSecretHeliusKey('integrations.helius.webhook_url')).toBe(false);
+  it('marks every RPC endpoint and both credentials as write-only',()=>{
+   for(const key of ['integrations.helius.rpc_urls','integrations.helius.rpc_fallback_urls','integrations.helius.rpc_url','integrations.helius.rpc_fallback_url','integrations.helius.api_keys','integrations.helius.api_key','integrations.helius.holder_rpc_urls','integrations.helius.holder_rpc_fallback_urls','integrations.helius.holder_rpc_url','integrations.helius.holder_rpc_fallback_url','integrations.helius.webhook_secret'])expect(isSecretHeliusKey(key)).toBe(true);
+   expect(isSecretHeliusKey('integrations.helius.webhook_url')).toBe(false);
+  });
+  it('supports up to eight deduplicated Helius API keys from database or env and clears with an empty pool',()=>{
+   const pool=effectiveHeliusSettings([{key:'integrations.helius.api_keys',value:['key-1','key-2','key-1']}],env);
+   expect(pool.apiKeys).toEqual({value:['key-1','key-2'],source:'database'});
+   expect(pool.apiKey).toEqual({value:'key-1',source:'database'});
+   expect(pool.ready.webhook).toBe(true);
+   const envPool=effectiveHeliusSettings([],{...env,HELIUS_API_KEYS:'env-1, env-2 env-1'});
+   expect(envPool.apiKeys).toEqual({value:['env-1','env-2'],source:'environment'});
+   expect(effectiveHeliusSettings([{key:'integrations.helius.api_keys',value:[]}],env).ready.webhook).toBe(false);
+   const eightKeys=Array.from({length:8},(_,i)=>`key_${i}`);
+   expect(HeliusSettingsInput.safeParse({'integrations.helius.api_keys':eightKeys}).success).toBe(true);
+   expect(HeliusSettingsInput.safeParse({'integrations.helius.api_keys':[...eightKeys,'key_9']}).success).toBe(false);
+   expect(HeliusSettingsInput.safeParse({'integrations.helius.api_keys':['bad key']}).success).toBe(false);
+  });
  });
-});

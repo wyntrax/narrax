@@ -14,6 +14,7 @@ export * from './walletSync';
 export * from './walletFunding';
 export * from './rpcFailover';
 export * from './rpcPool';
+export * from './heliusApiPool';
 export * from './heliusRuntime';
 export * from './walletDiscovery';
 export * from './tokenWalletDiscovery';

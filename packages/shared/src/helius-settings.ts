@@ -27,6 +27,8 @@ export const HeliusUrlList = z.array(HttpUrl).max(8);
 export const OptionalHeliusUrl = z.union([z.literal(''), HttpUrl]);
 /** Helius keys are treated as opaque tokens. No whitespace or URL syntax can be injected. */
 export const HeliusApiKey = z.string().trim().max(300).regex(/^[A-Za-z0-9_-]*$/);
+export const HeliusApiKeyItem = z.string().trim().min(1).max(300).regex(/^[A-Za-z0-9_-]+$/);
+export const HeliusApiKeyList = z.array(HeliusApiKeyItem).max(8);
 /** Sent back by Helius in the Authorization header. Empty disables webhook sync. */
 export const HeliusWebhookSecret = z.string().max(500).refine(value => !/[\r\n]/.test(value));
 
@@ -35,6 +37,7 @@ export const HELIUS_SETTING_SCHEMAS = {
   'integrations.helius.rpc_fallback_urls': HeliusUrlList,
   'integrations.helius.holder_rpc_urls': HeliusUrlList,
   'integrations.helius.holder_rpc_fallback_urls': HeliusUrlList,
+  'integrations.helius.api_keys': HeliusApiKeyList,
   // Read-only compatibility with the first admin version and existing environment keys.
   'integrations.helius.rpc_url': OptionalHeliusUrl,
   'integrations.helius.rpc_fallback_url': OptionalHeliusUrl,
@@ -57,6 +60,7 @@ export const SECRET_HELIUS_KEYS = [
   'integrations.helius.rpc_fallback_url',
   'integrations.helius.holder_rpc_url',
   'integrations.helius.holder_rpc_fallback_url',
+  'integrations.helius.api_keys',
   'integrations.helius.api_key',
   'integrations.helius.webhook_secret',
 ] as const satisfies readonly HeliusSettingKey[];
@@ -73,6 +77,8 @@ export interface HeliusSettings {
   /** Tried only when every primary is cooling down or failing. */
   rpcFallbackUrls: Sourced<string[]>;
   apiKey: Sourced<string>;
+  /** Up to eight Helius API keys for round-robin history/discovery calls and sharded webhooks. */
+  apiKeys: Sourced<string[]>;
   /** Dedicated holder enumeration endpoints. Empty means use the shared RPC pool. */
   holderRpcUrls: Sourced<string[]>;
   holderRpcFallbackUrls: Sourced<string[]>;
@@ -123,18 +129,31 @@ export function effectiveHeliusSettings(
   const holderRpcUrls = pickList('integrations.helius.holder_rpc_urls', 'integrations.helius.holder_rpc_url', env.HOLDER_RPC_URL);
   const rawHolderFallbackUrls = pickList('integrations.helius.holder_rpc_fallback_urls', 'integrations.helius.holder_rpc_fallback_url', env.HOLDER_RPC_FALLBACK_URL);
   const holderRpcFallbackUrls = sourced(rawHolderFallbackUrls.value.filter(url => !holderRpcUrls.value.includes(url)), rawHolderFallbackUrls.source);
-  const apiKey = pickText('integrations.helius.api_key', env.HELIUS_API_KEY);
+  const storedApiKeys = stored('integrations.helius.api_keys') as string[] | undefined;
+  const legacyApiKey = stored('integrations.helius.api_key') as string | undefined;
+  const envApiKeys = env.HELIUS_API_KEYS?.trim();
+  const envApiKey = env.HELIUS_API_KEY?.trim();
+  const apiKeys = storedApiKeys !== undefined
+    ? sourced(normalize(storedApiKeys), 'database')
+    : legacyApiKey !== undefined
+      ? sourced(normalize([legacyApiKey]), 'database')
+      : envApiKeys
+        ? sourced(normalize(envApiKeys.split(/[\s,]+/)), 'environment')
+        : envApiKey
+          ? sourced([envApiKey], 'environment')
+          : sourced([], 'default');
+  const apiKey = sourced(apiKeys.value[0] ?? '', apiKeys.source);
   const webhookUrl = pickText('integrations.helius.webhook_url', env.HELIUS_WEBHOOK_URL);
   const webhookSecret = pickText('integrations.helius.webhook_secret', env.HELIUS_WEBHOOK_SECRET, false);
   const rpcReady = rpcUrls.value.length > 0 || rpcFallbackUrls.value.length > 0;
 
   return {
-    rpcUrls, rpcFallbackUrls, apiKey, holderRpcUrls, holderRpcFallbackUrls, webhookUrl, webhookSecret,
+    rpcUrls, rpcFallbackUrls, apiKey, apiKeys, holderRpcUrls, holderRpcFallbackUrls, webhookUrl, webhookSecret,
     invalid: [...invalid],
     ready: {
       rpc: rpcReady,
       holder: holderRpcUrls.value.length > 0 || holderRpcFallbackUrls.value.length > 0 || rpcReady,
-      webhook: !!apiKey.value && !!webhookUrl.value && !!webhookSecret.value,
+      webhook: apiKeys.value.length > 0 && !!webhookUrl.value && !!webhookSecret.value,
     },
   };
 }

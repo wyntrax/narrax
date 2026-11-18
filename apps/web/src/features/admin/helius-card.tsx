@@ -38,7 +38,8 @@ export function HeliusForm({api,initial}:{api:AdminApi;initial:Helius}) {
  const changedPayload=()=>{
   const payload:Record<string,unknown>={};
   for(const name of Object.keys(poolKeys) as PoolName[]){const urls=lines(pools[name]);if(urls.length)payload[poolKeys[name]]=urls;}
-  if(apiKey.trim())payload['integrations.helius.api_key']=apiKey.trim();
+  const keys=lines(apiKey);
+  if(keys.length)payload['integrations.helius.api_keys']=keys;
   if(webhookSecret.trim())payload['integrations.helius.webhook_secret']=webhookSecret.trim();
   if(webhookUrl.trim()!==(baseline.webhookUrl.value??''))payload['integrations.helius.webhook_url']=webhookUrl.trim();
   return payload;
@@ -55,6 +56,7 @@ export function HeliusForm({api,initial}:{api:AdminApi;initial:Helius}) {
  }});
  const source=(value:'database'|'environment'|'default')=>t(value);
  const statusText=(configured:boolean,sourceValue:'database'|'environment'|'default')=>`${t('current')}: ${configured?t('configured'):t('notConfigured')} (${source(sourceValue)})`;
+ const apiKeyPool=baseline.apiKeys??{configured:baseline.apiKey.configured?1:0,source:baseline.apiKey.source};
  const poolField=(name:PoolName,id:string,label:string,help:string,view:{configured:number;source:'database'|'environment'|'default'})=><div className="admin-field" key={name}>
   <label htmlFor={id}>{label}</label>
   <textarea id={id} rows={3} maxLength={16_384} spellCheck={false} value={pools[name]} placeholder={view.configured?t('configuredCount',{count:view.configured}):t('missingPlaceholder')} onChange={event=>setPool(name,event.target.value)}/>
@@ -79,7 +81,7 @@ export function HeliusForm({api,initial}:{api:AdminApi;initial:Helius}) {
   </div>
   {poolField('rpcUrls','helius-rpc-urls',t('rpcUrls'),t('rpcUrlsHelp'),baseline.rpcUrls)}
   {poolField('rpcFallbackUrls','helius-rpc-fallback-urls',t('rpcFallbackUrls'),t('rpcFallbackUrlsHelp'),baseline.rpcFallbackUrls)}
-  <div className="admin-field"><label htmlFor="helius-api-key">{t('apiKey')}</label><input id="helius-api-key" type="password" autoComplete="off" spellCheck={false} maxLength={300} value={apiKey} placeholder={baseline.apiKey.configured?t('configuredPlaceholder'):t('missingPlaceholder')} onChange={event=>{reset();setApiKey(event.target.value);}}/><small>{t('apiKeyHelp')} · {statusText(baseline.apiKey.configured,baseline.apiKey.source)}</small></div>
+  <div className="admin-field"><label htmlFor="helius-api-key">{t('apiKey')}</label><textarea id="helius-api-key" rows={3} maxLength={4_096} autoComplete="off" spellCheck={false} value={apiKey} placeholder={apiKeyPool.configured?t('configuredCount',{count:apiKeyPool.configured}):t('missingPlaceholder')} onChange={event=>{reset();setApiKey(event.target.value);}}/><small>{t('apiKeyHelp')} · {t('current')}: {apiKeyPool.configured?t('configuredCount',{count:apiKeyPool.configured}):t('notConfigured')} ({source(apiKeyPool.source)})</small></div>
   {poolField('holderRpcUrls','helius-holder-rpc-urls',t('holderRpcUrls'),t('holderRpcUrlsHelp'),baseline.holderRpcUrls)}
   {poolField('holderRpcFallbackUrls','helius-holder-rpc-fallback-urls',t('holderRpcFallbackUrls'),t('holderRpcFallbackUrlsHelp'),baseline.holderRpcFallbackUrls)}
   <div className="admin-field"><label htmlFor="helius-webhook-url">{t('webhookUrl')}</label><input id="helius-webhook-url" maxLength={2048} value={webhookUrl} onChange={event=>{reset();setWebhookUrl(event.target.value);}}/><small>{t('webhookUrlHelp')} · {t('source')}: {source(baseline.webhookUrl.source)}</small></div>

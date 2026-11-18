@@ -37,7 +37,7 @@ const cleanReason = (value: string) => sanitizeUntrusted(value, 300).trim();
 /** Never store a credential in the audit log. The action still records that it changed. */
 const auditValue = (key: string, value: unknown): Prisma.InputJsonValue => {
   if (isSecretHeliusKey(key)) {
-    if (Array.isArray(value)) return value.length ? `${value.length} endpoint(s)` : '<unset>';
+    if (Array.isArray(value)) return value.length ? `${value.length} ${key === 'integrations.helius.api_keys' ? 'key(s)' : 'endpoint(s)'}` : '<unset>';
     return value == null || value === '' ? '<unset>' : '<set>';
   }
   return (value ?? null) as Prisma.InputJsonValue;
@@ -74,7 +74,8 @@ export function registerHeliusRoutes(app: FastifyInstance, deps: HeliusDeps): vo
     return {
       rpcUrls: pool(effective.rpcUrls),
       rpcFallbackUrls: pool(effective.rpcFallbackUrls),
-      apiKey: { configured: !!effective.apiKey.value, source: effective.apiKey.source },
+      apiKey: { configured: effective.apiKeys.value.length > 0, source: effective.apiKeys.source },
+      apiKeys: pool(effective.apiKeys),
       holderRpcUrls: pool(effective.holderRpcUrls),
       holderRpcFallbackUrls: pool(effective.holderRpcFallbackUrls),
       webhookUrl: { value: effective.webhookUrl.value || null, source: effective.webhookUrl.source },
@@ -118,7 +119,7 @@ export function registerHeliusRoutes(app: FastifyInstance, deps: HeliusDeps): vo
     await db.$transaction(writes);
     deps.runtime?.invalidate();
     // The worker builds the webhook client from the same rows, so ask it to sync now.
-    if (['integrations.helius.api_key', 'integrations.helius.webhook_url', 'integrations.helius.webhook_secret'].some(key => key in settings)) {
+    if (['integrations.helius.api_keys', 'integrations.helius.api_key', 'integrations.helius.webhook_url', 'integrations.helius.webhook_secret'].some(key => key in settings)) {
       try { await deps.requestSync?.(); } catch { /* the scheduled sync retries */ }
     }
     return view(await rows());

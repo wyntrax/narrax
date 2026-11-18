@@ -1,7 +1,7 @@
 import {parseHeliusSwaps} from '@narra/solana';
 import {SwapEventSchema,type SwapEvent} from '@narra/queue';
 
-export interface WalletHistoryOptions {apiKey:string;fetch?:typeof fetch;maxPages?:number;now?:Date;before?:string;since?:Date}
+export interface WalletHistoryOptions {apiKey:string;fetch?:typeof fetch;maxPages?:number;now?:Date;before?:string;since?:Date;rateLimitRetries?:number}
 export class WalletHistoryError extends Error {
   constructor(public readonly code: 'RATE_LIMITED'|'PROVIDER_HTTP'|'INVALID_PAYLOAD'|'PAGINATION_STALLED'|'TIMEOUT'|'NETWORK', public readonly pagesRead: number, public readonly httpStatus?: number, public readonly searchHops = 0) {
     super(httpStatus ? `Wallet history returned HTTP ${httpStatus}` : `Wallet history ${code}`);
@@ -41,12 +41,13 @@ export async function collectWalletHistory(address:string,opts:WalletHistoryOpti
  for(let page=0;page<pages;page++){
   const url=new URL(`https://api-mainnet.helius-rpc.com/v0/addresses/${encodeURIComponent(address)}/transactions`);
   url.searchParams.set('api-key',opts.apiKey);url.searchParams.set('type','SWAP');url.searchParams.set('limit','100');if(before)url.searchParams.set('before',before);
+  const rateLimitRetries=Math.max(0,opts.rateLimitRetries??2);
   let response:Response|undefined;
-  for(let attempt=0;attempt<3;attempt++){
+  for(let attempt=0;attempt<=rateLimitRetries;attempt++){
     try { response=await (opts.fetch??fetch)(url,{signal:AbortSignal.timeout(20000)}); }
     catch(e) { throw failure(e instanceof Error && ['TimeoutError','AbortError'].includes(e.name)?'TIMEOUT':'NETWORK'); }
    if(response.status!==429)break;
-   if(attempt<2)await new Promise(resolve=>setTimeout(resolve,1000*2**attempt));
+   if(attempt<rateLimitRetries)await new Promise(resolve=>setTimeout(resolve,1000*2**attempt));
   }
    if(response?.status===404){
     const next=searchContinuation(await response.json().catch(()=>null));
