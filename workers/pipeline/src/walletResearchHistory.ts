@@ -16,6 +16,8 @@ export const HISTORY_ATTEMPT_PREFIX='wallet.historyAttempt.';
 export const HISTORY_RETRY_MS=15*60_000;
 export const HISTORY_REFRESH_MS=12*3_600_000;
 export const HISTORY_RESUME_MAX_AGE_MS=7*86_400_000;
+export const HISTORY_WALLETS_PER_KEY=2;
+export const HISTORY_MAX_WALLETS_PER_RUN=10;
 const object=(v:unknown):Record<string,unknown>=>v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,unknown>:{};
 const count=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0?v:0;
 const earliest=(...xs:(string|null|undefined)[])=>xs.filter((s):s is string=>typeof s==='string').sort()[0]??null;
@@ -24,7 +26,8 @@ const latest=(...xs:(string|null|undefined)[])=>xs.filter((s):s is string=>typeo
 /** Oldest attempt first: admission cannot keep pushing the scan cursor forward forever.
  * Uses persisted DB timestamps for scheduling, not unvalidated JSON date casts. Failures
  * rotate too. One worker runs this job at a time; budget remains two wallets x three pages. */
-export async function selectResearchHistoryWallets(db:PrismaClient,now:Date){
+export async function selectResearchHistoryWallets(db:PrismaClient,now:Date,limit:number=HISTORY_WALLETS_PER_KEY){
+  const bounded=Math.max(1,Math.min(HISTORY_MAX_WALLETS_PER_RUN,Math.trunc(limit)));
   return db.$queryRaw<{id:string;address:string}[]>`
     SELECT w.id,w.address FROM "TrackedWallet" w
     LEFT JOIN "SystemSetting" h ON h.key='wallet.history.' || w.id
@@ -33,12 +36,13 @@ export async function selectResearchHistoryWallets(db:PrismaClient,now:Date){
       AND w."createdAt" <= ${now}
       AND (a.key IS NULL OR a."updatedAt" <= ${new Date(+now-HISTORY_RETRY_MS)})
       AND (h.key IS NULL OR h.value->>'capped' IS DISTINCT FROM 'false' OR h."updatedAt" <= ${new Date(+now-HISTORY_REFRESH_MS)})
-    ORDER BY COALESCE(a."updatedAt",h."updatedAt",w."createdAt") ASC,w.id ASC LIMIT 2`;
+    ORDER BY COALESCE(a."updatedAt",h."updatedAt",w."createdAt") ASC,w.id ASC LIMIT ${bounded}`;
 }
 
 export async function refreshResearchHistory(db: PrismaClient, apiKeyOrPool: string | HeliusApiKeyPool, now = new Date(), collect = collectWalletHistory) {
   if(!Number.isFinite(+now))throw new Error('Invalid history scheduling date');
-  const wallets=await selectResearchHistoryWallets(db,now);
+  const limit = typeof apiKeyOrPool === 'string' ? HISTORY_WALLETS_PER_KEY : Math.min(HISTORY_MAX_WALLETS_PER_RUN, Math.max(HISTORY_WALLETS_PER_KEY, apiKeyOrPool.size * HISTORY_WALLETS_PER_KEY));
+  const wallets=await selectResearchHistoryWallets(db,now,limit);
   const out={scanned:0,created:0,capped:0,skipped:0,failures:0,resumed:0,pagesRead:0,searchHops:0};
   const store=makeWalletEventStore(db);
   for(const wallet of wallets){

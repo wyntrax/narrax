@@ -25,10 +25,16 @@ export function rankingReasons(performance: WalletPerformance, band: WalletPerfo
   return { historyComplete, reasons };
 }
 
+/** Weak timing-only links can transitively chain unrelated wallets into one mega-cluster; only stronger links mark LINKED_WALLETS. */
+export function isLinkedCluster(wallet: { clusterId: string | null; cluster?: { label: string | null; confidence: string } | null }): boolean {
+  if (!wallet.clusterId) return false;
+  return !(wallet.cluster?.label === 'timing' && wallet.cluster?.confidence === 'LOW');
+}
+
 /** Bounded cohort, deterministic rank within it. Never ranks by token growth or promotes operator review. */
 export async function walletRanking(db: PrismaClient, now: Date, band: WalletEntryBand, limit: number, status: 'ALL' | 'REVIEW_READY' | 'OBSERVING' = 'ALL', minMedianPositionSol = 0.01) {
   const wallets = await db.trackedWallet.findMany({ where: { active: true, researchReview: { not: 'REJECTED' } },
-    orderBy: { id: 'asc' }, take: 501, select: { id: true, address: true, label: true, researchReview: true, clusterId: true } });
+    orderBy: { id: 'asc' }, take: 501, select: { id: true, address: true, label: true, researchReview: true, clusterId: true, cluster: { select: { label: true, confidence: true } } } });
   const cohort = wallets.slice(0,500);
   const [settings, developers] = await Promise.all([
     db.systemSetting.findMany({ where: { key: { in: ['wallet.evaluation.pipeline', ...cohort.flatMap(w=>[`wallet.performance.${w.id}`,`wallet.history.${w.id}`])] } } }),
@@ -44,7 +50,7 @@ export async function walletRanking(db: PrismaClient, now: Date, band: WalletEnt
     // Zero disables the size filter so unknown evidence remains inspectable.
     if (minMedianPositionSol > 0 && (performance.medianClosedPositionSol == null ||
       new Prisma.Decimal(performance.medianClosedPositionSol).lt(minMedianPositionSol))) return [];
-    const linked = w.clusterId!==null, developer = devs.has(w.address);
+    const linked = isLinkedCluster(w), developer = devs.has(w.address);
     const { reasons, historyComplete } = rankingReasons(parsed.data,performance,values.get(`wallet.history.${w.id}`),now,linked,developer,minMedianPositionSol);
     return [{ address:w.address,label:w.label,review:w.researchReview,status:reasons.length?'OBSERVING' as const:'REVIEW_READY' as const,
       reasons,historyComplete,linked,developer,checkedAt:parsed.data.checkedAt,performance }];

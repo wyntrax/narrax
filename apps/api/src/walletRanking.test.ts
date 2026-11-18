@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { rankingReasons } from './walletRanking';
+import { isLinkedCluster, rankingReasons } from './walletRanking';
 import type { WalletPerformance } from '@narra/shared';
 const now=new Date('2026-10-26T12:00:00Z');
 const history={checkedAt:now.toISOString(),coveredTo:now.toISOString(),coveredFrom:new Date(+now-30*86400000).toISOString(),capped:false,skipped:0,windowDays:30};
@@ -21,4 +21,10 @@ it('withholds dust-sized and legacy unknown-size results, with an explicit adjus
 it('withholds stale, unknown-cap, fast-exit, linked and known-deployer samples from review-ready rank',()=>{
  const result=rankingReasons(sample,{...band,band:'UNKNOWN',fastCloseRate:.8},history,new Date(+now+2*86400000),true,true);
  expect(result.reasons).toEqual(expect.arrayContaining(['PERFORMANCE_STALE','ACTIVITY_STALE','HISTORY_INCOMPLETE','SMALL_CAP_UNPROVEN','FAST_EXITS','LINKED_WALLETS','KNOWN_DEPLOYER']));
+});
+it('ignores LOW-confidence timing mega-clusters while still flagging funding and stronger timing clusters',()=>{
+ expect(isLinkedCluster({clusterId:null,cluster:null})).toBe(false);
+ expect(isLinkedCluster({clusterId:'c1',cluster:{label:'timing',confidence:'LOW'}})).toBe(false);
+ expect(isLinkedCluster({clusterId:'c2',cluster:{label:'timing',confidence:'MEDIUM'}})).toBe(true);
+ expect(isLinkedCluster({clusterId:'c3',cluster:{label:'funding',confidence:'LOW'}})).toBe(true);
 });
