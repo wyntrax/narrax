@@ -72,7 +72,7 @@ export async function saveResearchDiagnostics(db: PrismaClient, stage: ResearchS
       await tx.systemSetting.upsert({ where: { key: latestKey }, create: { key: latestKey, value }, update: { value } });
     }
     const cutoff = new Date(+at - (COVERAGE_LIMITS.retentionDays - 1) * 86_400_000).toISOString().slice(0, 10);
-    await tx.systemSetting.deleteMany({ where: { key: { startsWith: `${RESEARCH_DIAGNOSTICS_PREFIX}${stage}.day.`, lt: `${RESEARCH_DIAGNOSTICS_PREFIX}${stage}.day.${cutoff}` } } });
+    await tx.systemSetting.deleteMany({ where: { key: { gte: `${RESEARCH_DIAGNOSTICS_PREFIX}${stage}.day.0`, lt: `${RESEARCH_DIAGNOSTICS_PREFIX}${stage}.day.${cutoff}` } } });
   });
 }
 

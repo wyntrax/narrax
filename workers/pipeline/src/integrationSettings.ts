@@ -1,6 +1,8 @@
 import type { PrismaClient } from '@narra/database';
-import { DEFAULT_TREG_SETUP_PACKS, effectiveIntegrations } from '@narra/shared';
+import { DEFAULT_TREG_SETUP_PACKS, INTEGRATION_SETTING_KEYS, effectiveIntegrations } from '@narra/shared';
 import { readTregConfig, type TregConfig } from '@narra/narrative';
+
+const TREG_SETTING_KEYS = INTEGRATION_SETTING_KEYS.filter((k) => k.startsWith('integrations.treg.'));
 
 /**
  * Reads the admin-managed Treg settings with the environment as the fallback, and builds the same validated
@@ -17,7 +19,7 @@ export async function tregConfigFromSettings(
   db: Pick<PrismaClient, 'systemSetting'>,
   env: Record<string, string | undefined> = process.env,
 ): Promise<TregIntegration | null> {
-  const rows = await db.systemSetting.findMany({ where: { key: { startsWith: 'integrations.treg.' } }, select: { key: true, value: true } });
+  const rows = await db.systemSetting.findMany({ where: { key: { in: TREG_SETTING_KEYS } }, select: { key: true, value: true } });
   const settings = effectiveIntegrations(rows, env).treg;
   if (!settings.enabled.value) return null;
   if (!settings.token.value) throw new Error('TREG_TOKEN_REQUIRED');

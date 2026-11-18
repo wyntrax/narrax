@@ -151,7 +151,7 @@ export async function refreshMarketData(
       // A later reference price must never be applied to an earlier trade.
       const key = `${SOL_HISTORY_PREFIX}${value.at}`;
       await db.systemSetting.upsert({ where: { key }, create: { key, value }, update: {} });
-      await db.systemSetting.deleteMany({ where: { key: { startsWith: SOL_HISTORY_PREFIX, lt: `${SOL_HISTORY_PREFIX}${new Date(+now-35*86_400_000).toISOString()}` } } });
+      await db.systemSetting.deleteMany({ where: { key: { gte: `${SOL_HISTORY_PREFIX}0`, lt: `${SOL_HISTORY_PREFIX}${new Date(+now-35*86_400_000).toISOString()}` } } });
       out.solUsd = solPriceUsd;
     } else out.errors.push('sol price: no usable data');
   } catch (e) { out.errors.push(errText('sol price', e)); }

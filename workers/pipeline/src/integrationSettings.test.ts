@@ -39,8 +39,20 @@ describe('admin-managed integration settings',()=>{
   expect(integration?.config.topics.length).toBeGreaterThan(0);
   expect(integration?.config.topics.length).toBeLessThanOrEqual(10);
  });
- it('keeps Treg off without enablement and refuses to enable it without a token',async()=>{
-  expect(await tregConfigFromSettings(dbWith([]),{})).toBeNull();
-  await expect(tregConfigFromSettings(dbWith([{key:'integrations.treg.enabled',value:true}]),{})).rejects.toThrow('TREG_TOKEN_REQUIRED');
+  it('keeps Treg off without enablement and refuses to enable it without a token',async()=>{
+   expect(await tregConfigFromSettings(dbWith([]),{})).toBeNull();
+   await expect(tregConfigFromSettings(dbWith([{key:'integrations.treg.enabled',value:true}]),{})).rejects.toThrow('TREG_TOKEN_REQUIRED');
+  });
+  it('queries exact SystemSetting keys via primary key instead of startsWith table scans',async()=>{
+   const queries:unknown[]=[];
+   const spyDb={systemSetting:{findMany:async(arg:unknown)=>{queries.push(arg);return [];}}} as unknown as PrismaClient;
+   await telegramConfigFromSettings(spyDb,{});
+   await tregConfigFromSettings(spyDb,{});
+   expect(queries).toHaveLength(2);
+   for(const q of queries){
+    const where=(q as {where:{key:{in?:string[];startsWith?:string}}}).where.key;
+    expect(Array.isArray(where.in)).toBe(true);
+    expect(where.startsWith).toBeUndefined();
+   }
+  });
  });
-});

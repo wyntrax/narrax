@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from '@narra/database';
-import { FrozenRadarSafetySchema, effectiveIntegrations, type FrozenRadarSafety } from '@narra/shared';
+import { FrozenRadarSafetySchema, INTEGRATION_SETTING_KEYS, effectiveIntegrations, type FrozenRadarSafety } from '@narra/shared';
 import { radarSafetySettingKey } from '@narra/token-intel';
 
 /**
@@ -10,6 +10,7 @@ import { radarSafetySettingKey } from '@narra/token-intel';
 
 export const EARLY_RADAR_ALERT_KINDS = ['EARLY_RADAR_TRENCHER', 'EARLY_RADAR_HOLDER'] as const;
 export const TELEGRAM_CURSOR_PREFIX = 'integrations.telegram.cursor.';
+const TELEGRAM_SETTING_KEYS = INTEGRATION_SETTING_KEYS.filter((k) => k.startsWith('integrations.telegram.'));
 export const TELEGRAM_LIMITS = {
   /** A call older than this is not worth posting; the measured median time to peak is about 38 minutes. */
   maxAgeMs: 15 * 60_000,
@@ -126,7 +127,7 @@ export async function telegramConfigFromSettings(
   db: Pick<PrismaClient, 'systemSetting'>,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<TelegramDeliveryConfig | null> {
-  const rows = await db.systemSetting.findMany({ where: { key: { startsWith: 'integrations.telegram.' } }, select: { key: true, value: true } });
+  const rows = await db.systemSetting.findMany({ where: { key: { in: TELEGRAM_SETTING_KEYS } }, select: { key: true, value: true } });
   const settings = effectiveIntegrations(rows, env).telegram;
   if (!settings.enabled.value || !settings.botToken.value || !settings.chatId.value) return null;
   return telegramConfigFromEnv({

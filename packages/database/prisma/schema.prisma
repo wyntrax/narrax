@@ -595,6 +595,7 @@ model NarrativeTokenRelation {
   confidence  Float
 
   @@unique([narrativeId, tokenId])
+  @@index([tokenId])
 }
 
 // ---------- Tokens ----------
@@ -633,6 +634,7 @@ model Token {
   earlyBuyers      TokenEarlyBuyers?
 
   @@index([symbol])
+  @@index([deployer, createdOnChainAt])
   @@index([marketQuarantineUntil])
   @@index([marketPriorityUntil])
   @@index([firstSeenAt])
@@ -649,6 +651,7 @@ model TokenMetric {
   at           DateTime @default(now())
 
   @@index([tokenId, at])
+  @@index([at, tokenId])
 }
 
 model TokenHolderMetric {
@@ -940,6 +943,7 @@ model Alert {
 
   @@index([userId, createdAt])
   @@index([dispatchedAt, createdAt])
+  @@index([kind, refId])
 }
 
 /// Research-only token flow. Independent of ConsensusSignal and trading/Telegram alerts.
@@ -1050,6 +1054,8 @@ model SystemSetting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
 }
 
 model AuditLog {
