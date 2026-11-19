@@ -28,3 +28,20 @@ it('ignores LOW-confidence timing mega-clusters while still flagging funding and
  expect(isLinkedCluster({clusterId:'c2',cluster:{label:'timing',confidence:'MEDIUM'}})).toBe(true);
  expect(isLinkedCluster({clusterId:'c3',cluster:{label:'funding',confidence:'LOW'}})).toBe(true);
 });
+it('accepts deep live-sampled history (100+ ALL-band closes over 21+ days) while keeping historyComplete false',()=>{
+ const allBand={...band,band:'ALL',closedPositions:100,observedDays:21} as WalletPerformance['bands'][number];
+ const deepSample={...sample,bands:[allBand,band]} as WalletPerformance;
+ const cappedHistory={...history,capped:true,coveredFrom:new Date(+now-21*86400000).toISOString()};
+ expect(rankingReasons(deepSample,band,cappedHistory,now,false,false)).toEqual({historyComplete:false,reasons:[]});
+ expect(rankingReasons({...sample,bands:[{...allBand,observedDays:20},band]},band,cappedHistory,now,false,false).reasons).toContain('HISTORY_INCOMPLETE');
+ expect(rankingReasons({...sample,bands:[{...allBand,closedPositions:99},band]},band,cappedHistory,now,false,false).reasons).toContain('HISTORY_INCOMPLETE');
+ expect(rankingReasons(deepSample,band,{...cappedHistory,skipped:1},now,false,false).reasons).toContain('HISTORY_INCOMPLETE');
+ expect(rankingReasons({...deepSample,lastTradeAt:new Date(+now-25*3600000).toISOString()},band,cappedHistory,now,false,false).reasons).toContain('HISTORY_INCOMPLETE');
+});
+it('applies the 1.5% unmatched-sell tolerance on 100+ ALL-band closes while still rejecting invalidTrades',()=>{
+ const allBand={...band,band:'ALL',closedPositions:200,observedDays:21} as WalletPerformance['bands'][number];
+ const largeSample={...sample,bands:[allBand,band],unmatchedSells:3} as WalletPerformance;
+ expect(rankingReasons(largeSample,band,history,now,false,false)).toEqual({historyComplete:true,reasons:[]});
+ expect(rankingReasons({...largeSample,unmatchedSells:4},band,history,now,false,false).reasons).toContain('INCOMPLETE_COST_BASIS');
+ expect(rankingReasons({...largeSample,invalidTrades:1},band,history,now,false,false).reasons).toContain('INCOMPLETE_COST_BASIS');
+});

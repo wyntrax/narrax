@@ -1,18 +1,25 @@
 import { Prisma, type PrismaClient } from '@narra/database';
 import { WalletPerformance, WalletRankingPage, type WalletEntryBand } from '@narra/shared';
+import { RESEARCH_QUALIFICATION } from '@narra/smart-money';
 
 const obj = (v: unknown): Record<string,unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string,unknown> : {};
 const fresh = (v: unknown, now: Date, age: number) => typeof v === 'string' && Date.parse(v) <= +now && +now-Date.parse(v) <= age;
 export function rankingReasons(performance: WalletPerformance, band: WalletPerformance['bands'][number], history: unknown, now: Date, linked: boolean, developer: boolean, minMedianPositionSol = 0.01) {
   const h = obj(history), reasons: string[] = [];
+  const scope = performance.bands?.find((b) => b.band === 'ALL') ?? band;
   const historyComplete = h.capped === false && h.skipped === 0 && h.windowDays === 30 && fresh(h.checkedAt,now,86_400_000) &&
     fresh(h.coveredTo,now,86_400_000) && typeof h.coveredFrom === 'string' && typeof h.coveredTo === 'string' &&
     Date.parse(h.coveredTo)-Date.parse(h.coveredFrom)>=30*86_400_000;
-  if (!historyComplete) reasons.push('HISTORY_INCOMPLETE');
+  const deepLiveSampleHistory = h.capped === true && h.skipped === 0 && h.windowDays === 30 &&
+    fresh(h.checkedAt, now, 86_400_000) && fresh(performance.lastTradeAt, now, 86_400_000) &&
+    scope.closedPositions >= RESEARCH_QUALIFICATION.deepCappedMinClosedLegs &&
+    scope.observedDays >= RESEARCH_QUALIFICATION.deepCappedMinObservedDays;
+  if (!historyComplete && !deepLiveSampleHistory) reasons.push('HISTORY_INCOMPLETE');
   if (!fresh(performance.checkedAt,now,45*60_000)) reasons.push('PERFORMANCE_STALE');
   if (!fresh(performance.lastTradeAt,now,86_400_000)) reasons.push('ACTIVITY_STALE');
   if (performance.capped) reasons.push('TRADE_LIMIT');
-  if (performance.invalidTrades || performance.unmatchedSells) reasons.push('INCOMPLETE_COST_BASIS');
+  const unmatchedLimit = scope.closedPositions >= 100 ? Math.floor(scope.closedPositions * 0.015) : 0;
+  if (performance.invalidTrades || performance.unmatchedSells > unmatchedLimit) reasons.push('INCOMPLETE_COST_BASIS');
   if (band.closedPositions<20 || band.closedTokens<5 || band.observedDays<7) reasons.push('SMALL_SAMPLE');
   if (band.medianClosedPositionSol == null) reasons.push('POSITION_SIZE_UNKNOWN');
   else if (new Prisma.Decimal(band.medianClosedPositionSol).lt(minMedianPositionSol)) reasons.push('SMALL_POSITIONS');

@@ -1,7 +1,7 @@
 import {Prisma,type PrismaClient} from '@narra/database';
 import {setImmediate as yieldToEventLoop} from 'node:timers/promises';
 
-export const INTELLIGENCE_READ_PAGE_SIZE=2000;
+export const INTELLIGENCE_READ_PAGE_SIZE=5000;
 const select={id:true,walletId:true,tokenId:true,side:true,amountSol:true,tokenAmount:true,at:true,marketCapUsd:true,evidence:true} satisfies Prisma.WalletTradeSelect;
 type Row=Prisma.WalletTradeGetPayload<{select:typeof select}>;
 /** Bound driver/compiler decoding work without truncating history or changing
@@ -27,5 +27,5 @@ export async function readIntelligenceInputs(db:PrismaClient,from:Date,to:Date){
    const last=page.at(-1)!;cursor={id:last.id,at:last.at};
   }
   return {wallets,rows,pages};
- },{isolationLevel:'RepeatableRead',timeout:120_000,maxWait:10_000});
+ },{isolationLevel:'RepeatableRead',timeout:180_000,maxWait:10_000});
 }
