@@ -11,7 +11,7 @@ beforeAll(async()=>{
  walletId=(await db.trackedWallet.create({data:{address:tag}})).id;
  inactiveId=(await db.trackedWallet.create({data:{address:tag+'inactive',active:false}})).id;
  tokenId=(await db.token.create({data:{mint:tag,name:tag,symbol:'PAGE'}})).id;
- const rows=Array.from({length:INTELLIGENCE_READ_PAGE_SIZE*2+3},(_,i)=>({id:`${tag}-${String(i).padStart(5,'0')}`,walletId,tokenId,side:i%3?'BUY' as const:'SELL' as const,signature:`${tag}-${i}`,amountSol:'0.1234567890123456789',tokenAmount:i%31?'1.000000001':null,marketCapUsd:i%2?'123456.123456789':null,at:new Date(+from+(i<2001?0:i<4000?1000:60000)),evidence:i%7?{eventAt:from.toISOString(),market:null}:Prisma.DbNull}));
+ const rows=Array.from({length:INTELLIGENCE_READ_PAGE_SIZE*2+3},(_,i)=>({id:`${tag}-${String(i).padStart(5,'0')}`,walletId,tokenId,side:i%3?'BUY' as const:'SELL' as const,signature:`${tag}-${i}`,amountSol:'0.1234567890123456789',tokenAmount:i%31?'1.000000001':null,marketCapUsd:i%2?'123456.123456789':null,at:new Date(+from+(i<INTELLIGENCE_READ_PAGE_SIZE+1?0:i<INTELLIGENCE_READ_PAGE_SIZE*2?1000:60000)),evidence:i%7?{eventAt:from.toISOString(),market:null}:Prisma.DbNull}));
  await db.walletTrade.createMany({data:rows});
  await db.walletTrade.createMany({data:[{walletId:inactiveId,tokenId,side:'BUY',signature:tag+'inactive',amountSol:1,at:from},{walletId,tokenId,side:'BUY',signature:tag+'future',amountSol:1,at:new Date(+to+1)}]});
 });
@@ -31,8 +31,8 @@ it('reads every row once across tied timestamps and keeps a repeatable snapshot 
   return Reflect.get(target,key);
  }});
  const result=await readIntelligenceInputs(wrapped as PrismaClient,from,to);
- expect(readOptions).toMatchObject({isolationLevel:'RepeatableRead',timeout:120_000,maxWait:10_000});
- expect(result.pages).toBe(3);expect(pageSizes).toEqual([2000,2000,3]);
+ expect(readOptions).toMatchObject({isolationLevel:'RepeatableRead',timeout:180_000,maxWait:10_000});
+ expect(result.pages).toBe(3);expect(pageSizes).toEqual([INTELLIGENCE_READ_PAGE_SIZE,INTELLIGENCE_READ_PAGE_SIZE,3]);
  expect(result.rows).toEqual(baseline);
  expect(result.wallets.some(w=>w.id===inactiveId)).toBe(false);
  expect(await db.walletTrade.count({where:{walletId,at:{gte:from,lte:to}}})).toBe(baseline.length+1);

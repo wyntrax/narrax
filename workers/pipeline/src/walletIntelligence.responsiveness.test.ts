@@ -1,11 +1,12 @@
 import { expect, it } from 'vitest';
 import type { PrismaClient } from '@narra/database';
 import { recomputeWalletIntelligence } from './walletIntelligence';
+import { INTELLIGENCE_READ_PAGE_SIZE } from './walletIntelligenceRead';
 
 it('services event-loop callbacks during preparation and publishes all operations in one transaction',async()=>{
   const now=new Date('2040-01-01T00:00:00Z');
   const wallets=Array.from({length:8},(_,i)=>({id:`w${i}`,clusterId:null,cluster:null}));
-  const rows=Array.from({length:8000},(_,i)=>({id:String(i),walletId:`w${i%8}`,tokenId:`t${i}`,side:'BUY',amountSol:'1',tokenAmount:'1',at:new Date(+now-1000),marketCapUsd:null,evidence:null}));
+  const rows=Array.from({length:INTELLIGENCE_READ_PAGE_SIZE*4},(_,i)=>({id:String(i),walletId:`w${i%8}`,tokenId:`t${i}`,side:'BUY',amountSol:'1',tokenAmount:'1',at:new Date(+now-1000),marketCapUsd:null,evidence:null}));
    const operations: unknown[]=[],ticksAtPage:number[]=[];
    let ticks=0,fetchYielded=false,transactionCalls=0,readTransactions=0,readOptions:unknown,publishOptions:unknown;
   const heartbeat=()=>{ticks++;handle=setImmediate(heartbeat);};
@@ -28,7 +29,7 @@ it('services event-loop callbacks during preparation and publishes all operation
     },
     $transaction:async(ops:unknown[]|((tx:unknown)=>unknown),opts?:unknown):Promise<unknown>=>{
       if(typeof ops==='function'){
-        if((opts as {timeout?:number}|undefined)?.timeout===120_000){readTransactions++;readOptions=opts;return ops(db);}
+        if((opts as {timeout?:number}|undefined)?.timeout===180_000){readTransactions++;readOptions=opts;return ops(db);}
         transactionCalls++;publishOptions=opts;return ops(tx);
       }
       throw new Error('expected only callback transactions');
@@ -42,7 +43,7 @@ it('services event-loop callbacks during preparation and publishes all operation
     expect(transactionCalls).toBe(1);expect(result.tradesUsed).toBe(rows.length);
     expect(readTransactions).toBe(1);expect(result.readPages).toBe(5);
     expect(result.publicationOperations).toBe(operations.length);
-    expect(readOptions).toMatchObject({isolationLevel:'RepeatableRead',timeout:120_000,maxWait:10_000});
+    expect(readOptions).toMatchObject({isolationLevel:'RepeatableRead',timeout:180_000,maxWait:10_000});
     expect(publishOptions).toMatchObject({timeout:30_000,maxWait:10_000});
     for(let i=1;i<ticksAtPage.length;i++)expect(ticksAtPage[i]).toBeGreaterThan(ticksAtPage[i-1]!);
     expect(ticks).toBeGreaterThanOrEqual(result.readPages+wallets.length);

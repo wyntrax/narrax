@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@narra/database';
+import type { Prisma, PrismaClient } from '@narra/database';
 import { DISCOVERY, rankCandidates, type TokenScan } from '@narra/smart-money';
 import { earlyBuyer, WSOL_MINT, discoverySpendEvidence, RpcHttpError } from '@narra/solana';
 import { type HistoryPort } from './walletFunding';
@@ -86,9 +86,9 @@ export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: D
     orderBy: [{ createdOnChainAt: 'desc' }, { id: 'asc' }], take: slots, select: { id: true, mint: true },
   }) : [];
   const work: DiscoveryCheckpoint[] = [...resumed, ...fresh.map(t=>({ tokenId: t.id, mint: t.mint, startedAt: now.toISOString(), pagesRead: 0, before: null, candidates: [], historyComplete: false, nextTransaction: 0, buyers: [] }))];
-  const save = () => {
+  const save = (client: Pick<Prisma.TransactionClient, 'systemSetting'> = db) => {
     progress.primaryCooldownUntil = budget.primaryCooldownUntil === null ? null : new Date(budget.primaryCooldownUntil).toISOString();
-    return db.systemSetting.upsert({ where: { key: DISCOVERY_PROGRESS_KEY }, create: { key: DISCOVERY_PROGRESS_KEY, value: progress }, update: { value: progress } });
+    return client.systemSetting.upsert({ where: { key: DISCOVERY_PROGRESS_KEY }, create: { key: DISCOVERY_PROGRESS_KEY, value: progress }, update: { value: progress } });
   };
   await save();
   for (const p of work) {
@@ -127,10 +127,10 @@ export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: D
       progress.pending = progress.pending.filter(c=>c.tokenId!==p.tokenId);
       // Partial buyer lists never become discovery/admission input. Publish the
       // completed bounded scan and remove its checkpoint atomically.
-      await db.$transaction([
-        db.tokenEarlyBuyers.upsert({ where: { tokenId: p.tokenId }, create: { tokenId: p.tokenId, ...data }, update: data }),
-        save(),
-      ]);
+      await db.$transaction(async (tx) => {
+        await tx.tokenEarlyBuyers.upsert({ where: { tokenId: p.tokenId }, create: { tokenId: p.tokenId, ...data }, update: data });
+        await save(tx);
+      }, { maxWait: 10_000, timeout: 15_000 });
       out.scanned++; out.buyersFound += p.buyers.length;
       if (p.historyComplete) out.complete++; else out.tooLong++;
     } catch (e) {
