@@ -17,6 +17,7 @@ function ReviewPanel({api,queryKey}:{api:AdminApi;queryKey:readonly unknown[]}){
  const t=useTranslations('workspace.smartResearch'),f=useFormat(),client=useQueryClient(),candidatePage=usePagination();
  const [sort,setSort]=useState<'recommended'|'id'>('recommended');
  const [readyOnly,setReadyOnly]=useState(false);
+ const [flowOnly,setFlowOnly]=useState(false);
  const [review,setReview]=useState<''|'APPROVED'|'PROVISIONAL'|'REJECTED'>('');
  const [queryInput,setQueryInput]=useState('');
  const [query,setQuery]=useState('');
@@ -41,14 +42,15 @@ function ReviewPanel({api,queryKey}:{api:AdminApi;queryKey:readonly unknown[]}){
   <label>{t('sortLabel')}<select value={sort} onChange={e=>setSort(e.target.value as 'recommended'|'id')}><option value="recommended">{t('sortRecommended')}</option><option value="id">{t('sortDefault')}</option></select></label>
   <label>{t('reviewStatus')}<select value={review} onChange={e=>setReview(e.target.value as ''|'APPROVED'|'PROVISIONAL'|'REJECTED')}><option value="">{t('reviewAll')}</option><option value="APPROVED">{t('reviewApproved')}</option><option value="PROVISIONAL">{t('reviewProvisional')}</option><option value="REJECTED">{t('reviewRejected')}</option></select></label>
   <button type="button" className="research-control" aria-pressed={readyOnly} onClick={()=>setReadyOnly(!readyOnly)}>{t('readyOnly')}</button>
+  <button type="button" className="research-control" aria-pressed={flowOnly} onClick={()=>setFlowOnly(!flowOnly)}>{t('flowOnly')}</button>
  </div>
- <TrackedWalletsSection key={`${sort}:${readyOnly}:${review}:${query}`} api={api} queryKey={queryKey} sort={sort} readyOnly={readyOnly} review={review||undefined} query={query||undefined}/>
+ <TrackedWalletsSection key={`${sort}:${readyOnly}:${flowOnly}:${review}:${query}`} api={api} queryKey={queryKey} sort={sort} readyOnly={readyOnly} flowOnly={flowOnly} review={review||undefined} query={query||undefined}/>
  <h3>{t('candidates')}</h3><p>{t('candidateNote')}</p>{candidates.isError?<ResourceError error={candidates.error} retry={()=>void candidates.refetch()}/>:candidates.isPending?<Loading/>:<DataTable caption={t('candidates')} headers={[t('wallet'),t('evidence'),t('review')]} rows={candidates.data.items.map(c=>({key:c.address,cells:[c.address,<div key="evidence">{t('winnerCount',{count:c.winnerTokens})} · {f.number(c.score,1)}<small>{f.date(c.evidence?.checkedAt)}</small><ul>{c.evidence?.winnerMints?.map(m=><li key={m}><a href={`https://solscan.io/token/${encodeURIComponent(m)}`} target="_blank" rel="noopener noreferrer">{m}</a></li>)}</ul></div>,<ReviewForm key="review" api={api} address={c.address} queryKey={queryKey} candidate/>]}))}/>}
  <Pager page={candidatePage.page} previous={candidatePage.previous} next={()=>candidatePage.next(candidates.data?.nextCursor??null)} canNext={!candidates.isFetching&&!!candidates.data?.nextCursor}/></>;
 }
-function TrackedWalletsSection({api,queryKey,sort,readyOnly,review,query}:{api:AdminApi;queryKey:readonly unknown[];sort:'recommended'|'id';readyOnly:boolean;review?:'APPROVED'|'PROVISIONAL'|'REJECTED';query?:string}){
+function TrackedWalletsSection({api,queryKey,sort,readyOnly,flowOnly,review,query}:{api:AdminApi;queryKey:readonly unknown[];sort:'recommended'|'id';readyOnly:boolean;flowOnly:boolean;review?:'APPROVED'|'PROVISIONAL'|'REJECTED';query?:string}){
  const t=useTranslations('workspace.smartResearch'),f=useFormat(),walletPage=usePagination();
- const wallets=useQuery({queryKey:[...queryKey,'wallets',sort,readyOnly,review,query,walletPage.cursor],queryFn:()=>api.researchWallets(walletPage.cursor??undefined,{sort,readyOnly,...(review?{review}:{}),...(query?{q:query}:{})}),retry:false});
+ const wallets=useQuery({queryKey:[...queryKey,'wallets',sort,readyOnly,flowOnly,review,query,walletPage.cursor],queryFn:()=>api.researchWallets(walletPage.cursor??undefined,{sort,readyOnly,...(flowOnly?{flowOnly}:{}),...(review?{review}:{}),...(query?{q:query}:{})}),retry:false});
  return <>
   {wallets.isError?<ResourceError error={wallets.error} retry={()=>void wallets.refetch()}/>:wallets.isPending?<Loading/>:!wallets.data.items.length?<Empty body={readyOnly?t('noReadyWallets'):undefined}/>:<DataTable caption={t('wallets')} headers={[t('wallet'),t('qualification'),t('review')]} rows={wallets.data.items.map(w=>{
    const readyToApprove=w.readyToApprove??(w.researchReview==='PROVISIONAL'&&w.qualification.reasons.length===1&&w.qualification.reasons[0]==='REVIEW_REQUIRED');
@@ -70,6 +72,8 @@ function TrackedWalletsSection({api,queryKey,sort,readyOnly,review,query}:{api:A
       {sample?.medianRoi!=null&&<span className="sm-chip">{t('medianRoi')} {f.percent(sample.medianRoi)}</span>}
      </span>}
      <QualificationBadge value={w.qualification}/>
+     {w.flowSuitable&&<span className="sm-chips"><span className="sm-chip">{t('flowSuitable')}</span></span>}
+     {!w.flowSuitable&&w.flowReasons?.length?<small>{t('flowNotSuitable')}: {w.flowReasons.map(reason=>t(`flowIssues.${reason}`)).join(', ')}</small>:null}
     </div>,
     <ReviewForm key="review" api={api} address={w.address} queryKey={queryKey}/>,
    ]};

@@ -11,7 +11,7 @@ vi.mock('@/i18n/navigation',()=>({useRouter:()=>({push:vi.fn()}),Link:({href,chi
 afterEach(cleanup);
 it('requires a reason and saves an explicit review while qualification stays provisional',async()=>{
  const user=userEvent.setup(),reviewResearch=vi.fn(async()=>({ok:true}));
- const api={researchHealth:vi.fn(async()=>({enabled:false,discovery:null})),researchWallets:vi.fn(async()=>({nextCursor:null,items:[{address:'wallet',label:'Seed',source:'MANUAL',active:true,score:74.1,style:'FOLLOWER',readyToApprove:true,researchReview:'PROVISIONAL',researchReviewReason:null,qualification:{status:'PROVISIONAL',eligible:false,reasons:['REVIEW_REQUIRED'],rulesVersion:1,sample:{closedTrades:822,closedTokens:773,observedDays:10.5,pnlSol:1.22,medianRoi:0.4,lastTradeAt:'2026-11-16T00:00:00Z',checkedAt:'2026-11-16T00:00:00Z'}}}]})),walletCandidates:vi.fn(async()=>({items:[],nextCursor:null})),reviewResearch} as unknown as AdminApi;
+ const api={researchHealth:vi.fn(async()=>({enabled:false,discovery:null})),researchWallets:vi.fn(async()=>({nextCursor:null,items:[{address:'wallet',label:'Seed',source:'MANUAL',active:true,score:74.1,style:'FOLLOWER',readyToApprove:true,flowSuitable:true,flowReasons:[],researchReview:'PROVISIONAL',researchReviewReason:null,qualification:{status:'PROVISIONAL',eligible:false,reasons:['REVIEW_REQUIRED'],rulesVersion:1,sample:{closedTrades:822,closedTokens:773,observedDays:10.5,pnlSol:1.22,medianRoi:0.4,lastTradeAt:'2026-11-16T00:00:00Z',checkedAt:'2026-11-16T00:00:00Z'}}}]})),walletCandidates:vi.fn(async()=>({items:[],nextCursor:null})),reviewResearch} as unknown as AdminApi;
  const client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});
  render(<QueryClientProvider client={client}><NextIntlClientProvider locale="en" messages={{workspace:messages}}><WalletResearchCard api={api} queryKey={['test','wallet-research']}/></NextIntlClientProvider></QueryClientProvider>);
  expect(api.researchWallets).not.toHaveBeenCalled();await user.click(screen.getByRole('button',{name:'Open review panel'}));
@@ -31,5 +31,8 @@ it('requires a reason and saves an explicit review while qualification stays pro
  await vi.waitFor(()=>expect(api.researchWallets).toHaveBeenLastCalledWith(undefined,{sort:'recommended',readyOnly:true,q:'27HFm'}));
  await user.selectOptions(screen.getByLabelText(messages.smartResearch.reviewStatus),'APPROVED');
  await vi.waitFor(()=>expect(api.researchWallets).toHaveBeenLastCalledWith(undefined,{sort:'recommended',readyOnly:true,review:'APPROVED',q:'27HFm'}));
+ expect(screen.getByText(messages.smartResearch.flowSuitable)).toBeVisible();
+ await user.click(screen.getByRole('button',{name:messages.smartResearch.flowOnly}));
+ await vi.waitFor(()=>expect(api.researchWallets).toHaveBeenLastCalledWith(undefined,{sort:'recommended',readyOnly:true,flowOnly:true,review:'APPROVED',q:'27HFm'}));
  client.clear();
 });

@@ -35,6 +35,7 @@ describe('GET /v1/admin/wallets?sort=recommended', () => {
 
     const db = {
       trackedWallet: { findMany: vi.fn(async () => rows) },
+      systemSetting: { findMany: vi.fn(async () => []) },
     } as unknown as PrismaClient;
 
     const app = Fastify();
@@ -65,7 +66,7 @@ describe('GET /v1/admin/wallets?sort=recommended', () => {
 
   it('finds a reviewed wallet by address or label and filters review status', async () => {
     const findMany = vi.fn(async () => []);
-    const db = { trackedWallet: { findMany } } as unknown as PrismaClient;
+    const db = { trackedWallet: { findMany }, systemSetting: { findMany: vi.fn(async () => []) } } as unknown as PrismaClient;
     const app = Fastify();
     registerWalletAdminRoutes(app, { db, verifier: {} as never });
 
@@ -82,6 +83,47 @@ describe('GET /v1/admin/wallets?sort=recommended', () => {
     }));
 
     expect((await app.inject({ method: 'GET', url: '/v1/admin/wallets?review=NOPE' })).statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('filters the admin list to flow-suitable wallets without approving them', async () => {
+    const current = new Date();
+    const history = {
+      checkedAt: current.toISOString(), coveredFrom: new Date(+current - 30 * 86_400_000).toISOString(), coveredTo: current.toISOString(),
+      capped: false, scanned: 1_000, skipped: 0, windowDays: 30,
+    };
+    const performance = {
+      version: 1, checkedAt: current.toISOString(), windowDays: 30, observedTrades: 50, invalidTrades: 0, unmatchedSells: 0,
+      capped: false, lastTradeAt: current.toISOString(), bands: [{
+        band: 'ALL', positions: 25, closedPositions: 25, closedTokens: 6, wins: 15, losses: 10, breakeven: 0, openPositions: 0,
+        winRate: 0.6, winRateLowerBound: 0.4, realisedPnlSol: '1', openCostSol: '0', medianRoi: 0.1, medianWinSol: '0.2',
+        medianLossSol: '-0.1', profitFactor: 2, medianFirstSellSeconds: 3_600, medianCloseSeconds: 3_600, realisedDrawdownSol: '0',
+        observedDays: 12, fastCloseRate: 0, medianEntrySol: '1', deployedSol: '25', medianClosedPositionSol: '1',
+        entryCapKnownPositions: 25, entryCapTotalPositions: 25,
+      }],
+    };
+    const rows = [
+      { id: 'w1', address: 'Addr111111111111111111111111111111111111111', label: 'Flow wallet', source: 'DISCOVERED', active: true, createdAt: current, researchReview: 'PROVISIONAL', researchReviewReason: null, profile: { score: 75, style: 'SWING', leaderScore: 20 }, cluster: null, funding: null },
+      { id: 'w2', address: 'Addr222222222222222222222222222222222222222', label: 'Scalper', source: 'DISCOVERED', active: true, createdAt: current, researchReview: 'PROVISIONAL', researchReviewReason: null, profile: { score: 80, style: 'SCALPER', leaderScore: 20 }, cluster: null, funding: null },
+    ];
+    quals.set('w1', { status: 'PROVISIONAL', eligible: false, reasons: ['REVIEW_REQUIRED'], rulesVersion: 1 });
+    quals.set('w2', { status: 'PROVISIONAL', eligible: false, reasons: ['REVIEW_REQUIRED'], rulesVersion: 1 });
+    const settings = new Map<string, unknown>([
+      ['wallet.performance.w1', performance],
+      ['wallet.history.w1', history],
+    ]);
+    const db = {
+      trackedWallet: { findMany: vi.fn(async () => rows) },
+      systemSetting: { findMany: vi.fn(async (args: { where: { key: { in: string[] } } }) =>
+        args.where.key.in.flatMap(key => settings.has(key) ? [{ key, value: settings.get(key) }] : [])) },
+    } as unknown as PrismaClient;
+    const app = Fastify();
+    registerWalletAdminRoutes(app, { db, verifier: {} as never });
+
+    const page = await app.inject({ method: 'GET', url: '/v1/admin/wallets?sort=recommended&flowOnly=true&limit=100' });
+    expect(page.statusCode).toBe(200);
+    expect(page.json().items.map((x: { address: string }) => x.address)).toEqual([rows[0]!.address]);
+    expect(page.json().items[0]).toMatchObject({ flowSuitable: true, flowReasons: [], researchReview: 'PROVISIONAL' });
     await app.close();
   });
 });
