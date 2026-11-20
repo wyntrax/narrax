@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Prisma, PrismaClient } from '@narra/database';
-import { sanitizeUntrusted } from '@narra/shared';
+import { sanitizeUntrusted, parseFlowSuitability, type FlowSuitability } from '@narra/shared';
 import { makeRequireAdmin } from './admin';
 import type { AccountDeps } from './account';
 import { walletQualifications } from '@narra/worker-pipeline';
@@ -15,6 +15,7 @@ const AdminWalletQuery = Paging.extend({
   active: z.enum(['true', 'false']).optional(),
   sort: z.enum(['id', 'recommended']).default('id'),
   readyOnly: z.enum(['true', 'false']).optional(),
+  flowOnly: z.enum(['true', 'false']).optional(),
   review: z.enum(['APPROVED', 'PROVISIONAL', 'REJECTED']).optional(),
   q: z.string().trim().max(64).optional(),
 });
@@ -56,8 +57,18 @@ export function registerWalletAdminRoutes(app: FastifyInstance, deps: WalletAdmi
       ] } : {}),
     };
     const include = { profile: { select: { score: true, style: true, leaderScore: true } }, cluster: { select: { id: true, label: true, confidence: true } }, funding: { select: { status: true, funder: true, fundedAt: true } } } as const;
-    const isRecommended = q.data.sort === 'recommended' || q.data.readyOnly === 'true';
-    const formatItem = (w: { id: string; address: string; label: string | null; source: string; active: boolean; createdAt: Date; researchReview: string; researchReviewReason: string | null; profile: { score: number; style: string; leaderScore: number } | null; cluster: { id: string; label: string | null; confidence: unknown } | null; funding: { status: string; funder: string | null; fundedAt: Date | null } | null }, qual: NonNullable<ReturnType<Awaited<ReturnType<typeof walletQualifications>>['get']>>) => ({
+    const isRecommended = q.data.sort === 'recommended' || q.data.readyOnly === 'true' || q.data.flowOnly === 'true';
+    const now = new Date();
+    /** Bulk-load performance and history evidence for the requested page. Read-only. */
+    const flowFor = async (wallets: { id: string }[]) => {
+      if (!wallets.length) return new Map<string, FlowSuitability>();
+      const settings = await db.systemSetting.findMany({
+        where: { key: { in: wallets.flatMap(w => [`wallet.performance.${w.id}`, `wallet.history.${w.id}`]) } },
+      });
+      const byKey = new Map(settings.map(s => [s.key, s.value]));
+      return new Map(wallets.map(w => [w.id, parseFlowSuitability(byKey.get(`wallet.performance.${w.id}`), byKey.get(`wallet.history.${w.id}`), now)]));
+    };
+    const formatItem = (w: { id: string; address: string; label: string | null; source: string; active: boolean; createdAt: Date; researchReview: string; researchReviewReason: string | null; profile: { score: number; style: string; leaderScore: number } | null; cluster: { id: string; label: string | null; confidence: unknown } | null; funding: { status: string; funder: string | null; fundedAt: Date | null } | null }, qual: NonNullable<ReturnType<Awaited<ReturnType<typeof walletQualifications>>['get']>>, flow: FlowSuitability) => ({
       address: w.address,
       label: w.label,
       source: w.source,
@@ -72,6 +83,9 @@ export function registerWalletAdminRoutes(app: FastifyInstance, deps: WalletAdmi
       researchReviewReason: w.researchReviewReason,
       readyToApprove: w.researchReview === 'PROVISIONAL' && qual.reasons.length === 1 && qual.reasons[0] === 'REVIEW_REQUIRED',
       qualification: qual,
+      flowSuitable: flow.suitable,
+      flowReasons: flow.reasons,
+      flowMetrics: flow.metrics,
     });
 
     if (isRecommended) {
@@ -81,17 +95,18 @@ export function registerWalletAdminRoutes(app: FastifyInstance, deps: WalletAdmi
         offset = Number(q.data.cursor.slice(4));
       }
       const rows = await db.trackedWallet.findMany({ where, orderBy: { id: 'asc' }, take: 500, include });
-      const qualifications = await walletQualifications(db, rows, new Date());
+      const [qualifications, flows] = await Promise.all([walletQualifications(db, rows, now), flowFor(rows)]);
       const ranked = rows.map((w) => {
         const qual = qualifications.get(w.id)!;
-        const item = formatItem(w, qual);
+        const item = formatItem(w, qual, flows.get(w.id)!);
         const sample = qual.sample as { pnlSol?: number | null } | null | undefined;
         const tier = item.readyToApprove ? 3 : qual.eligible ? 2 : item.score != null ? 1 : 0;
         return { id: w.id, item, tier, reasonCount: qual.reasons.length, pnl: sample?.pnlSol ?? -1e9 };
       });
-      const filtered = q.data.readyOnly === 'true'
-        ? ranked.filter((r) => r.item.readyToApprove || r.item.qualification.eligible)
-        : ranked;
+      const filtered = ranked.filter((r) =>
+        (q.data.flowOnly !== 'true' || r.item.flowSuitable) &&
+        (q.data.readyOnly !== 'true' || r.item.readyToApprove || r.item.qualification.eligible),
+      );
       filtered.sort((a, b) =>
         b.tier - a.tier ||
         a.reasonCount - b.reasonCount ||
@@ -112,9 +127,9 @@ export function registerWalletAdminRoutes(app: FastifyInstance, deps: WalletAdmi
       include,
     });
     const page = rows.slice(0, q.data.limit);
-    const qualifications = await walletQualifications(db, page, new Date());
+    const [qualifications, flows] = await Promise.all([walletQualifications(db, page, now), flowFor(page)]);
     return {
-      items: page.map((w) => formatItem(w, qualifications.get(w.id)!)),
+      items: page.map((w) => formatItem(w, qualifications.get(w.id)!, flows.get(w.id)!)),
       nextCursor: rows.length > q.data.limit ? page[page.length - 1]!.id : null,
     };
   });

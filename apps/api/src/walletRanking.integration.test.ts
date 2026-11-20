@@ -63,6 +63,13 @@ it('persists real computed performance and returns ranked small-cap evidence wit
  expect(response.statusCode).toBe(200);
  const result=WalletRankingPage.parse(response.json()),item=result.items.find(w=>w.address===a)!;
  expect(item).toMatchObject({status:'REVIEW_READY',review:'PROVISIONAL',historyComplete:true,performance:{closedPositions:25,closedTokens:5,winRate:1,realisedPnlSol:'25',medianCloseSeconds:3600}});
+ expect(item).toMatchObject({flowSuitable:true,flowReasons:[],flowMetrics:{medianHoldSeconds:3600,medianClosedPositionSol:'1',closedPositions:25,closedTokens:5}});
+ const flowOnly=await app.inject({method:'GET',url:'/v1/smart-money/rankings?band=UNDER_100K&flowOnly=true&status=ALL&limit=100',headers:{authorization:'Bearer admin'}});
+ expect(flowOnly.statusCode).toBe(200);
+ const flowPage=WalletRankingPage.parse(flowOnly.json());
+ expect(flowPage.items.some(w=>w.address===a)).toBe(true);
+ expect(flowPage.items.every(w=>w.flowSuitable===true)).toBe(true);
+ expect(flowPage.counts?.flowSuitable).toBeGreaterThanOrEqual(1);
  expect((await db.trackedWallet.findUniqueOrThrow({where:{id:walletId}})).researchReview).toBe('PROVISIONAL');
 });
 it('enforces authentication, tier access and admin bypass, and validates query bands',async()=>{

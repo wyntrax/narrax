@@ -41,6 +41,15 @@ it('requests 1 SOL in Observing and explains a filtered empty result without cla
 it('reports worker configuration instead of implying waiting alone will fetch wallets',()=>{
  state.disabled=true;view();expect(screen.getByText('Automatic history collection is disabled on the worker.')).toBeVisible();
 });
+it('filters flow-suitable wallets and explains the behavioural badge',async()=>{
+ view();
+ await userEvent.selectOptions(screen.getByLabelText('Evaluation group'),'OBSERVING');
+ expect(screen.getByText('Flow-suitable')).toBeVisible();
+ await userEvent.click(screen.getByRole('button',{name:'Flow-suitable only'}));
+ expect(state.paths.at(-1)).toContain('flowOnly=true');
+ expect(state.paths.at(-1)).toContain('status=ALL');
+ expect(screen.getByText(/Behavioural filter/)).toBeVisible();
+});
 it('renders Indonesian ranking and evidence labels',async()=>{
  view('id');expect(screen.getByRole('heading',{name:'Peringkat wallet small-cap'})).toBeVisible();
  await userEvent.selectOptions(screen.getByLabelText('Kelompok evaluasi'),'OBSERVING');

@@ -19,3 +19,4 @@ export * from './pro-research';
 export * from './smart-money-investigation';
 export * from './investigation-strategy';
 export * from './wallet-ranking';
+export * from './wallet-flow-suitability';
