@@ -24,7 +24,7 @@ describe('flowSuitability', () => {
     const result = flowSuitability(performance(), completeHistory, now);
     expect(result.reasons).toEqual([]);
     expect(result.suitable).toBe(true);
-    expect(result.metrics).toMatchObject({ medianHoldSeconds: 3_600, medianClosedPositionSol: '1', closedPositions: 25, closedTokens: 6 });
+    expect(result.metrics).toMatchObject({ medianHoldSeconds: 3_600, medianFirstSellSeconds: 3_600, medianClosedPositionSol: '1', closedPositions: 25, closedTokens: 6 });
   });
 
   it('accepts a deep live capped sample even though the history row is not complete', () => {
@@ -43,6 +43,8 @@ describe('flowSuitability', () => {
     [{ band: { closedPositions: 19 } }, 'FLOW_SAMPLE_TOO_SMALL'],
     [{ band: { closedTokens: 4 } }, 'FLOW_SAMPLE_TOO_SMALL'],
     [{ band: { observedDays: 6 } }, 'FLOW_SAMPLE_TOO_SMALL'],
+    [{ band: { medianFirstSellSeconds: FLOW_SUITABILITY_LIMITS.minMedianFirstSellSeconds - 1 } }, 'FLOW_FIRST_SELL_TOO_EARLY'],
+    [{ band: { medianFirstSellSeconds: null } }, 'FLOW_FIRST_SELL_TOO_EARLY'],
     [{ band: { medianCloseSeconds: FLOW_SUITABILITY_LIMITS.minMedianHoldSeconds - 1 } }, 'FLOW_HOLD_TOO_SHORT'],
     [{ band: { medianCloseSeconds: null } }, 'FLOW_HOLD_TOO_SHORT'],
     [{ band: { medianClosedPositionSol: null } }, 'FLOW_POSITION_UNKNOWN'],

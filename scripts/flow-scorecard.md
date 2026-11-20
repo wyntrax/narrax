@@ -13,7 +13,7 @@ A wallet is flow-suitable only when all of these hold for its `ALL` 30-day perfo
 | Trade cap | Performance snapshot is not capped |
 | Cost basis | No invalid trades; unmatched sells within the existing 1.5% tolerance on 100+ closes |
 | Sample | At least 20 closes, 5 closed tokens and 7 observed days |
-| Hold behaviour | Median observed close at least 30 minutes |
+| Hold behaviour | Median first sell and median close at least 30 minutes |
 | Position size | Median closed-position spend at least 0.5 SOL |
 | Fast exits | Fewer than half of closes under one minute |
 

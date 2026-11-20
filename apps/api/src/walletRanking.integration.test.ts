@@ -63,7 +63,7 @@ it('persists real computed performance and returns ranked small-cap evidence wit
  expect(response.statusCode).toBe(200);
  const result=WalletRankingPage.parse(response.json()),item=result.items.find(w=>w.address===a)!;
  expect(item).toMatchObject({status:'REVIEW_READY',review:'PROVISIONAL',historyComplete:true,performance:{closedPositions:25,closedTokens:5,winRate:1,realisedPnlSol:'25',medianCloseSeconds:3600}});
- expect(item).toMatchObject({flowSuitable:true,flowReasons:[],flowMetrics:{medianHoldSeconds:3600,medianClosedPositionSol:'1',closedPositions:25,closedTokens:5}});
+ expect(item).toMatchObject({flowSuitable:true,flowReasons:[],flowMetrics:{medianHoldSeconds:3600,medianFirstSellSeconds:3600,medianClosedPositionSol:'1',closedPositions:25,closedTokens:5}});
  const flowOnly=await app.inject({method:'GET',url:'/v1/smart-money/rankings?band=UNDER_100K&flowOnly=true&status=ALL&limit=100',headers:{authorization:'Bearer admin'}});
  expect(flowOnly.statusCode).toBe(200);
  const flowPage=WalletRankingPage.parse(flowOnly.json());

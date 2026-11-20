@@ -31,6 +31,7 @@ export const WalletFlowSuitabilityReason = z.enum([
   'FLOW_TRADE_LIMIT',
   'FLOW_COST_BASIS_INCOMPLETE',
   'FLOW_SAMPLE_TOO_SMALL',
+  'FLOW_FIRST_SELL_TOO_EARLY',
   'FLOW_HOLD_TOO_SHORT',
   'FLOW_POSITION_UNKNOWN',
   'FLOW_POSITION_TOO_SMALL',
@@ -39,6 +40,7 @@ export const WalletFlowSuitabilityReason = z.enum([
 export type WalletFlowSuitabilityReason = z.infer<typeof WalletFlowSuitabilityReason>;
 export const WalletFlowSuitabilityMetrics = z.object({
   medianHoldSeconds: n.nullable(),
+  medianFirstSellSeconds: n.nullable(),
   medianClosedPositionSol: decimal.nullable(),
   closedPositions: count,
   closedTokens: count,
