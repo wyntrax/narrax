@@ -86,6 +86,12 @@ describe('computeLeaderStats', () => {
     const adds = computeLeaderStats([...entries('A', 6, 0), ...entries('A', 6, 3), ...entries('B', 6, 5)]);
     expect(adds.get('A')?.entries).toBe(6); // second buys of the same token are not new entries
   });
+  it('picks the earliest entry per wallet and token even when buys arrive out of order', () => {
+    const reversed = [...entries('A', 6, 15), ...entries('A', 6, 0), ...entries('B', 6, 5)];
+    const m = computeLeaderStats(reversed);
+    expect(m.get('A')).toMatchObject({ entries: 6, ledRate: 1, followerRate: 0, leaderScore: expect.closeTo(66.7, 1) });
+    expect(m.get('B')).toMatchObject({ entries: 6, ledRate: 0, followerRate: 1, leaderScore: 0 });
+  });
 });
 
 describe('style and patterns', () => {

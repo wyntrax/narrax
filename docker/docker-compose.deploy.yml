@@ -8,7 +8,10 @@ services:
     image: "${NARRA_IMAGE:?set NARRA_IMAGE to the image reference to run}"
     pull_policy: always
   api: *image
-  worker: *image
+  worker:
+    <<: *image
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=3072"
 
   personal-research:
     <<: *image

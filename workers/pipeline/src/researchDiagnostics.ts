@@ -73,7 +73,7 @@ export async function saveResearchDiagnostics(db: PrismaClient, stage: ResearchS
     }
     const cutoff = new Date(+at - (COVERAGE_LIMITS.retentionDays - 1) * 86_400_000).toISOString().slice(0, 10);
     await tx.systemSetting.deleteMany({ where: { key: { gte: `${RESEARCH_DIAGNOSTICS_PREFIX}${stage}.day.0`, lt: `${RESEARCH_DIAGNOSTICS_PREFIX}${stage}.day.${cutoff}` } } });
-  });
+  }, { timeout: 15_000, maxWait: 10_000 });
 }
 
 export async function readResearchDiagnostics(db: PrismaClient, now: Date) {
