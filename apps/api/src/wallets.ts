@@ -10,6 +10,14 @@ const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const Address = z.string().regex(BASE58_ADDRESS);
 const Label = z.string().max(120).transform((s) => sanitizeUntrusted(s, 60)).nullable();
 const Paging = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50), cursor: z.string().max(64).optional() });
+const AdminWalletQuery = Paging.extend({
+  source: z.enum(['MANUAL', 'IMPORT', 'DISCOVERED']).optional(),
+  active: z.enum(['true', 'false']).optional(),
+  sort: z.enum(['id', 'recommended']).default('id'),
+  readyOnly: z.enum(['true', 'false']).optional(),
+  review: z.enum(['APPROVED', 'PROVISIONAL', 'REJECTED']).optional(),
+  q: z.string().trim().max(64).optional(),
+});
 const AddBody = z.object({ address: Address, label: Label.optional() }).strict();
 const ImportBody = z.object({ wallets: z.array(z.object({ address: z.string().max(80), label: z.string().max(120).nullish() }).strict()).min(1).max(500) }).strict();
 const PatchBody = z.object({ label: Label.optional(), active: z.boolean().optional() }).strict().refine((b) => b.label !== undefined || b.active !== undefined, 'nothing to change');
@@ -36,14 +44,17 @@ export function registerWalletAdminRoutes(app: FastifyInstance, deps: WalletAdmi
   const sync = async () => { if (!deps.requestSync) return false; try { await deps.requestSync(); return true; } catch { return false; } };
 
   app.get('/v1/admin/wallets', opts, async (req, reply) => {
-    const q = Paging.extend({
-      source: z.enum(['MANUAL', 'IMPORT', 'DISCOVERED']).optional(),
-      active: z.enum(['true', 'false']).optional(),
-      sort: z.enum(['id', 'recommended']).default('id'),
-      readyOnly: z.enum(['true', 'false']).optional(),
-    }).safeParse(req.query);
+    const q = AdminWalletQuery.safeParse(req.query);
     if (!q.success) return reply.code(400).send(bad());
-    const where = { ...(q.data.source ? { source: q.data.source } : {}), ...(q.data.active ? { active: q.data.active === 'true' } : {}) };
+    const where: Prisma.TrackedWalletWhereInput = {
+      ...(q.data.source ? { source: q.data.source } : {}),
+      ...(q.data.active ? { active: q.data.active === 'true' } : {}),
+      ...(q.data.review ? { researchReview: q.data.review } : {}),
+      ...(q.data.q ? { OR: [
+        { address: { contains: q.data.q, mode: 'insensitive' } },
+        { label: { contains: q.data.q, mode: 'insensitive' } },
+      ] } : {}),
+    };
     const include = { profile: { select: { score: true, style: true, leaderScore: true } }, cluster: { select: { id: true, label: true, confidence: true } }, funding: { select: { status: true, funder: true, fundedAt: true } } } as const;
     const isRecommended = q.data.sort === 'recommended' || q.data.readyOnly === 'true';
     const formatItem = (w: { id: string; address: string; label: string | null; source: string; active: boolean; createdAt: Date; researchReview: string; researchReviewReason: string | null; profile: { score: number; style: string; leaderScore: number } | null; cluster: { id: string; label: string | null; confidence: unknown } | null; funding: { status: string; funder: string | null; fundedAt: Date | null } | null }, qual: NonNullable<ReturnType<Awaited<ReturnType<typeof walletQualifications>>['get']>>) => ({

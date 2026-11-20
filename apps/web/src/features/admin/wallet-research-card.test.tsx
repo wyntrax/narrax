@@ -26,5 +26,10 @@ it('requires a reason and saves an explicit review while qualification stays pro
  expect(await screen.findByText(messages.smartResearch.saved)).toBeVisible();
  await user.click(screen.getByRole('button',{name:messages.smartResearch.readyOnly}));
  expect(api.researchWallets).toHaveBeenLastCalledWith(undefined,{sort:'recommended',readyOnly:true});
+ await user.type(screen.getByLabelText(messages.smartResearch.walletSearch),'27HFm');
+ await user.click(screen.getByRole('button',{name:messages.smartResearch.search}));
+ await vi.waitFor(()=>expect(api.researchWallets).toHaveBeenLastCalledWith(undefined,{sort:'recommended',readyOnly:true,q:'27HFm'}));
+ await user.selectOptions(screen.getByLabelText(messages.smartResearch.reviewStatus),'APPROVED');
+ await vi.waitFor(()=>expect(api.researchWallets).toHaveBeenLastCalledWith(undefined,{sort:'recommended',readyOnly:true,review:'APPROVED',q:'27HFm'}));
  client.clear();
 });

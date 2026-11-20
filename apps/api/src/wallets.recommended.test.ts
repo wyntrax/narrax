@@ -62,4 +62,26 @@ describe('GET /v1/admin/wallets?sort=recommended', () => {
 
     await app.close();
   });
+
+  it('finds a reviewed wallet by address or label and filters review status', async () => {
+    const findMany = vi.fn(async () => []);
+    const db = { trackedWallet: { findMany } } as unknown as PrismaClient;
+    const app = Fastify();
+    registerWalletAdminRoutes(app, { db, verifier: {} as never });
+
+    const found = await app.inject({ method: 'GET', url: '/v1/admin/wallets?q=27hfm&review=APPROVED' });
+    expect(found.statusCode).toBe(200);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        researchReview: 'APPROVED',
+        OR: [
+          { address: { contains: '27hfm', mode: 'insensitive' } },
+          { label: { contains: '27hfm', mode: 'insensitive' } },
+        ],
+      }),
+    }));
+
+    expect((await app.inject({ method: 'GET', url: '/v1/admin/wallets?review=NOPE' })).statusCode).toBe(400);
+    await app.close();
+  });
 });
