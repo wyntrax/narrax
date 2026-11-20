@@ -14,14 +14,18 @@ const obj = (v: unknown): Record<string, unknown> => v !== null && typeof v === 
 
 async function main() {
   const now = new Date();
+  const signalSelect = {
+    id: true, tokenId: true, side: true, createdAt: true, walletCount: true, independentEntities: true, netFlowSol: true,
+    evidence: true, token: { select: { mint: true, symbol: true } },
+    measurements: { select: { horizonHours: true, status: true, returnPct: true } },
+  } as const;
   const signals = await db.walletResearchSignal.findMany({
     where: { createdAt: { lte: now }, token: { blacklisted: false } },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 10_001,
-    select: {
-      id: true, tokenId: true, side: true, createdAt: true, walletCount: true, independentEntities: true, netFlowSol: true,
-      evidence: true, token: { select: { mint: true, symbol: true } },
-      measurements: { select: { horizonHours: true, status: true, returnPct: true } },
-    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 10_001, select: signalSelect,
+  });
+  const recentSignals = await db.walletResearchSignal.findMany({
+    where: { createdAt: { lte: now }, token: { blacklisted: false } },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 20, select: signalSelect,
   });
   const rows = signals.slice(0, 10_000);
   type Signal = typeof rows[number];
@@ -33,7 +37,8 @@ async function main() {
     const groups = new Map<string, Signal[]>();
     for (const s of rows) {
       const bucket = key(s);
-      groups.set(bucket, [...(groups.get(bucket) ?? []), s]);
+      const group = groups.get(bucket);
+      if (group) group.push(s); else groups.set(bucket, [s]);
     }
     return Object.fromEntries([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([bucket, group]) => [bucket, summarizeWalletResearch(group.map(outcome))]));
   };
@@ -94,9 +99,10 @@ async function main() {
     flowHealth: health?.value ?? null,
     signals: {
       read: rows.length, truncated: signals.length > 10_000,
+      window: { from: rows[0]?.createdAt.toISOString() ?? null, to: rows.at(-1)?.createdAt.toISOString() ?? null },
       cohorts: summarizeWalletResearch(rows.map(outcome)),
       breakdowns,
-      recent: rows.slice(-20).reverse().map(s => ({
+      recent: recentSignals.map(s => ({
         at: s.createdAt.toISOString(), side: s.side, token: s.token, wallets: s.walletCount, entities: s.independentEntities,
         netSol: Number(s.netFlowSol), liquidityUsd: liquidity(s), holders: holders(s),
         measurements: s.measurements.map(m => ({ hours: m.horizonHours, status: m.status, returnPct: m.returnPct == null ? null : Number(m.returnPct) })),
