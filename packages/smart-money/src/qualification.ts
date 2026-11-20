@@ -4,7 +4,7 @@ import type { TradeRow, WalletStats } from './stats';
  * Starting values require forward validation. Costs/transfers outside parsed swaps remain unknown. */
 export const RESEARCH_QUALIFICATION = {
   version: 1, minClosedLegs: 20, minClosedTokens: 5, minObservedDays: 7,
-  minScore: 70, maxProfileAgeMs: 45 * 60_000, maxHistoryAgeMs: 24 * 3_600_000,
+  minScore: 60, maxProfileAgeMs: 45 * 60_000, maxHistoryAgeMs: 24 * 3_600_000,
   maxTradeAgeMs: 14 * 86_400_000,
   deepCappedMinClosedLegs: 100, deepCappedMinObservedDays: 21,
 } as const;
@@ -55,10 +55,14 @@ export function qualifyWallet(review: string, active: boolean, sampleValue: unkn
   if (!finite(s.score) || s.score < L.minScore) reasons.push('SCORE_BELOW_MINIMUM');
   if (!finite(s.pnlSol) || s.pnlSol <= 0 || !finite(s.medianRoi) || s.medianRoi <= 0) reasons.push('POSITIVE_RESULTS_REQUIRED');
   if (!fresh(s.lastTradeAt, now, L.maxTradeAgeMs)) reasons.push('ACTIVITY_STALE_OR_MISSING');
-  const fullUncappedHistory = fresh(h.checkedAt, now, L.maxHistoryAgeMs) && h.capped === false && h.skipped === 0 && h.windowDays === 30 &&
+  const historyScanned = finite(h.scanned) ? h.scanned : 0;
+  const historySkipped = finite(h.skipped) ? h.skipped : Infinity;
+  const historySkipLimit = historyScanned >= 100 ? Math.floor(historyScanned * 0.01) : 0;
+  const skippedAcceptable = historySkipped >= 0 && historySkipped <= historySkipLimit;
+  const fullUncappedHistory = fresh(h.checkedAt, now, L.maxHistoryAgeMs) && h.capped === false && skippedAcceptable && h.windowDays === 30 &&
     fresh(h.coveredTo, now, L.maxHistoryAgeMs) && typeof h.coveredFrom === 'string' && typeof h.coveredTo === 'string' &&
     Number.isFinite(Date.parse(h.coveredFrom)) && Date.parse(h.coveredTo) - Date.parse(h.coveredFrom) >= 30 * 86_400_000;
-  const deepLiveSampleHistory = h.capped === true && h.skipped === 0 && h.windowDays === 30 &&
+  const deepLiveSampleHistory = h.capped === true && skippedAcceptable && h.windowDays === 30 &&
     fresh(h.checkedAt, now, L.maxHistoryAgeMs) && fresh(s.lastTradeAt, now, 86_400_000) &&
     finite(s.closedTrades) && s.closedTrades >= L.deepCappedMinClosedLegs &&
     finite(s.observedDays) && s.observedDays >= L.deepCappedMinObservedDays;

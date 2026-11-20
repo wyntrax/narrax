@@ -45,4 +45,11 @@ describe('research qualification independent of historical score',()=>{
   expect(qualifyWallet('APPROVED',true,{...highSample,unmatchedSells:20},history,now).reasons).toContain('INCOMPLETE_COST_BASIS');
   expect(qualifyWallet('APPROVED',true,{...sample,closedTrades:99,unmatchedSells:1,excessSellUnits:0},history,now).reasons).toContain('INCOMPLETE_COST_BASIS');
  });
+ it('enforces calibrated minScore (60) and tolerates <=1% skipped history swaps on 100+ scanned swaps',()=>{
+  expect(qualifyWallet('APPROVED',true,{...sample,score:62},history,now).eligible).toBe(true);
+  expect(qualifyWallet('APPROVED',true,{...sample,score:59},history,now).reasons).toContain('SCORE_BELOW_MINIMUM');
+  expect(qualifyWallet('APPROVED',true,sample,{...history,scanned:1000,skipped:10},now).eligible).toBe(true);
+  expect(qualifyWallet('APPROVED',true,sample,{...history,scanned:1000,skipped:11},now).reasons).toContain('HISTORY_INCOMPLETE_OR_STALE');
+  expect(qualifyWallet('APPROVED',true,sample,{...history,scanned:99,skipped:1},now).reasons).toContain('HISTORY_INCOMPLETE_OR_STALE');
+ });
 });

@@ -45,3 +45,11 @@ it('applies the 1.5% unmatched-sell tolerance on 100+ ALL-band closes while stil
  expect(rankingReasons({...largeSample,unmatchedSells:4},band,history,now,false,false).reasons).toContain('INCOMPLETE_COST_BASIS');
  expect(rankingReasons({...largeSample,invalidTrades:1},band,history,now,false,false).reasons).toContain('INCOMPLETE_COST_BASIS');
 });
+it('tolerates <=1% skipped history swaps when scanned >= 100 on both uncapped and deep live samples',()=>{
+ const allBand={...band,band:'ALL',closedPositions:100,observedDays:21} as WalletPerformance['bands'][number];
+ const deepSample={...sample,bands:[allBand,band]} as WalletPerformance;
+ expect(rankingReasons(sample,band,{...history,scanned:1000,skipped:10},now,false,false)).toEqual({historyComplete:true,reasons:[]});
+ expect(rankingReasons(deepSample,band,{...history,capped:true,scanned:1000,skipped:10},now,false,false)).toEqual({historyComplete:false,reasons:[]});
+ expect(rankingReasons(deepSample,band,{...history,capped:true,scanned:1000,skipped:11},now,false,false).reasons).toContain('HISTORY_INCOMPLETE');
+ expect(rankingReasons(sample,band,{...history,skipped:1},now,false,false).reasons).toContain('HISTORY_INCOMPLETE');
+});

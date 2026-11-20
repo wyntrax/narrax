@@ -58,3 +58,14 @@ it('separates first entries, recycled buy turnover, closed position spend and wa
   expect(small).toMatchObject({medianEntrySol:'1.000015',deployedSol:'2.1',medianClosedPositionSol:'1.05',entryCapKnownPositions:2,entryCapTotalPositions:3});
   expect(result.bands.find(b=>b.band==='ALL')).toMatchObject({deployedSol:'102.1',medianClosedPositionSol:'1.05',medianEntrySol:'2'});
 });
+it('treats sells within 1e-9 relative float dust as full closes without false contamination',()=>{
+  const rows=[
+    trade('BUY','1','1000000',0,'85000','overshoot'),
+    trade('SELL','2','1000000.0005',10,'85000','overshoot'),
+    trade('BUY','1','1000000',20,'85000','undershoot'),
+    trade('SELL','1.5','999999.9995',30,'85000','undershoot'),
+  ];
+  const result=computeWalletPerformance(rows,now);
+  expect(result).toMatchObject({unmatchedSells:0,invalidTrades:0});
+  expect(result.bands.find(b=>b.band==='SMALL_CAP')).toMatchObject({closedPositions:2,openPositions:0,wins:2,realisedPnlSol:'1.5'});
+});

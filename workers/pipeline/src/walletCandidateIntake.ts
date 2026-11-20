@@ -3,8 +3,9 @@ import { isSolanaAddress } from '@narra/shared';
 import { z } from 'zod';
 
 export const WALLET_INTAKE_KEY = 'wallet.evaluation.intake';
-export const WALLET_INTAKE_LIMITS = { capacity: 200, perCycle: 2, staleProvisionalMs: 7 * 86_400_000, evictMaxScore: 40 } as const;
-const Snapshot = z.object({ checkedAt: z.string().datetime(), items: z.array(z.object({ address: z.string(), scannedTokens: z.number().int().min(2) })).max(50) });
+export const WALLET_INTAKE_LIMITS = { capacity: 200, perCycle: 2, staleProvisionalMs: 7 * 86_400_000, evictMaxScore: 40, minMedianQuoteSol: 0.01 } as const;
+const SpendSummary = z.object({ matchedTokens: z.number().int().nonnegative(), medianMatchedQuoteSol: z.number().nullable() }).optional();
+const Snapshot = z.object({ checkedAt: z.string().datetime(), items: z.array(z.object({ address: z.string(), scannedTokens: z.number().int().min(2), spend: SpendSummary })).max(50) });
 
 /** Repeat early participation is a lead, never proof of returns. Intake is independently
  * enabled by history collection, not by publication. Existing reviews are never overwritten. */
@@ -17,7 +18,11 @@ export async function intakeEmergingWallets(db: PrismaClient, now = new Date()) 
       const count = await tx.trackedWallet.count({ where: { source: 'DISCOVERED', active: true, researchReview: { not: 'REJECTED' } } });
       out.capacity = Math.max(0, WALLET_INTAKE_LIMITS.capacity - count);
       const rejected = new Set((await tx.walletCandidate.findMany({ where: { status: 'REJECTED' }, select: { address: true } })).map(w => w.address));
-      const candidates = snapshot.data.items.filter(w => isSolanaAddress(w.address) && !rejected.has(w.address));
+      const candidates = snapshot.data.items.filter(w =>
+        isSolanaAddress(w.address) &&
+        !rejected.has(w.address) &&
+        !(w.spend && w.spend.matchedTokens >= 2 && w.spend.medianMatchedQuoteSol !== null && w.spend.medianMatchedQuoteSol < WALLET_INTAKE_LIMITS.minMedianQuoteSol),
+      );
       const existing = new Set((await tx.trackedWallet.findMany({ where: { address: { in: candidates.map(w => w.address) } }, select: { address: true } })).map(w => w.address));
       const pending = candidates.filter(w => !existing.has(w.address));
       if (out.capacity === 0 && pending.length > 0 && typeof tx.trackedWallet.updateMany === 'function') {

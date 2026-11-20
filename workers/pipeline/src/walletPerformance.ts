@@ -44,11 +44,14 @@ function accountPositions(rows: PerformanceTrade[], now: Date) {
         qty: new D(0), cost: new D(0), invested: new D(0), entry: sol, pnl: new D(0), sold: false }; positions.push(p); active.set(t.tokenId,p); }
       p.qty = p.qty.plus(qty); p.cost = p.cost.plus(sol); p.invested = p.invested.plus(sol); p.last = +t.at;
     } else {
-      if (!p || qty.gt(p.qty)) { unmatchedSells++; contaminated.add(t.tokenId); active.delete(t.tokenId); continue; }
-      const cost = p.cost.mul(qty).div(p.qty);
-      p.pnl = p.pnl.plus(sol.minus(cost)); p.qty = p.qty.minus(qty); p.cost = p.cost.minus(cost); p.last = +t.at;
+      const eps = p ? D.max(new D('1e-9'), p.qty.mul('1e-9')) : null;
+      if (!p || qty.gt(p.qty.plus(eps!))) { unmatchedSells++; contaminated.add(t.tokenId); active.delete(t.tokenId); continue; }
+      const fullClose = p.qty.minus(qty).lte(eps!);
+      const soldQty = fullClose ? p.qty : qty;
+      const cost = fullClose ? p.cost : p.cost.mul(soldQty).div(p.qty);
+      p.pnl = p.pnl.plus(sol.minus(cost)); p.qty = fullClose ? new D(0) : p.qty.minus(soldQty); p.cost = fullClose ? new D(0) : p.cost.minus(cost); p.last = +t.at;
       p.firstSell ??= +t.at; p.sold = true;
-      if (p.qty.eq(0)) { p.close = +t.at; active.delete(t.tokenId); }
+      if (fullClose) { p.close = +t.at; active.delete(t.tokenId); }
     }
   }
   // Incomplete basis can distort even earlier positions for that token; exclude all of them.

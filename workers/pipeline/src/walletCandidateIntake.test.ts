@@ -44,3 +44,20 @@ it('evicts stale low-score PROVISIONAL wallets when capacity is full and new can
  expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['stale-unscored','stale-low']}},data:{active:false}});
  expect(createMany).toHaveBeenCalledTimes(1);
 });
+it('skips confirmed micro-dust bots with matched median quote below 0.01 SOL while keeping unmeasured or larger candidates',async()=>{
+ const createMany=vi.fn(async(args:{data:{address:string}[]})=>({count:args.data.length}));
+ const upsert=vi.fn(async()=>({}));
+ const tx={
+  $executeRaw:vi.fn(async()=>0),
+  systemSetting:{findUnique:async()=>({value:{checkedAt:now.toISOString(),items:[
+   {address:addresses[0],scannedTokens:4,spend:{matchedTokens:3,medianMatchedQuoteSol:0.00005}},
+   {address:addresses[1],scannedTokens:4,spend:{matchedTokens:3,medianMatchedQuoteSol:0.25}},
+  ]}}),upsert},
+  trackedWallet:{count:async()=>0,findMany:async()=>[],createMany},
+  walletCandidate:{findMany:async()=>[]},
+ };
+ const db={$transaction:async(fn:(tx:unknown)=>unknown)=>fn(tx)} as unknown as PrismaClient;
+ const res=await intakeEmergingWallets(db,now);
+ expect(res).toMatchObject({added:1,considered:1});
+ expect(createMany.mock.calls[0]?.[0].data.map(w=>w.address)).toEqual([addresses[1]]);
+});
