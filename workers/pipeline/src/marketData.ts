@@ -8,7 +8,7 @@ import { storeMarketSnapshot } from './marketSnapshot';
 import { pruneExpiredMetricProvenance, pruneExpiredTokenMetadata, pruneStaleTokenSnapshots, pruneExpiredWalletTrades } from './metricRetention';
 import { SOL_HISTORY_PREFIX } from './walletResearchEvidence';
 import { COVERAGE_LIMITS, readSocialPriority, saveResearchDiagnostics, SOCIAL_INFO_CURSOR_KEY } from './researchDiagnostics';
-import {refreshHolderFallback,type HolderFailureReasons} from './holderFallback';
+import {refreshHolderFallback,holderFallbackBudget,type HolderFailureReasons} from './holderFallback';
 import type {HolderRpcSource} from './holderRpc';
 import {EARLY_RULES} from '@narra/token-intel';
 
@@ -555,7 +555,7 @@ export async function refreshMarketData(
         [EARLY_RULES.trencher,EARLY_RULES.holder].some(p=>s.liquidityUsd>=p.minLiquidityUsd&&s.liquidityUsd/s.marketCapUsd>=p.minLiquidityToCap&&age>=p.minAgeMinutes&&age<=p.maxAgeMinutes);
     };
     const candidates=tokens.filter(t=>!cohort.has(t.id)&&(reachable(t)||(walletPriorityIds.has(t.id)&&(snaps.get(t.mint)?.liquidityUsd??0)>=20_000)));
-    Object.assign(out,await refreshHolderFallback(db,deps.holderFallback,candidates));
+    Object.assign(out,await refreshHolderFallback(db,deps.holderFallback,candidates,undefined,{...holderFallbackBudget(),priorityIds:[...flowPriorityIds]}));
   }
   // Advance only through attempted members of each rotating group.
   const lastDiscovery = discoveryIds.filter(id => attempted.has(discoveryById.get(id)?.mint ?? '')).at(-1);

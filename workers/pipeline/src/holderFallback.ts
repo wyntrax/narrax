@@ -33,7 +33,7 @@ export const HOLDER_FALLBACK_LIMITS={
  minDeadlineMs:5_000,
 } as const;
 
-export interface HolderFallbackBudget{perRun:number;deadlineMs:number;stateKey?:string;/** Real retrieval time; defaults to the scheduling clock for deterministic tests. */retrievedAt?:()=>Date}
+export interface HolderFallbackBudget{perRun:number;deadlineMs:number;stateKey?:string;/** Real retrieval time; defaults to the scheduling clock for deterministic tests. */retrievedAt?:()=>Date;/** Tokens to serve before the age-ordered backlog (active wallet-flow evidence). */priorityIds?:readonly string[]}
 
 /** Bounded operator tuning. Invalid or out-of-range values fall back to the defaults. */
 export function holderFallbackBudget(env:NodeJS.ProcessEnv=process.env):HolderFallbackBudget{
@@ -132,7 +132,12 @@ export async function refreshHolderFallback(
  const isFresh=(id:string)=>{const at=newest.get(id);return at!=null&&at<=+now&&+now-at<=RADAR_EVIDENCE_LIMITS.holdersMaxAgeMs;};
  const order=(id:string)=>newest.get(id)??-Infinity;
  const cursor=state?.cursor??'';
+ // Flow candidates are time-sensitive: their publication gate needs a holder row while the
+ // observed flow is still inside the 60-minute window, so they jump ahead of the backlog.
+ const priority=new Set(opts.priorityIds??[]);
  const ordered=[...unique].sort((a,b)=>{
+  const priorityOrder=(priority.has(a.id)?0:1)-(priority.has(b.id)?0:1);
+  if(priorityOrder!==0)return priorityOrder;
   const byAge=order(a.id)-order(b.id);
   if(byAge!==0)return byAge;
   // Equal (or unknown) ages rotate from the saved cursor so one run cannot always win.
