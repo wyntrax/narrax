@@ -423,7 +423,7 @@ export async function refreshMarketData(
     if (!s) { out.tokensWithoutData++; continue; }
     out.tokensWithPrice++;
     // Tie provider provenance to the exact metric row. Older/imported rows never inherit this trust.
-    await db.$transaction(tx => storeMarketSnapshot(tx, t.id, s, deps.quotes.name, now));
+    await db.$transaction(tx => storeMarketSnapshot(tx, t.id, s, deps.quotes.name, now), { timeout: 30_000, maxWait: 10_000 });
     out.metricsWritten++;
     if (s.marketCapIsFdv) out.fdvUsedAsMarketCap++;
     const patch: Prisma.TokenUpdateInput = {};

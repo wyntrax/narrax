@@ -15,12 +15,21 @@ export const MIN_ENTRIES = 5;
 
 /** The first buy of each wallet in each token. Later buys of the same token are adds, not entries. */
 export function firstEntries(buys: Entry[]): Entry[] {
-  const seen = new Map<string, Entry>();
-  for (const b of [...buys].sort((a, c) => a.at.getTime() - c.at.getTime())) {
-    const k = `${b.wallet}|${b.token}`;
-    if (!seen.has(k)) seen.set(k, b);
+  const byWallet = new Map<string, Map<string, Entry>>();
+  for (const b of buys) {
+    let tokens = byWallet.get(b.wallet);
+    if (!tokens) {
+      tokens = new Map();
+      byWallet.set(b.wallet, tokens);
+    }
+    const prev = tokens.get(b.token);
+    if (!prev || b.at.getTime() < prev.at.getTime()) tokens.set(b.token, b);
   }
-  return [...seen.values()];
+  const out: Entry[] = [];
+  for (const tokens of byWallet.values()) {
+    for (const e of tokens.values()) out.push(e);
+  }
+  return out;
 }
 
 /**
@@ -31,15 +40,39 @@ export function firstEntries(buys: Entry[]): Entry[] {
 export function computeLeaderStats(buys: Entry[], windowMs = FOLLOW_WINDOW_MS): Map<string, LeaderStats> {
   const entries = firstEntries(buys);
   const byToken = new Map<string, Entry[]>();
-  for (const e of entries) byToken.set(e.token, [...(byToken.get(e.token) ?? []), e]);
+  for (const e of entries) {
+    let list = byToken.get(e.token);
+    if (!list) {
+      list = [];
+      byToken.set(e.token, list);
+    }
+    list.push(e);
+  }
 
   const acc = new Map<string, { n: number; led: number; followers: number; followed: number }>();
   for (const list of byToken.values()) {
-    for (const e of list) {
+    const len = list.length;
+    if (len === 1) {
+      const w = list[0]!.wallet;
+      const a = acc.get(w) ?? { n: 0, led: 0, followers: 0, followed: 0 };
+      a.n++;
+      acc.set(w, a);
+      continue;
+    }
+    for (let i = 0; i < len; i++) {
+      const e = list[i]!;
       const a = acc.get(e.wallet) ?? { n: 0, led: 0, followers: 0, followed: 0 };
       const t = e.at.getTime();
-      const after = list.filter((o) => o.wallet !== e.wallet && o.at.getTime() > t && o.at.getTime() <= t + windowMs).length;
-      const before = list.some((o) => o.wallet !== e.wallet && o.at.getTime() < t && o.at.getTime() >= t - windowMs);
+      let after = 0;
+      let before = false;
+      for (let j = 0; j < len; j++) {
+        if (i === j) continue;
+        const o = list[j]!;
+        if (o.wallet === e.wallet) continue;
+        const ot = o.at.getTime();
+        if (ot > t && ot <= t + windowMs) after++;
+        else if (!before && ot < t && ot >= t - windowMs) before = true;
+      }
       a.n++; a.followers += after; if (after > 0) a.led++; if (before) a.followed++;
       acc.set(e.wallet, a);
     }

@@ -19,10 +19,18 @@ export function detectTimingClusters(buys: Entry[], opts: { windowMs?: number; m
   const minShared = opts.minSharedTokens ?? 3;
   const entries = firstEntries(buys);
   const byToken = new Map<string, Entry[]>();
-  for (const e of entries) byToken.set(e.token, [...(byToken.get(e.token) ?? []), e]);
+  for (const e of entries) {
+    let list = byToken.get(e.token);
+    if (!list) {
+      list = [];
+      byToken.set(e.token, list);
+    }
+    list.push(e);
+  }
 
   const pairs = new Map<string, number>();
   for (const list of byToken.values()) {
+    if (list.length < 2) continue;
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
         const x = list[i]!, y = list[j]!;

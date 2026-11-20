@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from '@narra/database';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import {bulkSettings,bulkProfiles,PUBLICATION_BATCH_SIZE,type ProfilePublication} from './bulkPublication';
-import {readIntelligenceInputs} from './walletIntelligenceRead';
+import { streamIntelligenceInputs, type IntelligenceTradeRow } from './walletIntelligenceRead';
 import { computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
 import {
   classifyStyle, computeConsensus, computeLeaderStats, computeWalletStats, detectTimingClusters, holdingPatterns, rotationRate, walletScore, MIN_CLOSED_LEGS, researchSample,
@@ -27,7 +27,42 @@ export interface RecomputeSummary {
 }
 
 const WINDOW = '30D';
+export const PERFORMANCE_TRADE_CAP = 10_000;
 const toNum = (v: { toString(): string } | null) => (v == null ? 0 : Number(v.toString()));
+const plainObject = (v: unknown): Record<string, unknown> | null =>
+  v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+
+/** Keeps only the frozen pre-trade DexScreener marketCapUsd provenance needed by `computeWalletPerformance`,
+ * converting Prisma Decimals to strings and dropping large raw webhook payloads from V8 heap. */
+export function slimPerformanceTrade(row: IntelligenceTradeRow): PerformanceTrade {
+  let evidence: PerformanceTrade['evidence'] = null;
+  let marketCapUsd: string | null = null;
+  if (row.side === 'BUY') {
+    const ev = plainObject(row.evidence);
+    const market = ev ? plainObject(ev.market) : null;
+    if (
+      ev &&
+      market &&
+      typeof ev.eventAt === 'string' &&
+      market.source === 'dexscreener' &&
+      market.marketCapIsFdv === false &&
+      typeof market.at === 'string'
+    ) {
+      evidence = { eventAt: ev.eventAt, market: { at: market.at, source: 'dexscreener', marketCapIsFdv: false } };
+      marketCapUsd = row.marketCapUsd == null ? null : row.marketCapUsd.toString();
+    }
+  }
+  return {
+    id: row.id,
+    tokenId: row.tokenId,
+    side: row.side,
+    amountSol: row.amountSol.toString(),
+    tokenAmount: row.tokenAmount == null ? null : row.tokenAmount.toString(),
+    marketCapUsd,
+    evidence,
+    at: row.at,
+  };
+}
 
 /**
  * Recomputes wallet scores, leader scores, styles, timing clusters and per-token consensus from stored trades.
@@ -38,35 +73,82 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   const windowDays = opts.windowDays ?? 30;
   const consensusMinutes = opts.consensusMinutes ?? 60;
   const since = new Date(now.getTime() - windowDays * 86_400_000);
+  const perfSince = +now - 30 * 86_400_000;
+  const sinceMs = +since;
+  const consensusCutoff = now.getTime() - consensusMinutes * 60_000;
 
-  const started=performance.now();
-  const {wallets,rows,pages}=await readIntelligenceInputs(db,new Date(Math.min(+since,+now-30*86_400_000)),now);
-  const loaded=performance.now();
-
-  // Deactivated wallets keep their history but take no part in scores, clusters or consensus.
-  const activeIds = new Set(wallets.map((w) => w.id));
-  const trades: TradeRow[] = [];
   const performanceRows = new Map<string, PerformanceTrade[]>();
+  const performanceCapped = new Set<string>();
   const byWallet = new Map<string, TradeRow[]>();
-  let processed=0;
-  for (const row of rows) {
-    if (+row.at >= +now-30*86_400_000) {
-      const mine = performanceRows.get(row.walletId) ?? []; mine.push(row); performanceRows.set(row.walletId,mine);
-    }
-    if (activeIds.has(row.walletId) && row.tokenAmount !== null && +row.at >= +since) {
-      const t: TradeRow = { wallet: row.walletId, token: row.tokenId, side: row.side, sol: toNum(row.amountSol), qty: toNum(row.tokenAmount), at: row.at };
-      trades.push(t);
-      const mine = byWallet.get(t.wallet) ?? []; mine.push(t); byWallet.set(t.wallet,mine);
-    }
-    if (++processed%2000===0) await yieldToEventLoop();
-  }
+  const firstBuyByWallet = new Map<string, Map<string, Date>>();
+  const recentPerToken = new Map<string, ConsensusEvent[]>();
+  let tradesUsed = 0;
 
-  const buys: Entry[] = trades.filter((t) => t.side === 'BUY').map((t) => ({ wallet: t.wallet, token: t.token, at: t.at }));
+  const started = performance.now();
+  const { wallets, pages } = await streamIntelligenceInputs(db, new Date(Math.min(sinceMs, perfSince)), now, (page, activeIds) => {
+    for (const row of page) {
+      const rowAt = +row.at;
+      if (rowAt >= perfSince && !performanceCapped.has(row.walletId)) {
+        let mine = performanceRows.get(row.walletId);
+        if (!mine) {
+          mine = [];
+          performanceRows.set(row.walletId, mine);
+        }
+        if (mine.length >= PERFORMANCE_TRADE_CAP) {
+          performanceCapped.add(row.walletId);
+        } else {
+          mine.push(slimPerformanceTrade(row));
+        }
+      }
+      if (activeIds.has(row.walletId) && row.tokenAmount !== null && rowAt >= sinceMs) {
+        const t: TradeRow = {
+          wallet: row.walletId,
+          token: row.tokenId,
+          side: row.side,
+          sol: toNum(row.amountSol),
+          qty: toNum(row.tokenAmount),
+          at: row.at,
+        };
+        tradesUsed++;
+        let mine = byWallet.get(t.wallet);
+        if (!mine) {
+          mine = [];
+          byWallet.set(t.wallet, mine);
+        }
+        mine.push(t);
+        if (row.side === 'BUY') {
+          let firsts = firstBuyByWallet.get(t.wallet);
+          if (!firsts) {
+            firsts = new Map<string, Date>();
+            firstBuyByWallet.set(t.wallet, firsts);
+          }
+          const prev = firsts.get(t.token);
+          if (!prev || rowAt < +prev) firsts.set(t.token, row.at);
+        }
+        if (rowAt >= consensusCutoff) {
+          let events = recentPerToken.get(t.token);
+          if (!events) {
+            events = [];
+            recentPerToken.set(t.token, events);
+          }
+          events.push({ wallet: t.wallet, side: t.side, sol: t.sol, at: t.at });
+        }
+      }
+    }
+  });
+  const loaded = performance.now();
+
+  const firstBuyEntries: Entry[] = [];
+  for (const [wallet, tokens] of firstBuyByWallet) {
+    for (const [token, at] of tokens) firstBuyEntries.push({ wallet, token, at });
+  }
+  firstBuyByWallet.clear();
+
+  const leaders = computeLeaderStats(firstBuyEntries);
   await yieldToEventLoop();
-  const leaders = computeLeaderStats(buys);
+  const { clusters, edges } = detectTimingClusters(firstBuyEntries);
   await yieldToEventLoop();
-  const { clusters, edges } = detectTimingClusters(buys);
-  await yieldToEventLoop();
+  firstBuyEntries.length = 0;
 
   // Only wallets with no cluster, or a timing cluster, can be reassigned. Clusters from other evidence are left alone.
   const reassignable = new Set(wallets.filter((w) => !w.cluster || w.cluster.label === 'timing').map((w) => w.id));
@@ -87,20 +169,24 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
     // leases and other queues stay responsive, then publish atomically as before.
     await yieldToEventLoop();
     const performanceKey = `wallet.performance.${w.id}`, observed = performanceRows.get(w.id) ?? [];
-    const performance = computeWalletPerformance(observed.slice(0,10_000),now,observed.length>10_000);
+    const performance = computeWalletPerformance(observed, now, performanceCapped.has(w.id));
+    performanceRows.delete(w.id);
     settings.push({key:performanceKey,value:performance});
     const mine = byWallet.get(w.id) ?? [];
+    let observedBuys = 0, observedSells = 0;
+    for (const t of mine) { if (t.side === 'BUY') observedBuys++; else observedSells++; }
     const stats = computeWalletStats(mine);
     const score = walletScore(stats);
     const sample = researchSample(mine, stats, score, now);
     const researchKey = `wallet.research.${w.id}`;
     settings.push({key:researchKey,value:{...sample}});
     const key = `wallet.intelligence.${w.id}`;
-    const value = { checkedAt: now.toISOString(), windowDays, observedTrades: mine.length, observedBuys: mine.filter(t=>t.side==='BUY').length, observedSells: mine.filter(t=>t.side==='SELL').length, unmatchedSells: stats.unmatchedSells, closedTrades: stats.legs.length, requiredClosedTrades: MIN_CLOSED_LEGS, status: score === null ? 'INSUFFICIENT_HISTORY' : 'READY' };
+    const value = { checkedAt: now.toISOString(), windowDays, observedTrades: mine.length, observedBuys, observedSells, unmatchedSells: stats.unmatchedSells, closedTrades: stats.legs.length, requiredClosedTrades: MIN_CLOSED_LEGS, status: score === null ? 'INSUFFICIENT_HISTORY' : 'READY' };
     settings.push({key,value});
-    if (score === null) { unscored.push(w.id); continue; }
+    if (score === null) { byWallet.delete(w.id); unscored.push(w.id); continue; }
     const leader = leaders.get(w.id);
     const style = classifyStyle(stats, leader, rotationRate(mine));
+    byWallet.delete(w.id);
     const pat = holdingPatterns(stats.legs);
     const leaderScore = leader?.leaderScore ?? 0;
     // A wallet in a non-timing cluster (for example a funding cluster) keeps it, so linked wallets count once in consensus.
@@ -122,15 +208,9 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   const rel = edges.filter((e) => reassignable.has(e.a) && reassignable.has(e.b));
 
   // Consensus per token over the recent window.
-  const cutoff = now.getTime() - consensusMinutes * 60_000;
-  const recent = trades.filter((t) => t.at.getTime() >= cutoff);
-  const perToken = new Map<string, ConsensusEvent[]>();
-  for (const t of recent) {
-    const events = perToken.get(t.token) ?? [];
-    events.push({ wallet: t.wallet, side: t.side, sol: t.sol, at: t.at }); perToken.set(t.token,events);
-  }
+  let processed = 0;
   let signals = 0;
-  for (const [tokenId, events] of perToken) {
+  for (const [tokenId, events] of recentPerToken) {
     if (++processed%2000===0) await yieldToEventLoop();
     const c = computeConsensus(events, info);
     if (!c) continue;
@@ -163,7 +243,7 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
     return ops.length;
   },{timeout:30_000,maxWait:10_000});
   await pruneExpiredConsensusSignals(db, now);
-  return { walletsScored: scored, walletsUnscored: unscored.length, clusters: clusterCount, consensusSignals: signals, tradesUsed: trades.length,
+  return { walletsScored: scored, walletsUnscored: unscored.length, clusters: clusterCount, consensusSignals: signals, tradesUsed,
     readPages:pages,loadMs:Math.round(loaded-started),computeMs:Math.round(prepared-loaded),publishMs:Math.round(performance.now()-prepared),publicationOperations };
 }
 
