@@ -7,10 +7,14 @@ const fresh = (v: unknown, now: Date, age: number) => typeof v === 'string' && D
 export function rankingReasons(performance: WalletPerformance, band: WalletPerformance['bands'][number], history: unknown, now: Date, linked: boolean, developer: boolean, minMedianPositionSol = 0.01) {
   const h = obj(history), reasons: string[] = [];
   const scope = performance.bands?.find((b) => b.band === 'ALL') ?? band;
-  const historyComplete = h.capped === false && h.skipped === 0 && h.windowDays === 30 && fresh(h.checkedAt,now,86_400_000) &&
+  const historyScanned = typeof h.scanned === 'number' && Number.isFinite(h.scanned) ? h.scanned : 0;
+  const historySkipped = typeof h.skipped === 'number' && Number.isFinite(h.skipped) ? h.skipped : Infinity;
+  const historySkipLimit = historyScanned >= 100 ? Math.floor(historyScanned * 0.01) : 0;
+  const skippedAcceptable = historySkipped >= 0 && historySkipped <= historySkipLimit;
+  const historyComplete = h.capped === false && skippedAcceptable && h.windowDays === 30 && fresh(h.checkedAt,now,86_400_000) &&
     fresh(h.coveredTo,now,86_400_000) && typeof h.coveredFrom === 'string' && typeof h.coveredTo === 'string' &&
     Date.parse(h.coveredTo)-Date.parse(h.coveredFrom)>=30*86_400_000;
-  const deepLiveSampleHistory = h.capped === true && h.skipped === 0 && h.windowDays === 30 &&
+  const deepLiveSampleHistory = h.capped === true && skippedAcceptable && h.windowDays === 30 &&
     fresh(h.checkedAt, now, 86_400_000) && fresh(performance.lastTradeAt, now, 86_400_000) &&
     scope.closedPositions >= RESEARCH_QUALIFICATION.deepCappedMinClosedLegs &&
     scope.observedDays >= RESEARCH_QUALIFICATION.deepCappedMinObservedDays;

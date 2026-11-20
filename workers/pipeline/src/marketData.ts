@@ -28,7 +28,12 @@ export const MARKET_DATA_LIMITS = {
   /** Placeholder tokens with no resolved symbol: bounded retries for metadata backfill. */
   maxUnknownTokensPerRun: 5,
   /** Recent tracked-wallet tokens rotate independently of the general backlog. */
-  maxWalletTokensPerRun: 10,
+  maxWalletTokensPerRun: 25,
+  /** Dedicated token-info slots so active wallet-flow tokens receive fresh risk/holder metadata. */
+  maxWalletInfoSlots: 6,
+  walletFlowWindowMs: 60 * 60_000,
+  walletFlowMinSol: 0.25,
+  walletFlowPriceFreshMs: 10 * 60_000,
   /** Bounded lane for active monitors, emerging-narrative tokens, and recently refreshed tokens. */
   maxFocusTokensPerRun: 25,
   /** Only the strongest active narratives feed the focus lane; this keeps the set small enough to refresh often. */
@@ -54,6 +59,7 @@ export const GENERAL_PRICE_CURSOR_KEY = 'market.generalPriceCursor';
 export const INFO_CURSOR_KEY = 'market.infoCursor';
 export const SOCIAL_PRICE_CURSOR_KEY = 'market.socialPriceCursor';
 export const WALLET_PRICE_CURSOR_KEY = 'market.walletPriceCursor';
+export const WALLET_INFO_CURSOR_KEY = 'market.walletInfoCursor';
 
 export type PriceCoverageLane = 'outcomes' | 'discovery' | 'wallets' | 'social' | 'launches' | 'focus' | 'unpriced' | 'general';
 export interface PriceCoverageCounts {
@@ -208,10 +214,33 @@ export async function refreshMarketData(
   const priorIds = [...priority, ...discovery].map(t => t.id);
   const walletBudget = Math.min(L.maxWalletTokensPerRun, Math.floor((cap-priorIds.length)/2));
   const walletCursor = await readCursor(db,WALLET_PRICE_CURSOR_KEY);
-  const walletWhere: Prisma.TokenWhereInput = { blacklisted:false, mint:{not:WSOL_MINT}, id:{notIn:priorIds},
+  const flowFreshCutoff = new Date(+now - L.walletFlowPriceFreshMs);
+  const flowWindowStart = new Date(+now - L.walletFlowWindowMs);
+  const flowBudget = Math.min(10, Math.floor(walletBudget / 2));
+  const flowPriority = flowBudget ? await db.token.findMany({
+    where: {
+      blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: priorIds },
+      metrics: { none: { at: { gte: flowFreshCutoff } } },
+      walletTrades: {
+        some: {
+          at: { gte: flowWindowStart, lte: now },
+          OR: [
+            { wallet: { active: true, researchReview: 'APPROVED' } },
+            { amountSol: { gte: L.walletFlowMinSol }, wallet: { active: true, researchReview: { not: 'REJECTED' } } },
+          ],
+        },
+      },
+    },
+    orderBy: { id: 'desc' }, take: flowBudget, select: tokenSelect,
+  }) : [];
+  const flowPriorityIds = flowPriority.map(t => t.id);
+  const rotatingWalletBudget = walletBudget - flowPriority.length;
+  const walletWhere: Prisma.TokenWhereInput = { blacklisted:false, mint:{not:WSOL_MINT}, id:{notIn:[...priorIds, ...flowPriorityIds]},
     walletTrades:{some:{at:{gte:new Date(+now-L.activeWindowMs),lte:now},wallet:{active:true,researchReview:{not:'REJECTED'}}}} };
-  const wallets = walletBudget ? await db.token.findMany({where:{AND:[walletWhere,...(walletCursor?[{id:{gt:walletCursor}}]:[])]},orderBy:{id:'asc'},take:walletBudget,select:tokenSelect}) : [];
-  if (walletCursor && wallets.length<walletBudget) wallets.push(...await db.token.findMany({where:{AND:[walletWhere,{id:{lte:walletCursor}}]},orderBy:{id:'asc'},take:walletBudget-wallets.length,select:tokenSelect}));
+  const rotatingWallets = rotatingWalletBudget ? await db.token.findMany({where:{AND:[walletWhere,...(walletCursor?[{id:{gt:walletCursor}}]:[])]},orderBy:{id:'asc'},take:rotatingWalletBudget,select:tokenSelect}) : [];
+  if (walletCursor && rotatingWallets.length<rotatingWalletBudget) rotatingWallets.push(...await db.token.findMany({where:{AND:[walletWhere,{id:{lte:walletCursor}}]},orderBy:{id:'asc'},take:rotatingWalletBudget-rotatingWallets.length,select:tokenSelect}));
+  const wallets = [...flowPriority, ...rotatingWallets];
+  const walletPriorityIds = new Set(wallets.map(t => t.id));
   priorIds.push(...wallets.map(t=>t.id));
   const socialIds = await readSocialPriority(db, now);
   const socialCursor = await readCursor(db, SOCIAL_PRICE_CURSOR_KEY);
@@ -447,13 +476,21 @@ export async function refreshMarketData(
     const socialDue = (socialInfoCursor ? [...socialEligible.filter(t => t.id > socialInfoCursor), ...socialEligible.filter(t => t.id <= socialInfoCursor)] : socialEligible)
       .slice(0, Math.min(COVERAGE_LIMITS.maxSocialInfoSlots, Math.floor(infoCap / 2)));
     const socialDueIds = new Set(socialDue.map(t => t.id));
-    const generalEligible = eligible.filter(t => !socialDueIds.has(t.id));
-    const due = [...socialDue, ...(infoCursor ? [...generalEligible.filter(t => t.id > infoCursor), ...generalEligible.filter(t => t.id <= infoCursor)] : generalEligible).slice(0, infoCap - socialDue.length)];
+    const walletInfoCursor = await readCursor(db, WALLET_INFO_CURSOR_KEY);
+    const walletInfoEligible = eligible.filter(t => walletPriorityIds.has(t.id) && !socialDueIds.has(t.id));
+    const walletInfoCap = Math.min(L.maxWalletInfoSlots, Math.max(0, Math.floor((infoCap - socialDue.length) / 2)));
+    const walletInfoDue = (walletInfoCursor ? [...walletInfoEligible.filter(t => t.id > walletInfoCursor), ...walletInfoEligible.filter(t => t.id <= walletInfoCursor)] : walletInfoEligible)
+      .slice(0, walletInfoCap);
+    const walletInfoDueIds = new Set(walletInfoDue.map(t => t.id));
+    const generalEligible = eligible.filter(t => !socialDueIds.has(t.id) && !walletInfoDueIds.has(t.id));
+    const generalDue = (infoCursor ? [...generalEligible.filter(t => t.id > infoCursor), ...generalEligible.filter(t => t.id <= infoCursor)] : generalEligible)
+      .slice(0, infoCap - socialDue.length - walletInfoDue.length);
+    const due = [...socialDue, ...walletInfoDue, ...generalDue];
     let developerLookups = 0;
     for (const t of due) {
       const s = snaps.get(t.mint)!;
       let info: TokenInfo | null;
-      const cursorKey = socialDueIds.has(t.id) ? SOCIAL_INFO_CURSOR_KEY : INFO_CURSOR_KEY;
+      const cursorKey = socialDueIds.has(t.id) ? SOCIAL_INFO_CURSOR_KEY : walletInfoDueIds.has(t.id) ? WALLET_INFO_CURSOR_KEY : INFO_CURSOR_KEY;
       try {
         out.infoCalls++;
         if (socialDueIds.has(t.id)) out.socialInfoCalls++;
@@ -517,13 +554,13 @@ export async function refreshMarketData(
       return !!s&&s.marketCapUsd>=EARLY_RULES.minMarketCapUsd&&s.marketCapUsd<EARLY_RULES.maxMarketCapUsd&&age!=null&&
         [EARLY_RULES.trencher,EARLY_RULES.holder].some(p=>s.liquidityUsd>=p.minLiquidityUsd&&s.liquidityUsd/s.marketCapUsd>=p.minLiquidityToCap&&age>=p.minAgeMinutes&&age<=p.maxAgeMinutes);
     };
-    const candidates=tokens.filter(t=>!cohort.has(t.id)&&reachable(t));
+    const candidates=tokens.filter(t=>!cohort.has(t.id)&&(reachable(t)||(walletPriorityIds.has(t.id)&&(snaps.get(t.mint)?.liquidityUsd??0)>=20_000)));
     Object.assign(out,await refreshHolderFallback(db,deps.holderFallback,candidates));
   }
   // Advance only through attempted members of each rotating group.
   const lastDiscovery = discoveryIds.filter(id => attempted.has(discoveryById.get(id)?.mint ?? '')).at(-1);
   if (lastDiscovery) await writeCursor(db, DISCOVERY_PRICE_CURSOR_KEY, lastDiscovery);
-  const lastWallet = wallets.filter(t=>attempted.has(t.mint)).at(-1);
+  const lastWallet = rotatingWallets.filter(t=>attempted.has(t.mint)).at(-1);
   if (lastWallet) await writeCursor(db,WALLET_PRICE_CURSOR_KEY,lastWallet.id);
   const lastGeneral = rest.filter(t => attempted.has(t.mint)).at(-1);
   if (lastGeneral) await writeCursor(db, GENERAL_PRICE_CURSOR_KEY, lastGeneral.id);
