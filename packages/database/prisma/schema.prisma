@@ -627,6 +627,7 @@ model Token {
   walletTrades     WalletTrade[]
   smartSignals     SmartMoneySignal[]
   walletResearchSignals WalletResearchSignal[]
+  walletFlowCandidates WalletFlowCandidate[]
   consensus        ConsensusSignal[]
   opportunities    Opportunity[]
   positions        Position[]
@@ -965,6 +966,27 @@ model WalletResearchSignal {
 
   @@index([tokenId, createdAt])
   @@index([createdAt])
+}
+
+/// Bounded near-miss evidence. A flow that passes the wallet gates but lacks fresh
+/// market/holder/risk evidence is retried for a short window instead of being dropped.
+model WalletFlowCandidate {
+  id                    String    @id @default(cuid())
+  tokenId               String    @unique
+  token                 Token     @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  side                  TradeSide
+  netFlowSol            Decimal
+  supportingEntities    Int
+  walletCount           Int
+  signatures            String[]
+  firstFlowAt           DateTime
+  lastAttemptAt         DateTime
+  expiresAt             DateTime
+  lastReason            String
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([expiresAt])
 }
 
 model WalletResearchMeasurement {
