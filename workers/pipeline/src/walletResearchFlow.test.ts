@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flowWithholdReason, WALLET_FLOW_LIMITS, type FlowGateFacts } from './walletResearch';
+import { flowGateReason, flowWithholdReason, WALLET_FLOW_LIMITS, type FlowGateFacts } from './walletResearch';
 
 const passing: FlowGateFacts = {
   tokenAvailable: true, trades: 2, tooManyTrades: false, qualifiedTrades: 2,
@@ -34,5 +34,10 @@ describe('flowWithholdReason', () => {
 
   it('keeps non-blocking risk flags publishable', () => {
     expect(flowWithholdReason({ ...passing, riskFlags: ['THIN_LIQUIDITY', 'HOLDERS_UNKNOWN'] })).toBeNull();
+  });
+
+  it('exposes the wallet-only gate for pending retries', () => {
+    expect(flowGateReason({ ...passing, newestQualifiedTradeAgeMs: 0 })).toBeNull();
+    expect(flowGateReason({ ...passing, newestQualifiedTradeAgeMs: WALLET_FLOW_LIMITS.newestTradeMs + 1 })).toBe('TRADE_STALE');
   });
 });
