@@ -26,10 +26,14 @@ function ReviewPanel({api,queryKey}:{api:AdminApi;queryKey:readonly unknown[]}){
  const refresh=()=>{void client.invalidateQueries({queryKey});};
  const d=health.data?.discovery,w=health.data?.wallets,s=health.data?.tokenScans,fl=health.data?.flow;
  const reasons=fl?.withheldReasons?Object.entries(fl.withheldReasons).filter(([,count])=>count>0):[];
+ const pendingReasons=fl?.pendingReasons?Object.entries(fl.pendingReasons).filter(([,count])=>count>0):[];
+ const pendingExpired=fl?.pendingExpiredReasons?Object.entries(fl.pendingExpiredReasons).filter(([,count])=>count>0):[];
  return <><button className="research-control" onClick={refresh}>{t('refresh')}</button>{health.isError&&<ResourceError error={health.error} retry={()=>void health.refetch()}/>}
  {health.data&&<p>{t(health.data.enabled?'enabled':'disabled')}</p>}{w&&<Facts items={[{label:t('activeWallets'),value:f.number(w.active,0)},{label:t('discoveredWallets'),value:f.number(w.discovered,0)},{label:t('approvedWallets'),value:f.number(w.approved,0)}]}/>}
- {fl&&<><h3>{t('flowHealth')}</h3><p>{f.date(fl.checkedAt)}</p><Facts items={[{label:t('flowConsidered'),value:f.number(fl.considered,0)},{label:t('flowCreated'),value:f.number(fl.created,0)},{label:t('flowWithheld'),value:f.number(fl.withheld,0)}]}/>
+ {fl&&<><h3>{t('flowHealth')}</h3><p>{f.date(fl.checkedAt)}</p><Facts items={[{label:t('flowConsidered'),value:f.number(fl.considered,0)},{label:t('flowCreated'),value:f.number(fl.created,0)},{label:t('flowWithheld'),value:f.number(fl.withheld,0)},{label:t('flowPending'),value:f.number(fl.pending??0,0)}]}/>
   {reasons.length>0&&<><p>{t('flowWithheldNote')}</p><ul>{reasons.map(([reason,count])=><li key={reason}>{t(`flowReasons.${reason}`)}: {f.number(count,0)}</li>)}</ul></>}
+  {pendingReasons.length>0&&<><p>{t('flowPendingNote')}</p><ul>{pendingReasons.map(([reason,count])=><li key={reason}>{t(`flowReasons.${reason}`)}: {f.number(count,0)}</li>)}</ul></>}
+  {pendingExpired.length>0&&<><p>{t('flowPendingExpiredNote')}</p><ul>{pendingExpired.map(([reason,count])=><li key={reason}>{t(`flowReasons.${reason}`)}: {f.number(count,0)}</li>)}</ul></>}
  </>}
  {d&&<><p>{t('discovery')} · {f.date(d.checkedAt)}</p><Facts items={(['completeScans','noPrice','stalePrice','insufficientObservations','tokensJudged','winners','candidates','emerging'] as const).map(k=>({label:t(k),value:f.number(d[k],0)}))}/></>}
  {s&&s.length>0&&<><h3>{t('tokenScans')}</h3><Facts items={[{label:t('scanNewWallets'),value:f.number(s.reduce((sum,x)=>sum+x.newWallets,0),0)},{label:t('scanStoredSwaps'),value:f.number(s.reduce((sum,x)=>sum+x.createdTrades,0),0)}]}/><p>{s[0]!.status}{s[0]!.error?` · ${s[0]!.error}`:''} · {f.date(s[0]!.checkedAt)}</p></>}

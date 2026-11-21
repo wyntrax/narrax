@@ -33,6 +33,7 @@ async function setup(side:'BUY'|'SELL'='BUY'){
 afterAll(async()=>{
  const metrics=await db.tokenMetric.findMany({where:{tokenId:{in:tokens}},select:{id:true}});
  await db.systemSetting.deleteMany({where:{key:{in:[...settingKeys,...tokens.map(id=>`research.market.${id}`),...metrics.map(m=>`research.marketMetric.${m.id}`)]}}});
+ await db.walletFlowCandidate.deleteMany({where:{tokenId:{in:tokens}}});
  await db.walletTrade.deleteMany({where:{tokenId:{in:tokens}}});
  await db.token.deleteMany({where:{id:{in:tokens}}});
  await db.trackedWallet.deleteMany({where:{id:{in:wallets}}});
@@ -84,6 +85,32 @@ it('records net selling as an observation, not proof of a full wallet exit',asyn
  const {token}=await setup('SELL');await publishWalletResearch(db,()=>now);
  const s=await db.walletResearchSignal.findFirstOrThrow({where:{tokenId:token.id}});
  expect(s.side).toBe('SELL');expect(Number(s.netFlowSol)).toBe(-2);
+});
+
+it('retries a flow when missing holder evidence arrives inside the pending window',async()=>{
+ const {token}=await setup();
+ await db.tokenHolderMetric.deleteMany({where:{tokenId:token.id}});
+ const first=await publishWalletResearch(db,()=>now);
+ expect(first.created).toBe(0);
+ expect(await db.walletFlowCandidate.findUniqueOrThrow({where:{tokenId:token.id}})).toMatchObject({lastReason:'NO_HOLDER_OBSERVATION'});
+ const later=new Date(+now+5*60_000);
+ await db.tokenHolderMetric.create({data:{tokenId:token.id,holders:100,top10Pct:20,at:later}});
+ const second=await publishWalletResearch(db,()=>later);
+ expect(second.pendingPublished).toBe(1);
+ expect(await db.walletResearchSignal.count({where:{tokenId:token.id}})).toBe(1);
+ expect(await db.walletFlowCandidate.findUnique({where:{tokenId:token.id}})).toBeNull();
+});
+
+it('expires a pending flow after the evidence window',async()=>{
+ const {token}=await setup();
+ await db.tokenHolderMetric.deleteMany({where:{tokenId:token.id}});
+ await publishWalletResearch(db,()=>now);
+ expect(await db.walletFlowCandidate.count({where:{tokenId:token.id}})).toBe(1);
+ const later=new Date(+now+61*60_000);
+ const result=await publishWalletResearch(db,()=>later);
+ expect(result.pendingExpired).toBe(1);
+ expect(await db.walletFlowCandidate.count({where:{tokenId:token.id}})).toBe(0);
+ expect(await db.walletResearchSignal.count({where:{tokenId:token.id}})).toBe(0);
 });
 
 it('freezes trade-time evidence and leaves later-only prices unknown, including duplicates',async()=>{
