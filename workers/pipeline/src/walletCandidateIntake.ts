@@ -1,11 +1,16 @@
 import type { PrismaClient } from '@narra/database';
 import { isSolanaAddress } from '@narra/shared';
 import { z } from 'zod';
+import { DISCOVERY_HOLD_LIMITS } from './walletDiscovery';
 
 export const WALLET_INTAKE_KEY = 'wallet.evaluation.intake';
-export const WALLET_INTAKE_LIMITS = { capacity: 200, perCycle: 2, staleProvisionalMs: 7 * 86_400_000, evictMaxScore: 40, minMedianQuoteSol: 0.01 } as const;
-const SpendSummary = z.object({ matchedTokens: z.number().int().nonnegative(), medianMatchedQuoteSol: z.number().nullable() }).optional();
-const Snapshot = z.object({ checkedAt: z.string().datetime(), items: z.array(z.object({ address: z.string(), scannedTokens: z.number().int().min(2), spend: SpendSummary })).max(50) });
+/** `evictMaxScore` is a reversible capacity policy: stale provisional wallets below it can be released to make room for new candidates. History is kept and they can be reactivated. */
+export const WALLET_INTAKE_LIMITS = { capacity: 200, perCycle: 2, staleProvisionalMs: 7 * 86_400_000, evictMaxScore: 50, minMedianQuoteSol: 0.01 } as const;
+const SpendSummary = z.object({ matchedTokens: z.number().int().nonnegative(),
+  medianMatchedQuoteSol: z.union([z.number().finite(), z.string().regex(/^\d+(\.\d+)?$/)]).nullable() }).optional();
+const Hold = z.object({ checkedAt: z.string().datetime(), tokenId: z.string(), mint: z.string(), stillHolding: z.boolean(),
+  heldMs: z.number().int().nonnegative().nullable() }).optional();
+const Snapshot = z.object({ checkedAt: z.string().datetime(), items: z.array(z.object({ address: z.string(), scannedTokens: z.number().int().min(2), spend: SpendSummary, hold: Hold })).max(50) });
 
 /** Repeat early participation is a lead, never proof of returns. Intake is independently
  * enabled by history collection, not by publication. Existing reviews are never overwritten. */
@@ -21,10 +26,17 @@ export async function intakeEmergingWallets(db: PrismaClient, now = new Date()) 
       const candidates = snapshot.data.items.filter(w =>
         isSolanaAddress(w.address) &&
         !rejected.has(w.address) &&
-        !(w.spend && w.spend.matchedTokens >= 2 && w.spend.medianMatchedQuoteSol !== null && w.spend.medianMatchedQuoteSol < WALLET_INTAKE_LIMITS.minMedianQuoteSol),
+        !(w.spend && w.spend.matchedTokens >= 2 && w.spend.medianMatchedQuoteSol !== null && Number(w.spend.medianMatchedQuoteSol) < WALLET_INTAKE_LIMITS.minMedianQuoteSol),
       );
       const existing = new Set((await tx.trackedWallet.findMany({ where: { address: { in: candidates.map(w => w.address) } }, select: { address: true } })).map(w => w.address));
-      const pending = candidates.filter(w => !existing.has(w.address));
+      const holdRank = (w: typeof candidates[number]) => w.hold?.stillHolding ? (w.hold.heldMs != null && w.hold.heldMs >= DISCOVERY_HOLD_LIMITS.minHeldMs ? 2 : 1) : 0;
+      const spendSize = (w: typeof candidates[number]) => {
+        const value = w.spend?.medianMatchedQuoteSol;
+        return w.spend && w.spend.matchedTokens >= 2 && value != null && Number.isFinite(Number(value)) ? Number(value) : -1;
+      };
+      // Prefer observed holders first, then known size, then repeat participation. Ties retain snapshot order.
+      const pending = candidates.filter(w => !existing.has(w.address)).sort((a,b) =>
+        holdRank(b) - holdRank(a) || spendSize(b) - spendSize(a) || b.scannedTokens - a.scannedTokens);
       if (out.capacity === 0 && pending.length > 0 && typeof tx.trackedWallet.updateMany === 'function') {
         const staleCutoff = new Date(+now - WALLET_INTAKE_LIMITS.staleProvisionalMs);
         const stalePool = await tx.trackedWallet.findMany({
