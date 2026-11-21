@@ -235,7 +235,8 @@ export async function discoverCandidates(db: PrismaClient, now: Date = new Date(
   const emerging = [...repeat].filter(([address, ids]) => ids.size >= 2 && !exclude.has(address)).map(([address, ids]) => ({ address, scannedTokens: ids.size, spend: summarizeDiscoverySpend(spend.get(address)??[],now) })).sort((a,b) => b.scannedTokens - a.scannedTokens || a.address.localeCompare(b.address));
   // A current positive balance is a bounded holding signal, not proof of the original position.
   // Spend is checked first so the limited probe budget reaches plausible swing wallets, not only
-  // high-repeat dust bots. The published snapshot keeps its original repeat-count order.
+  // high-repeat dust bots. The published snapshot is re-ranked after the probe so those
+  // spend-prioritised candidates are not hidden behind the top 50 by repeat count.
   const holds = new Map<string, DiscoveryHoldEvidence>();
   const spendScore = (item: typeof emerging[number]) => {
     const value = item.spend.medianMatchedQuoteSol;
@@ -261,14 +262,22 @@ export async function discoverCandidates(db: PrismaClient, now: Date = new Date(
       // A failed balance read is unknown, never a negative holding claim.
     }
   }
-  const probed = emerging.map(item => {
+  const probed: (typeof emerging[number] & { hold?: DiscoveryHoldEvidence })[] = emerging.map(item => {
     const hold = holds.get(item.address);
     return hold ? { ...item, hold } : item;
   });
+  // Keep the bounded snapshot aligned with intake: holders first, then known spend and repeat
+  // count. Otherwise the spend-prioritised hold evidence can fall outside the top 50 by repeats.
+  const holdScore = (item: typeof probed[number]) => item.hold?.stillHolding ? (item.hold.heldMs ?? 0) : -1;
+  const snapshotItems = [...probed].sort((a,b) =>
+    Number(holdScore(b) >= 0) - Number(holdScore(a) >= 0) ||
+    holdScore(b) - holdScore(a) ||
+    spendScore(b) - spendScore(a) ||
+    b.scannedTokens - a.scannedTokens);
   out.holdChecks = holdChecks; out.holdingCandidates = holdingCandidates;
   Object.assign(out, { tokensJudged: scans.length, winners, candidates: ranked.length, emerging: emerging.length });
   const health = { ...out, checkedAt: now.toISOString(), lookbackHours: 48 };
-  const candidates = { checkedAt: now.toISOString(), total: probed.length, capped: probed.length > 50, items: probed.slice(0,50) } as unknown as Prisma.InputJsonValue;
+  const candidates = { checkedAt: now.toISOString(), total: probed.length, capped: probed.length > 50, items: snapshotItems.slice(0,50) } as unknown as Prisma.InputJsonValue;
   await db.$transaction([
     db.systemSetting.upsert({ where: { key: DISCOVERY_HEALTH_KEY }, create: { key: DISCOVERY_HEALTH_KEY, value: health }, update: { value: health } }),
     db.systemSetting.upsert({ where: { key: DISCOVERY_EMERGING_KEY }, create: { key: DISCOVERY_EMERGING_KEY, value: candidates }, update: { value: candidates } }),
