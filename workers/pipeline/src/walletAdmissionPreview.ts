@@ -14,7 +14,9 @@ export const AdmissionPreviewOptions = z.object({
 export type AdmissionPreviewOptions = z.infer<typeof AdmissionPreviewOptions>;
 export const AdmissionSnapshot = z.object({
   checkedAt: z.string().datetime(), total: count, capped: z.boolean(),
-  items: z.array(z.object({ address: z.string(), scannedTokens: count.min(2), spend: z.unknown().optional() })).max(50),
+  items: z.array(z.object({ address: z.string(), scannedTokens: count.min(2), spend: z.unknown().optional(),
+    hold: z.object({ checkedAt: z.string().datetime(), tokenId: z.string(), mint: z.string(), stillHolding: z.boolean(),
+      heldMs: z.number().int().nonnegative().nullable() }).optional() })).max(50),
 }).refine(s => s.total >= s.items.length && s.capped === (s.total > s.items.length) && new Set(s.items.map(w=>w.address)).size === s.items.length);
 const Spend = z.object({
   version: z.literal(1), observedTokens: count, matchedTokens: count, unknownTokens: count,
@@ -62,6 +64,7 @@ export function previewWalletAdmission(input: AdmissionPreviewInput, options: Pa
     // fully-known below-threshold size or a known insufficient sample.
     const explorationLane = !evidenceLane && (!spend || spend.unknownTokens > 0);
     return { address: w.address, snapshotOrder: index+1, scannedTokens: w.scannedTokens, exclusions, evidenceStatus,
+      hold: w.hold ?? null,
       lane: exclusions.length ? 'EXCLUDED' : evidenceLane ? 'EVIDENCE' : explorationLane ? 'EXPLORATION' : 'BELOW_PREVIEW',
       reasons, spend, matchedCoveragePercent: spend ? spend.matchedTokens*100/spend.observedTokens : null };
   });

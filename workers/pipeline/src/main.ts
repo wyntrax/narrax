@@ -196,7 +196,8 @@ async function main(): Promise<void> {
     new Worker(QUEUE_NAMES.walletDiscovery, async () => {
       const tiers = await helius.rpcTiers(15_000);
       if (!tiers.primary) return 'needs a Helius RPC URL';
-      return JSON.stringify({ scan: await scanEarlyBuyers(db, tiers.primary, new Date(), { fallbackRpc: tiers.fallback ?? undefined }), discovery: await discoverCandidates(db) });
+      const now = new Date();
+      return JSON.stringify({ scan: await scanEarlyBuyers(db, tiers.primary, now, { fallbackRpc: tiers.fallback ?? undefined }), discovery: await discoverCandidates(db, now, { holdings: tiers.primary }) });
     }, { connection, concurrency: 1 }),
     // User-requested, token-scoped discovery. It adds provisional wallets and bounded recent history, then asks for a webhook sync.
     new Worker(QUEUE_NAMES.tokenDiscovery, async (job) => {

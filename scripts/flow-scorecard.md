@@ -38,7 +38,30 @@ It prints:
 
 - aggregate 1h/4h/24h outcomes by side, entity count, net-flow, liquidity and holder bucket;
 - the latest `wallet.research.flowHealth` snapshot, including withheld reasons;
+- the blocked-wallet reason distribution and the 15 closest near-miss wallets with a performance snapshot;
 - up to 50 flow-suitable tracked wallets, ranked by median hold, median position size and score;
 - the criteria used, so a saved report is self-describing.
 
 It never approves a wallet, changes a threshold, or writes to the database.
+
+## Swing-wallet sourcing
+
+Discovery now probes whether the top emerging candidates still hold one of their observed early buys:
+
+- at most 20 candidates per discovery run;
+- one current token balance read per candidate;
+- a 20-second overall deadline;
+- stored as `hold: { checkedAt, tokenId, mint, stillHolding, heldMs }` in `wallet.discovery.emerging`.
+
+`heldMs` is the time since the observed buy, so it is a **lower bound** on how long the wallet has held. A positive balance can include tokens received elsewhere; it is not proof of the original position.
+
+`intakeEmergingWallets` orders candidates by:
+
+1. still holding a token bought at least 30 minutes ago;
+2. still holding a shorter-dated token;
+3. known median matched spend;
+4. repeat participation count.
+
+The spend preview is accepted as either a JSON number or the decimal string actually stored by discovery. Existing tracked and rejected addresses are never re-added, and the current capacity and dust filters still apply. The hold probe is descriptive evidence, not an approval or a claim that the wallet is profitable.
+
+When the 200-wallet discovered cap is full, the intake releases at most two stale provisional wallets per cycle to make room. A released wallet must be older than seven days and have no profile or a score below 50; it is deactivated, not deleted, so its history remains and it can be reactivated.

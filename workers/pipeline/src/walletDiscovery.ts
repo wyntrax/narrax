@@ -27,6 +27,11 @@ export const DISCOVERY_LIMITS = {
   maxCandidates: 50,
 } as const;
 
+/** Bounded check of whether an emerging candidate still holds an observed early buy. */
+export const DISCOVERY_HOLD_LIMITS = { maxChecks: 20, deadlineMs: 20_000, minHeldMs: 30 * 60_000 } as const;
+export interface HoldingEvidenceSource { getTokenBaseUnits(owner: string, mint: string): Promise<bigint> }
+export interface DiscoveryHoldEvidence { checkedAt: string; tokenId: string; mint: string; stillHolding: boolean; heldMs: number | null }
+
 export interface ScanSummary {
   scanned: number; complete: number; tooLong: number; buyersFound: number; errors: string[];
   requests: number; retries: number; rateLimits: number; resumed: number; pending: number; expired: number;
@@ -154,7 +159,7 @@ export async function scanEarlyBuyers(db: PrismaClient, rpc: HistoryPort, now: D
   return finish();
 }
 
-export interface DiscoverySummary { tokensJudged: number; winners: number; candidates: number; completeScans: number; noPrice: number; stalePrice: number; insufficientObservations: number; invalidPrice: number; emerging: number }
+export interface DiscoverySummary { tokensJudged: number; winners: number; candidates: number; completeScans: number; noPrice: number; stalePrice: number; insufficientObservations: number; invalidPrice: number; emerging: number; holdChecks: number; holdingCandidates: number }
 export const DISCOVERY_HEALTH_KEY = 'wallet.discovery.health';
 export const DISCOVERY_EMERGING_KEY = 'wallet.discovery.emerging';
 
@@ -180,7 +185,7 @@ export async function discoveryPriceCandidates(db: PrismaClient, now: Date, limi
  * recorded price, it still has real liquidity, and it was not flagged a honeypot. Tokens too young or without fresh
  * prices are left out, not counted as losers. A flagged honeypot is judged as a non-winner, so a wallet that bought one is marked down. Suggestions are stored PENDING for an admin. Nothing is tracked here.
  */
-export async function discoverCandidates(db: PrismaClient, now: Date = new Date()): Promise<DiscoverySummary> {
+export async function discoverCandidates(db: PrismaClient, now: Date = new Date(), opts: { holdings?: HoldingEvidenceSource } = {}): Promise<DiscoverySummary> {
   const L = DISCOVERY_LIMITS;
   const rows = await db.tokenEarlyBuyers.findMany({
     where: { complete: true, token: { blacklisted: false, createdOnChainAt: { gte: new Date(now.getTime() - L.lookbackMs), lte: new Date(now.getTime() - L.minAgeMs) } } },
@@ -189,7 +194,7 @@ export async function discoverCandidates(db: PrismaClient, now: Date = new Date(
   const scans: TokenScan[] = [];
   const mintOf = new Map<string, string>();
   let winners = 0;
-  const out: DiscoverySummary = { tokensJudged: 0, winners: 0, candidates: 0, completeScans: rows.length, noPrice: 0, stalePrice: 0, insufficientObservations: 0, invalidPrice: 0, emerging: 0 };
+  const out: DiscoverySummary = { tokensJudged: 0, winners: 0, candidates: 0, completeScans: rows.length, noPrice: 0, stalePrice: 0, insufficientObservations: 0, invalidPrice: 0, emerging: 0, holdChecks: 0, holdingCandidates: 0 };
   const repeat = new Map<string, Set<string>>();
   const spend = new Map<string, DiscoverySpendObservation[]>();
   for (const r of rows) {
@@ -228,9 +233,42 @@ export async function discoverCandidates(db: PrismaClient, now: Date = new Date(
     await db.walletCandidate.upsert({ where: { address: c.address }, create: { address: c.address, ...data }, update: data });
   }
   const emerging = [...repeat].filter(([address, ids]) => ids.size >= 2 && !exclude.has(address)).map(([address, ids]) => ({ address, scannedTokens: ids.size, spend: summarizeDiscoverySpend(spend.get(address)??[],now) })).sort((a,b) => b.scannedTokens - a.scannedTokens || a.address.localeCompare(b.address));
+  // A current positive balance is a bounded holding signal, not proof of the original position.
+  // Spend is checked first so the limited probe budget reaches plausible swing wallets, not only
+  // high-repeat dust bots. The published snapshot keeps its original repeat-count order.
+  const holds = new Map<string, DiscoveryHoldEvidence>();
+  const spendScore = (item: typeof emerging[number]) => {
+    const value = item.spend.medianMatchedQuoteSol;
+    return item.spend.matchedTokens >= 2 && value != null && Number.isFinite(Number(value)) ? Number(value) : -1;
+  };
+  const probeOrder = [...emerging].sort((a,b) => spendScore(b) - spendScore(a) || b.scannedTokens - a.scannedTokens);
+  const holdings = opts.holdings;
+  let holdChecks = 0, holdingCandidates = 0;
+  const holdStarted = Date.now();
+  for (const item of probeOrder) {
+    if (!holdings || holdChecks >= DISCOVERY_HOLD_LIMITS.maxChecks || Date.now() - holdStarted >= DISCOVERY_HOLD_LIMITS.deadlineMs) break;
+    const observations = (spend.get(item.address) ?? []).filter(o => typeof o.at === 'string' && Number.isFinite(Date.parse(o.at)) && Date.parse(o.at) <= +now && mintOf.has(o.tokenId));
+    const oldest = [...observations].sort((a,b) => Date.parse(a.at as string) - Date.parse(b.at as string))[0];
+    const mint = oldest ? mintOf.get(oldest.tokenId) : undefined;
+    if (!oldest || !mint) continue;
+    holdChecks++;
+    try {
+      const stillHolding = await holdings.getTokenBaseUnits(item.address, mint) > 0n;
+      const heldMs = stillHolding ? Math.max(0, +now - Date.parse(oldest.at as string)) : null;
+      if (stillHolding) holdingCandidates++;
+      holds.set(item.address, { checkedAt: now.toISOString(), tokenId: oldest.tokenId, mint, stillHolding, heldMs });
+    } catch {
+      // A failed balance read is unknown, never a negative holding claim.
+    }
+  }
+  const probed = emerging.map(item => {
+    const hold = holds.get(item.address);
+    return hold ? { ...item, hold } : item;
+  });
+  out.holdChecks = holdChecks; out.holdingCandidates = holdingCandidates;
   Object.assign(out, { tokensJudged: scans.length, winners, candidates: ranked.length, emerging: emerging.length });
   const health = { ...out, checkedAt: now.toISOString(), lookbackHours: 48 };
-  const candidates = { checkedAt: now.toISOString(), total: emerging.length, capped: emerging.length > 50, items: emerging.slice(0,50) };
+  const candidates = { checkedAt: now.toISOString(), total: probed.length, capped: probed.length > 50, items: probed.slice(0,50) } as unknown as Prisma.InputJsonValue;
   await db.$transaction([
     db.systemSetting.upsert({ where: { key: DISCOVERY_HEALTH_KEY }, create: { key: DISCOVERY_HEALTH_KEY, value: health }, update: { value: health } }),
     db.systemSetting.upsert({ where: { key: DISCOVERY_EMERGING_KEY }, create: { key: DISCOVERY_EMERGING_KEY, value: candidates }, update: { value: candidates } }),

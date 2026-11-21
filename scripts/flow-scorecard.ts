@@ -90,6 +90,15 @@ async function main() {
     (b.score ?? -1) - (a.score ?? -1) ||
     a.address.localeCompare(b.address),
   );
+  const reasonCounts: Record<string, number> = {};
+  for (const candidate of candidates) for (const reason of candidate.reasons) reasonCounts[reason] = (reasonCounts[reason] ?? 0) + 1;
+  const nearMisses = candidates.filter(c => !c.suitable && c.metrics).sort((a, b) =>
+    a.reasons.length - b.reasons.length ||
+    (b.metrics?.medianHoldSeconds ?? 0) - (a.metrics?.medianHoldSeconds ?? 0) ||
+    Number(b.metrics?.medianClosedPositionSol ?? '0') - Number(a.metrics?.medianClosedPositionSol ?? '0') ||
+    (b.score ?? -1) - (a.score ?? -1) ||
+    a.address.localeCompare(b.address),
+  ).slice(0, 15);
   const health = await db.systemSetting.findUnique({ where: { key: 'wallet.research.flowHealth' } });
 
   console.log(JSON.stringify({
@@ -110,6 +119,8 @@ async function main() {
     },
     wallets: {
       read: wallets.length, suitable: suitable.length, blocked: candidates.length - suitable.length,
+      reasonCounts,
+      nearMisses,
       items: suitable.slice(0, 50),
     },
   }, null, 2));
