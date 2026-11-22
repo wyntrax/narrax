@@ -75,7 +75,7 @@ export function registerAdminStatusRoutes(app: FastifyInstance, deps: Pick<Accou
         const lastFailedAt = queueHealth?.[name]?.lastFailedAt;
         const lastFailedMs = lastFailedAt ? Date.parse(lastFailedAt) : NaN;
         const failedRecently = Number.isFinite(lastFailedMs) ? lastFailedMs > at.getTime() - DAY : null;
-        if (c.failed > 0 && failedRecently !== false) warnings.push(`Queue ${name} has ${c.failed} failed job(s)${failedRecently ? ' in the last 24h' : ''}.`);
+        if (c.failed > 0 && failedRecently !== false) warnings.push(`Queue ${name} has ${c.failed} failed job(s)${failedRecently ? '; latest in the last 24h' : ''}.`);
         if (c.waiting > QUEUE_BACKLOG_WARN) warnings.push(`Queue ${name} has a backlog of ${c.waiting}.`);
         if (c.waiting > 0 && c.consumers === 0) warnings.push(`Queue ${name} has ${c.waiting} job(s) waiting and no worker consuming it.${name === 'execution' ? ' Start the executor (npm run dev:executor): paper fills, confirmations and dry runs are processed there, not in the pipeline worker.' : ''}`);
       }
