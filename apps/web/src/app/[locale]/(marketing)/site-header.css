@@ -106,8 +106,9 @@
   border-color: var(--bd-strong);
 }
 
+/* Global scroll-padding already reserves 88px for the sticky header. */
 .landing-page section[id] {
-  scroll-margin-top: 84px;
+  scroll-margin-top: 0;
 }
 
 /* Narrax Observatory Engraving Footer */
