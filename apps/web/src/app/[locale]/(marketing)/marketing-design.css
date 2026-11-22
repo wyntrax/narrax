@@ -65,6 +65,8 @@
 .portal-stage {
   position: relative;
   isolation: isolate;
+  margin-top: -76px;
+  padding-top: 76px;
   background-color: var(--stage-bg);
   overflow: hidden;
   transition: background-color 280ms var(--ease-base);
@@ -77,6 +79,21 @@
   width: 100%;
   z-index: 0;
   pointer-events: none;
+}
+
+.portal-stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    var(--stage-bg) 0%,
+    color-mix(in srgb, var(--stage-bg) 86%, transparent) 36%,
+    color-mix(in srgb, var(--stage-bg) 32%, transparent) 54%,
+    transparent 68%
+  );
 }
 
 :root[data-theme="light"] .portal-canvas {
@@ -895,9 +912,19 @@
   .marketing .container {
     width: calc(100% - 32px);
   }
+  .portal-stage::after {
+    background: linear-gradient(
+      180deg,
+      transparent 0px,
+      transparent 220px,
+      color-mix(in srgb, var(--stage-bg) 48%, transparent) 280px,
+      color-mix(in srgb, var(--stage-bg) 92%, transparent) 338px,
+      var(--stage-bg) 392px
+    );
+  }
   .portal-content {
-    padding: 36px 0 28px;
-    gap: 36px;
+    padding: clamp(245px, 64vw, 315px) 0 28px;
+    gap: 28px;
   }
   .portal-stage h1 {
     font-size: clamp(32px, 8vw, 42px);
@@ -1021,6 +1048,13 @@
   .marketing .final-cta {
     margin-bottom: 56px;
     padding: 44px 20px;
+  }
+}
+
+@media (max-width: 600px) {
+  .portal-stage {
+    margin-top: -68px;
+    padding-top: 68px;
   }
 }
 
