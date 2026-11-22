@@ -3,6 +3,7 @@ import {languageAlternates,localizedPath,pageMetadata,searchIndexable,serializeJ
 import {articleSchema,breadcrumbSchema,collectionPageSchema,websiteSchema,productFaqSchema} from './structured-data';
 import {productFacts} from '@/content/product-facts';
 import {socialImageUrl,socialPreview} from './social-preview';
+import {renderSocialImage} from './social-image';
 import {GET as llmsDirectory} from '@/app/llms.txt/route';
 import {GET as llmsFull} from '@/app/llms-full.txt/route';
 import {researchCopy,researchGuides} from '@/content/research-guides';
@@ -32,7 +33,7 @@ describe('localized canonical metadata',()=>{
  it('gives each public page its own canonical and localized share metadata',()=>{
   production();const m=pageMetadata('id','/research/test','Judul','Deskripsi');
   expect(m.alternates?.canonical).toBe('https://narrax.example/id/research/test');
-  expect(m.openGraph).toMatchObject({url:'https://narrax.example/id/research/test',locale:'id_ID',title:'Judul | Narrax',images:[{url:'https://narrax.example/share/id/home.png?v=5',width:1200,height:630}]});
+  expect(m.openGraph).toMatchObject({url:'https://narrax.example/id/research/test',locale:'id_ID',title:'Judul | Narrax',images:[{url:'https://narrax.example/share/id/home.png?v=6',width:1200,height:630}]});
   expect(m.twitter).toMatchObject({card:'summary_large_image',description:'Deskripsi'});
   expect(m.robots).toMatchObject({index:true,follow:true});
  });
@@ -43,6 +44,19 @@ describe('localized canonical metadata',()=>{
   production();const entries=sitemap();expect(entries).toHaveLength(12);expect(new Set(entries.map(item=>item.url)).size).toBe(12);
   for(const entry of entries){expect(entry.url).not.toMatch(/\/app|early-access|\/en\//);expect(entry.lastModified).toBeUndefined();expect(Object.keys(entry.alternates!.languages!)).toEqual(['en','id','x-default']);}
  });
+  it('renders valid 1200x630 PNG social cards for home and editorial subpages',async()=>{
+   production();
+   for(const [locale,key] of [['en','home'],['en','research'],['id','methodology']] as const){
+    const response=await renderSocialImage(locale,key);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('image/png');
+    const bytes=Buffer.from(await response.arrayBuffer());
+    expect(bytes.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');
+    expect(bytes.readUInt32BE(16)).toBe(1200);
+    expect(bytes.readUInt32BE(20)).toBe(630);
+    expect(bytes.length).toBeLessThan(5*1024*1024);
+   }
+  }, 20000);
 });
 describe('truthful structured data and editorial coverage',()=>{
   it.each(['en','id'] as const)('uses the same visible answers in %s structured data',locale=>{
@@ -73,8 +87,8 @@ describe('truthful structured data and editorial coverage',()=>{
    production();const urls=new Set<string>();
    for(const locale of ['en','id'] as const)for(const path of ['', '/research','/methodology',...researchGuides[locale].map(guide=>`/research/${guide.slug}`)]){
      const image=socialImageUrl('https://narrax.example',locale,path);
-     if(path==='') expect(image).toBe(`https://narrax.example/share/${locale}/home.png?v=5`);
-     else expect(image).toMatch(/\/share\/(en|id)\/[a-z-]+\.png\?v=4$/);
+     if(path==='') expect(image).toBe(`https://narrax.example/share/${locale}/home.png?v=6`);
+     else expect(image).toMatch(/\/share\/(en|id)\/[a-z-]+\.png\?v=5$/);
      urls.add(image);
    }
    expect(urls.size).toBe(12);expect(socialPreview('en','<script>')).toBeNull();
