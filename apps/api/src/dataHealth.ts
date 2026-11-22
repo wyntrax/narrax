@@ -139,7 +139,7 @@ export async function dataHealth(db:PrismaClient,ports:HealthPorts,now:Date){
    });
    const ingestion=queues.find(q=>q.name==='narrative-ingestion');
    const ingestionAt=ingestion?.lastCompletedAt&&Date.parse(ingestion.lastCompletedAt)<=+now?ingestion.lastCompletedAt:null;
-   const ingestionCounters=ingestionAt&&ingestion?.lastRun?Object.fromEntries(['topicsSeen','mentionsStored','narrativesUpdated','providerErrors'].flatMap(key=>{const value=ingestion.lastRun?.[key as 'topicsSeen'|'mentionsStored'|'narrativesUpdated'|'providerErrors'];return value===undefined?[]:[[key,value]];})):null;
+   const ingestionCounters=ingestionAt&&ingestion?.lastRun?Object.fromEntries(['topicsSeen','mentionsStored','narrativesUpdated','providerErrors','providerRetries'].flatMap(key=>{const value=ingestion.lastRun?.[key as 'topicsSeen'|'mentionsStored'|'narrativesUpdated'|'providerErrors'|'providerRetries'];return value===undefined?[]:[[key,value]];})):null;
    const ingestionState=ingestion?.state==='ERROR'?'ERROR':!ingestionAt||ingestionCounters?.providerErrors===undefined?'UNKNOWN':ingestionCounters.providerErrors>0?'WARNING':elapsed(ingestionAt,now)!>35*60?'STALE':'OK';
    const collectors=[...resolutionCollectors,{stage:'narrative-ingestion' as const,state:ingestionState,lastRecordedAt:ingestionAt,ageSeconds:elapsed(ingestionAt,now),maxAgeSeconds:35*60,counters:ingestionCounters}];
   const lastMarket=collectors.find(c=>c.stage==='market');

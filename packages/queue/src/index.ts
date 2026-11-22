@@ -10,7 +10,7 @@ export { TOKEN_DISCOVERY_QUEUE, TokenDiscoveryJobSchema, createTokenDiscoveryQue
 export interface QueueCounts { waiting: number; active: number; failed: number; delayed: number; /** Workers connected to this queue right now. 0 with jobs waiting means nothing is consuming it. */ consumers?: number }
 /** Allowlisted run evidence. Raw error text and job payloads are never returned. */
 export interface QueueRun {
-  analyzed?:number;providerFailures?:number;providerErrors?:number;mentionsStored?:number;narrativesUpdated?:number;topicsSeen?:number;tokensUsed?:number;
+  analyzed?:number;providerFailures?:number;providerErrors?:number;providerRetries?:number;mentionsStored?:number;narrativesUpdated?:number;topicsSeen?:number;tokensUsed?:number;
   /** A run that intentionally did no work. Only known reasons are surfaced. */
   skipped?:string;
   /** The wallet-sync action, when it completed. */
@@ -273,7 +273,7 @@ export function createQueues(connection: Redis) {
         if(typeof value==='string'){try{value=JSON.parse(value);}catch{value=null;}}
         const object=value&&typeof value==='object'?value as Record<string,unknown>:null;
         const run:QueueRun={};
-        for(const key of ['analyzed','providerFailures','providerErrors','mentionsStored','narrativesUpdated','topicsSeen','tokensUsed'] as const)if(typeof object?.[key]==='number'&&Number.isInteger(object[key])&&object[key]>=0)run[key]=object[key];
+        for(const key of ['analyzed','providerFailures','providerErrors','providerRetries','mentionsStored','narrativesUpdated','topicsSeen','tokensUsed'] as const)if(typeof object?.[key]==='number'&&Number.isInteger(object[key])&&object[key]>=0)run[key]=object[key];
         if(typeof object?.skipped==='string'&&['disabled','budget','no_provider','invalid'].includes(object.skipped))run.skipped=object.skipped;
         if(typeof object?.action==='string'&&['created','updated','in_sync','skipped'].includes(object.action))run.action=object.action;
         if(typeof object?.error==='string'&&object.error)run.error=classifyRunError(object.error);
