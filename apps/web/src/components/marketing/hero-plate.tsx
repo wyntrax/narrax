@@ -115,14 +115,20 @@ export function HeroPlate() {
 
       const natW = img.naturalWidth || 1600;
       const natH = img.naturalHeight || 900;
-      const scale = Math.max(width / natW, height / natH) * 1.04;
+      const isMobile = width <= 700;
+      const parallaxX = reducedMotion ? 0 : smoothX * (isMobile ? 4 : 10);
+      const parallaxY = reducedMotion ? 0 : smoothY * (isMobile ? 2 : 5);
+      const scale = isMobile
+        ? (width * 1.85) / natW
+        : Math.max((height * 1.01) / natH, (width * 0.9 + 48) / natW);
       const drawW = natW * scale;
       const drawH = natH * scale;
-      const alignX = width < 768 ? 0.62 : 0.72;
-      const parallaxX = reducedMotion ? 0 : smoothX * 10;
-      const parallaxY = reducedMotion ? 0 : smoothY * 5;
-      const imgX = (width - drawW) * alignX + parallaxX;
-      const imgY = (height - drawH) * 0.5 + parallaxY;
+      const imgX = isMobile
+        ? width * 0.5 - drawW * 0.693 + parallaxX
+        : width * 0.73 - drawW * 0.693 + parallaxX;
+      const imgY = isMobile
+        ? 18 + parallaxY
+        : Math.max(-24, (height - drawH) * 0.26) + parallaxY;
 
       const doorX = imgX + drawW * 0.693;
       const doorY = imgY + drawH * 0.44;
@@ -200,19 +206,30 @@ export function HeroPlate() {
         }
       }
 
-      const shieldW = width < 900 ? width * 0.72 : width * 0.56;
-      const leftShield = ctx.createLinearGradient(0, 0, shieldW, 0);
-      leftShield.addColorStop(0, 'rgba(5, 5, 5, 0.88)');
-      leftShield.addColorStop(0.68, 'rgba(5, 5, 5, 0.44)');
-      leftShield.addColorStop(1, 'rgba(5, 5, 5, 0)');
-      ctx.fillStyle = leftShield;
-      ctx.fillRect(0, 0, shieldW, height);
+      if (isMobile) {
+        const fadeTop = imgY + drawH * 0.58;
+        const fadeBottom = imgY + drawH * 1.02;
+        const mobileFade = ctx.createLinearGradient(0, fadeTop, 0, fadeBottom);
+        mobileFade.addColorStop(0, 'rgba(5, 5, 5, 0)');
+        mobileFade.addColorStop(0.55, 'rgba(5, 5, 5, 0.72)');
+        mobileFade.addColorStop(1, '#050505');
+        ctx.fillStyle = mobileFade;
+        ctx.fillRect(0, fadeTop, width, Math.max(0, height - fadeTop));
+      } else {
+        const shieldW = width * 0.54;
+        const leftShield = ctx.createLinearGradient(0, 0, shieldW, 0);
+        leftShield.addColorStop(0, 'rgba(5, 5, 5, 0.9)');
+        leftShield.addColorStop(0.68, 'rgba(5, 5, 5, 0.46)');
+        leftShield.addColorStop(1, 'rgba(5, 5, 5, 0)');
+        ctx.fillStyle = leftShield;
+        ctx.fillRect(0, 0, shieldW, height);
 
-      const bottomEdge = ctx.createLinearGradient(0, height * 0.84, 0, height);
-      bottomEdge.addColorStop(0, 'rgba(5, 5, 5, 0)');
-      bottomEdge.addColorStop(1, '#050505');
-      ctx.fillStyle = bottomEdge;
-      ctx.fillRect(0, height * 0.84, width, height * 0.16);
+        const bottomEdge = ctx.createLinearGradient(0, height * 0.84, 0, height);
+        bottomEdge.addColorStop(0, 'rgba(5, 5, 5, 0)');
+        bottomEdge.addColorStop(1, '#050505');
+        ctx.fillStyle = bottomEdge;
+        ctx.fillRect(0, height * 0.84, width, height * 0.16);
+      }
     }
 
     function resizeCanvas() {
