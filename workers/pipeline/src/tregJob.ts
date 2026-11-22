@@ -24,6 +24,15 @@ export async function runTregJob(db: PrismaClient, config: TregConfig, job: Job,
   const providers = config.platforms.map(platform => new TregNarrativeProvider({ ...config, platform, call, now, runId: job.id,
     onPage: stats => console.log(JSON.stringify({ msg: 'narrative_source_page', ...stats })) }));
   const result = await ingestNarratives(db, providers, now, {
+    // Ten topics back-to-back can trip a per-minute limit; space them out.
+    topicDelayMs: 300,
+    providerRetryAttempts: 3,
+    providerRetryBaseDelayMs: 500,
+    providerRetryMaxDelayMs: 30_000,
+    onProviderRetry: (provider, attempt, delayMs, error) => console.warn(JSON.stringify({
+      msg: 'narrative_source_retry', provider, attempt, delayMs,
+      code: error instanceof TregError ? error.code : 'SOURCE_FAILED',
+    })),
     onProviderError: (provider, error) => console.warn(JSON.stringify({ msg: 'narrative_source_error', provider, code: error instanceof TregError ? error.code : 'SOURCE_FAILED' })),
   });
   console.log(JSON.stringify({ msg: 'narrative_ingestion_complete', jobId: job.id, ...result }));

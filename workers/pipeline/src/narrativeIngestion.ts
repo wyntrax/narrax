@@ -5,13 +5,23 @@ import {
 } from '@narra/narrative';
 import type { NarrativeStage } from '@narra/shared';
 import {bulkCreatorRoles} from './bulkPublication';
+import { retryProviderCall } from './providerRetry';
 
 export interface IngestOptions {
   /** How far back to ask providers for activity. */
   lookbackHours?: number;
   /** Hard cap per topic per run, so one noisy topic cannot flood the database. */
   maxMentionsPerTopic?: number;
+  /** Bounded retries for transient provider failures (429 and 5xx). */
+  providerRetryAttempts?: number;
+  providerRetryBaseDelayMs?: number;
+  providerRetryMaxDelayMs?: number;
+  /** Delay between topic calls, so a burst cannot trip a provider rate limit. */
+  topicDelayMs?: number;
+  /** Injectable sleep for tests. */
+  sleep?: (ms: number) => Promise<void>;
   onProviderError?: (provider: string, error: unknown) => void;
+  onProviderRetry?: (provider: string, attempt: number, delayMs: number, error: unknown) => void;
 }
 
 export interface IngestSummary {
@@ -20,6 +30,7 @@ export interface IngestSummary {
   mentionsStored: number;
   stageChanges: number;
   providerErrors: number;
+  providerRetries: number;
 }
 
 const ALERT_FOR: Partial<Record<NarrativeStage, { kind: string; priority: 'INFO' | 'WATCH' | 'IMPORTANT' | 'CRITICAL'; verb: string }>> = {
@@ -48,18 +59,30 @@ export async function ingestNarratives(db: PrismaClient, providers: NarrativePro
   const lookback = opts.lookbackHours ?? 48;
   const cap = opts.maxMentionsPerTopic ?? 2000;
   const since = new Date(now.getTime() - lookback * 3_600_000);
-  const summary: IngestSummary = { topicsSeen: 0, narrativesUpdated: 0, mentionsStored: 0, stageChanges: 0, providerErrors: 0 };
+  const summary: IngestSummary = { topicsSeen: 0, narrativesUpdated: 0, mentionsStored: 0, stageChanges: 0, providerErrors: 0, providerRetries: 0 };
   const touched = new Map<string, string>(); // slug -> narrative id
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const retryFor = (providerName: string) => ({
+    attempts: opts.providerRetryAttempts ?? 3,
+    baseDelayMs: opts.providerRetryBaseDelayMs ?? 500,
+    maxDelayMs: opts.providerRetryMaxDelayMs ?? 30_000,
+    sleep,
+    onRetry: (attempt: number, delayMs: number, error: unknown) => {
+      summary.providerRetries++;
+      opts.onProviderRetry?.(providerName, attempt, delayMs, error);
+    },
+  });
 
   for (const provider of providers) {
     let topics;
-    try { topics = await provider.getTrendingTopics(); } catch (error) { summary.providerErrors++; opts.onProviderError?.(provider.name, error); continue; }
-    for (const topic of topics) {
+    try { topics = await retryProviderCall(() => provider.getTrendingTopics(), retryFor(provider.name)); } catch (error) { summary.providerErrors++; opts.onProviderError?.(provider.name, error); continue; }
+    for (const [topicIndex, topic] of topics.entries()) {
+      if (topicIndex > 0 && (opts.topicDelayMs ?? 0) > 0) await sleep(opts.topicDelayMs!);
       const norm = normalizeTopic(topic.name);
       if (!norm) continue;
       summary.topicsSeen++;
       let raw: RawMention[];
-      try { raw = await provider.getTopicActivity(topic, since); } catch (error) { summary.providerErrors++; opts.onProviderError?.(provider.name, error); continue; }
+      try { raw = await retryProviderCall(() => provider.getTopicActivity(topic, since), retryFor(provider.name)); } catch (error) { summary.providerErrors++; opts.onProviderError?.(provider.name, error); continue; }
 
       const rows = raw.filter((m) => m.at >= since && m.at <= now).slice(0, cap).map(toRow).filter((r) => r.handle && r.externalId);
       // A configured search with no observations is not evidence that a new narrative exists.

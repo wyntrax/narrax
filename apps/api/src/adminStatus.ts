@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Prisma, PrismaClient } from '@narra/database';
-import type { QueueCounts } from '@narra/queue';
+import type { QueueCounts, QueueHealth } from '@narra/queue';
 import { SYSTEM_LIMITS_KEY, resolveSystemLimits } from '@narra/risk';
 import { sanitizeUntrusted } from '@narra/shared';
 import { TRADING_PAUSE_KEY, aiEnabled, loadAiConfig, parsePause, tokensUsedToday } from '@narra/worker-pipeline';
@@ -62,10 +62,20 @@ export function registerAdminStatusRoutes(app: FastifyInstance, deps: Pick<Accou
     if (redis && !redis.ok) warnings.push('Redis did not answer.');
 
     let queues: Record<string, QueueCounts> | null = null;
+    let queueHealth: Record<string, QueueHealth> | null = null;
+    if (ops.queueHealth) {
+      try { queueHealth = await ops.queueHealth(); } catch { warnings.push('Queue health could not be read.'); }
+    }
     if (ops.queueCounts) {
       try { queues = await ops.queueCounts(); } catch { warnings.push('Queue counts could not be read.'); }
       for (const [name, c] of Object.entries(queues ?? {})) {
-        if (c.failed > 0) warnings.push(`Queue ${name} has ${c.failed} failed job(s).`);
+        // A retained failed job is evidence, not a permanent alarm. Warn only when the
+        // failure age is unknown or falls inside the last day; older failures stay in the
+        // queue for audit without keeping the status page yellow forever.
+        const lastFailedAt = queueHealth?.[name]?.lastFailedAt;
+        const lastFailedMs = lastFailedAt ? Date.parse(lastFailedAt) : NaN;
+        const failedRecently = Number.isFinite(lastFailedMs) ? lastFailedMs > at.getTime() - DAY : null;
+        if (c.failed > 0 && failedRecently !== false) warnings.push(`Queue ${name} has ${c.failed} failed job(s)${failedRecently ? ' in the last 24h' : ''}.`);
         if (c.waiting > QUEUE_BACKLOG_WARN) warnings.push(`Queue ${name} has a backlog of ${c.waiting}.`);
         if (c.waiting > 0 && c.consumers === 0) warnings.push(`Queue ${name} has ${c.waiting} job(s) waiting and no worker consuming it.${name === 'execution' ? ' Start the executor (npm run dev:executor): paper fills, confirmations and dry runs are processed there, not in the pipeline worker.' : ''}`);
       }

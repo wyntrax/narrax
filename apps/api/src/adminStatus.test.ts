@@ -103,6 +103,21 @@ describe.skipIf(!up)('admin status and costs (needs Postgres)', () => {
       await db.systemSetting.deleteMany({ where: { key: TRADING_PAUSE_KEY } });
     });
 
+    it('does not warn forever about a retained failed job older than a day', async () => {
+      const old = new Date(NOW.getTime() - 3 * DAY).toISOString();
+      const aged = await buildApp({ account: { db, verifier, now: () => NOW }, ops: {
+        redisPing: async () => true,
+        queueCounts: async () => ({ execution: { waiting: 0, active: 0, failed: 1, delayed: 0 } }),
+        queueHealth: async () => ({ execution: { lastCompletedAt: NOW.toISOString(), lastFailedAt: old, lastRun: null } }),
+      } });
+      try {
+        const r = await http('GET', '/v1/admin/status', boss, undefined, aged);
+        expect((r.body.warnings as string[]).some((x) => x.includes('execution') && x.includes('failed'))).toBe(false);
+      } finally {
+        await aged.close();
+      }
+    });
+
     it('says when redis is down, and says "not checked" rather than guessing when nothing can check it', async () => {
       const down = await http('GET', '/v1/admin/status', boss, undefined, appDown);
       expect(down.body.redis.ok).toBe(false);
