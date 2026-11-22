@@ -4,6 +4,7 @@ import {useLocale,useTranslations} from 'next-intl';
 import {ShieldCheck,Wallet,Check} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {Badge,Card,ConfirmDialog,Stepper} from '@/components/ui/primitives';
+import {BrandLogo} from '@/components/brand-logo';
 import {Link} from '@/i18n/navigation';
 import {errorKey,ApiError} from '@/lib/api';
 import {busyStates,stepFor,type AccessState} from './machine';
@@ -23,12 +24,12 @@ export function AccessView({state,actions,wallets=[],mode='standalone'}: {state:
   {state.error&&<div role="alert" className="error-note">{errors(errorKey(new ApiError(state.error)))}{state.requiredTier&&<Badge>{state.requiredTier.replace('_',' ')}</Badge>}{state.retryAt&&<p>{t('rateWait')}</p>}</div>}
   {state.name==='signedOut'&&<Button onClick={actions.login}>{d('continue')}<span aria-hidden>↗</span></Button>}
   {state.name==='signedOut'&&name!=='signedOut'&&<p className="small-note">{t('existingMember')}</p>}
-  {['noWallet','disabled','full','inviteOnly'].includes(state.name)&&<><p className="wallet-explanation">{t('sameWallet')}</p><div className="actions centered"><Button onClick={actions.connect} variant={state.data?.links.length?'ghost':'primary'}>{t('connect')}</Button><Button variant="ghost" onClick={actions.createWallet}>{t('embedded')}</Button></div></>}
+  {['noWallet','disabled','full','inviteOnly'].includes(state.name)&&<><p className="wallet-explanation">{t('sameWallet')}</p><div className="actions centered"><Button onClick={actions.connect} variant={state.data?.links.length?'ghost':'primary'}><BrandLogo brand="solana" size={15} inverted={!state.data?.links.length}/>{t('connect')}</Button><Button variant="ghost" onClick={actions.createWallet}><BrandLogo brand="privy" size={15}/>{t('embedded')}</Button></div></>}
   {state.name==='connecting'&&<><p className="wallet-explanation">{t('sameWallet')}</p><div className="wallet-options">{wallets.map(w=><Button variant="ghost" key={w.address} onClick={()=>actions.select(w.address)}><Wallet size={16}/><span>{w.name}<small>{w.address.slice(0,6)}…{w.address.slice(-6)}</small></span></Button>)}</div><Button variant="ghost" onClick={actions.retry}>{c('cancel')}</Button></>}
   {state.name==='challenge'&&state.challenge&&<><p className="small-note">{t('reviewMessage')}</p><pre className="challenge-message" tabIndex={0}>{state.challenge.message}</pre><div className="actions centered"><Button onClick={actions.sign}>{t('signMessage')}</Button><Button variant="ghost" onClick={actions.retry}>{c('cancel')}</Button></div></>}
   {state.name==='linked'&&<>
    {mode==='standalone'&&<><CommunitySteps compact completed={communityDone} onStep={completeCommunityStep}/><div className="actions centered community-join"><Button disabled={!communityComplete||disabled} aria-describedby="access-community-status" onClick={actions.join}>{t('join')}</Button></div></>}
-   <div className="actions centered linked-more"><Button variant="ghost" onClick={actions.connect}>{t('connect')}</Button><Button variant="ghost" onClick={actions.createWallet}>{t('embedded')}</Button></div>
+   <div className="actions centered linked-more"><Button variant="ghost" onClick={actions.connect}><BrandLogo brand="solana" size={15}/>{t('connect')}</Button><Button variant="ghost" onClick={actions.createWallet}><BrandLogo brand="privy" size={15}/>{t('embedded')}</Button></div>
   </>}
   {state.name==='active'&&state.data&&<><div className="tier-result"><Badge>{state.data.effectiveTier.replace('_',' ')}</Badge><p>{state.data.nextExpiry?t('nextExpiry',{date:new Intl.DateTimeFormat(locale,{dateStyle:'medium',timeStyle:'short'}).format(new Date(state.data.nextExpiry))}):t('noExpiry')}</p></div>{mode==='standalone'&&<Link className="button button-primary" href="/app">{t('openNarra')} ↗</Link>}</>}
   {!busy&&mode==='standalone'&&<WyntraxLink/>}

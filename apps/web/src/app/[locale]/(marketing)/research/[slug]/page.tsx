@@ -5,6 +5,8 @@ import {pageMetadata, seoLocale} from '@/lib/seo';
 import {researchCopy, researchGuides, findResearchGuide, researchReferences} from '@/content/research-guides';
 import {StructuredData} from '@/components/marketing/structured-data';
 import {articleSchema, breadcrumbSchema} from '@/lib/structured-data';
+import {BrandMark} from '@/components/brand-mark';
+import {BrandLogo} from '@/components/brand-logo';
 import '../../research.css';
 
 type Props = {params: Promise<{locale: string; slug: string}>};
@@ -24,7 +26,7 @@ export default async function Guide({params}: Props) {
   return <main id="main" className="container research-public">
     <StructuredData data={[articleSchema(locale, `/research/${slug}`, guide.title, guide.description, guide.sections), breadcrumbSchema(locale, [{name: copy.home, path: ''}, {name: copy.guides, path: '/research'}, {name: guide.title, path: `/research/${slug}`}])]}/>
     <nav aria-label={locale === 'id' ? 'Jejak navigasi' : 'Breadcrumb'} className="research-breadcrumb"><Link href="/">{copy.home}</Link><span aria-hidden="true">/</span><Link href="/research">{copy.guides}</Link></nav>
-    <article className="research-public-article"><header><p className="eyebrow">Narrax · Solana</p><h1>{guide.title}</h1><p className="research-public-intro">{guide.intro}</p><p className="research-public-byline">{copy.byline} · <Link href="/methodology">{copy.methodology}</Link></p></header>
+    <article className="research-public-article"><header><p className="eyebrow"><BrandMark className="eyebrow-mark"/><BrandLogo brand="solana" size={14}/>Narrax · Solana</p><h1>{guide.title}</h1><p className="research-public-intro">{guide.intro}</p><p className="research-public-byline">{copy.byline} · <Link href="/methodology">{copy.methodology}</Link></p></header>
       {guide.sections.map((section, index) => <section key={section.title} aria-labelledby={`section-${index}`}><h2 id={`section-${index}`}>{section.title}</h2>{section.paragraphs.map(text => <p key={text}>{text}</p>)}</section>)}
       <section><h2>{copy.checklist}</h2><ul>{guide.checklist.map(item => <li key={item}>{item}</li>)}</ul></section>
       <section><h2>{copy.sources}</h2><p>{copy.sourceNote}</p><ul>{researchReferences.map(source => <li key={source.url}><a href={source.url} rel="external">{source.name}</a></li>)}</ul></section>

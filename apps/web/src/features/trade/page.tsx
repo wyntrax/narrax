@@ -11,6 +11,7 @@ import {validateChallenge,encodeSignature} from '@/features/access/proof';
 import {hasFeature,useResearch,useResearchQuery} from '@/features/research/session';
 import {Locked,ResourceError,useFormat} from '@/features/research/ui';
 import {tradeCopy} from './copy';
+import {BrandLogo} from '@/components/brand-logo';
 import {TokenAvatar,TokenIdentity} from '@/features/research/token-identity';
 import './trade.css';
 
@@ -24,7 +25,7 @@ export function TradePage({initialMint=''}:{initialMint?:string}){
  const c=useCopy(),{access}=useResearch(),[draft,setDraft]=useState(initialMint),[mint,setMint]=useState(isSolanaAddress(initialMint)?initialMint:''),[invalid,setInvalid]=useState(false),[busy,setBusy]=useState(false);
  const config=useResearchQuery('manual-trades/config',TradeConfig);
  return <div className="trade-page">
-  <header className="trade-heading"><div><p className="trade-eyebrow">{c.eyebrow}</p><h1>{c.headline}</h1><p>{c.intro}</p></div><span className="trade-network"><span/>{c.mainnet}</span></header>
+  <header className="trade-heading"><div><p className="trade-eyebrow">{c.eyebrow}</p><h1>{c.headline}</h1><p>{c.intro}</p></div><span className="trade-network"><BrandLogo brand="solana" size={14}/>{c.mainnet}</span></header>
   {!hasFeature(access,'research.tokens')?<Locked tier={access.features['research.tokens']?.requiredTier}/>:<>
    <form className="trade-lookup" onSubmit={e=>{e.preventDefault();const value=draft.trim();setInvalid(!isSolanaAddress(value));if(isSolanaAddress(value))setMint(value);}}>
     <label htmlFor="trade-mint">{c.mint}</label><div><Search size={18} aria-hidden="true"/><input id="trade-mint" value={draft} disabled={busy} onChange={e=>setDraft(e.target.value)} placeholder={c.placeholder} maxLength={44} spellCheck={false} autoComplete="off" aria-invalid={invalid}/><button disabled={busy} className="trade-primary">{c.analyze}<ArrowRight size={16} aria-hidden="true"/></button></div>{invalid&&<p role="alert">{c.invalid}</p>}
@@ -151,7 +152,7 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
      {unsupported.length>0&&<p className="trade-wallet-warning">{c.signerHelp}</p>}
      <div className="trade-wallet-actions">
       <button type="button" className="research-control" disabled={busy||pending||!!walletBusy} onClick={()=>void Promise.resolve(auth.connectWallet()).catch(()=>setError(c.errors.WALLET_REJECTED!))}><Plus size={14}/>{auth.wallets.length?c.connectAnother:c.connect}</button>
-      {!hasPrivy&&<button type="button" className="research-control" disabled={busy||pending||!!walletBusy} onClick={()=>void Promise.resolve(auth.createWallet()).catch(()=>setError(c.errors.WALLET_REJECTED!))}><Wallet size={14}/>{c.createPrivy}</button>}
+      {!hasPrivy&&<button type="button" className="research-control" disabled={busy||pending||!!walletBusy} onClick={()=>void Promise.resolve(auth.createWallet()).catch(()=>setError(c.errors.WALLET_REJECTED!))}><BrandLogo brand="privy" size={14}/>{c.createPrivy}</button>}
       <Link className="research-control" href="/app/settings">{c.manageWallets}</Link>
      </div>
     </div>
