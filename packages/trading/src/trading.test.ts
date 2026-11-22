@@ -2,13 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { AgentDecisionSchema } from '@narra/shared';
 import {
   CONFIRMATION_TTL_MS, EXIT_RETRY_COOLDOWN_MS, MAX_DECISION_AGE_MS, MAX_EVALUATION_AGE_MS, MAX_EXIT_ATTEMPTS, MAX_REDUCES_PER_POSITION, PAPER_FEE_SOL,
-  PaperFillError, buildExitDecision, canClaim, canRetryExit, checkEligibility, confirmationExpiry, effectiveStatus, entryKey, exitKey, isDecisionFresh,
+  PaperFillError, buildExitDecision, canClaim, canRetryExit, checkEligibility, confirmationExpiry, confirmKey, effectiveStatus, entryKey, exitKey, isDecisionFresh,
   paperBalance, paperBuyFill, paperPortfolioValue, paperSellFill, sellUnits, shouldActOnEvaluation, signalCodesOf, tradableBalance, type PermissionFacts,
 } from './index';
 
 const NOW = new Date('2026-10-03T12:00:00Z');
 const ago = (ms: number) => new Date(NOW.getTime() - ms);
 const perm = (o: Partial<PermissionFacts> = {}): PermissionFacts => ({ aiTradingEnabled: true, agentPaused: false, revokedAt: null, delegatedUntil: null, ...o });
+
+describe('confirmation job key', () => {
+  it('is BullMQ-safe and deterministic', () => {
+    expect(confirmKey('cmabc123')).toBe('confirm-cmabc123');
+    expect(confirmKey('cmabc123')).not.toContain(':');
+  });
+});
 
 describe('eligibility', () => {
   it('a paused agent stops every mode, SHADOW included', () => {

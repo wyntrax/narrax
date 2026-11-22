@@ -94,7 +94,8 @@ describe.skipIf(!up)('confirmation routes (needs Postgres)', () => {
     const r = await call('POST', `/v1/confirmations/${c.id}/confirm`, alice);
     expect(r.status).toBe(202);
     expect(enqueued).toHaveLength(1);
-    expect(enqueued[0]).toMatchObject({ userId: a, confirmationId: c.id, idempotencyKey: `confirm:${c.id}`, mint: MINT });
+    expect(enqueued[0]).toMatchObject({ userId: a, confirmationId: c.id, idempotencyKey: `confirm-${c.id}`, mint: MINT });
+    expect(enqueued[0]!.idempotencyKey).not.toContain(':');
     expect((await db.pendingConfirmation.findUniqueOrThrow({ where: { id: c.id } })).status).toBe('CLAIMED');
     const again = await call('POST', `/v1/confirmations/${c.id}/confirm`, alice);
     expect(again.status).toBe(409);

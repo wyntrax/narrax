@@ -388,7 +388,7 @@ describe.skipIf(!up)('B5a dry-run executor on a real Postgres (Jupiter and the R
     it('a confirmed order ends as dry_run, and the confirmation is marked resolved with that result', async () => {
       const u = await mkUser({ mode: 'SEMI_AUTO' });
       const conf = await db.pendingConfirmation.create({ data: { userId: u.id, idempotencyKey: `pc-${tag}`, kind: 'ENTRY', mint, job: {}, sizeSol: 0.01, quote: {}, expiresAt: new Date(Date.now() + 300_000), status: 'CLAIMED' } });
-      const job = ExecutionJobSchema.parse({ userId: u.id, idempotencyKey: `confirm:${conf.id}`, confirmationId: conf.id, mint, decision: payload() });
+      const job = ExecutionJobSchema.parse({ userId: u.id, idempotencyKey: `confirm-${conf.id}`, confirmationId: conf.id, mint, decision: payload() });
       const out = await runExecution(db, job, deps(u.id, [u.id], 'SEMI_AUTO'));
       expect(out.status).toBe('dry_run');
       expect((await db.pendingConfirmation.findUniqueOrThrow({ where: { id: conf.id } })).result).toMatch(/^dry_run/);
