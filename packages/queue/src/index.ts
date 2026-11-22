@@ -247,7 +247,8 @@ export function createQueues(connection: Redis) {
       }),
     enqueueAiScreening: async (job: AiScreeningJob) =>
       aiScreening.add('screen', AiScreeningJobSchema.parse(job), {
-        jobId: `${job.mint}:${job.sourceSignature}`, attempts: 2, backoff: { type: 'fixed', delay: 2000 }, ...RETAIN,
+        // BullMQ reserves ':' in custom job ids. Hash the mint/signature pair instead.
+        jobId: createHash('sha256').update(`${job.mint}:${job.sourceSignature}`).digest('hex'), attempts: 2, backoff: { type: 'fixed', delay: 2000 }, ...RETAIN,
       }),
     /** attempts: 1 on purpose. A failed trade must never be retried automatically. */
     enqueueExecution: async (job: ExecutionJob) =>
