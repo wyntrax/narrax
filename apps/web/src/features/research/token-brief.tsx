@@ -3,6 +3,7 @@ import {useEffect,useState} from 'react';
 import {useTranslations} from 'next-intl';
 import type {Token} from './contracts';
 import {Facts,Metrics,Section,useFormat} from './ui';
+import {BrandLogo} from '@/components/brand-logo';
 
 // Matches the API's source-linked observation window, not signal quality.
 export const TOKEN_MARKET_MAX_AGE_MS=15*60*1000;
@@ -35,7 +36,7 @@ export function TokenBrief({token,state}:{token:Token;state:ReturnType<typeof to
  const turnover=m&&m.liquidityUsd!=null&&m.liquidityUsd>0&&m.volume24hUsd!=null&&m.volume24hUsd>=0?m.volume24hUsd/m.liquidityUsd:null;
  return <Section title={t('title')}>
   <div className="token-brief-status" role="status"><strong>{t(`states.${state}`)}</strong><span>{t(`stateHelp.${state}`)}</span></div>
-  <Metrics items={[{label:w('trench.change1h'),value:changeValue},{label:w('trench.turnover'),value:turnover==null?t('needsFresh'):`${f.number(turnover,2)}×`},{label:t('network'),value:'Solana'}]}/>
+  <Metrics items={[{label:w('trench.change1h'),value:changeValue},{label:w('trench.turnover'),value:turnover==null?t('needsFresh'):`${f.number(turnover,2)}×`},{label:t('network'),value:<span className="token-artwork-label"><BrandLogo brand="solana" size={14}/><span>Solana</span></span>}]}/>
   <p className="research-note">{w('trench.turnoverNote')}</p>
   <Facts items={[{label:t('marketAt'),value:f.date(o?.at)},{label:w('trench.poolCreated'),value:f.date(o?.pairCreatedAt)},{label:t('tokenCreated'),value:f.date(token.createdOnChainAt)}]}/>
   <p className="research-note">{t('timingNote')}</p>

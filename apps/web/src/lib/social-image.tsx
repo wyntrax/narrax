@@ -12,7 +12,7 @@ export async function renderSocialImage(locale: SeoLocale, key: string) {
     const image = await readFile(path.join(process.cwd(), 'public/og-default.png'));
     return new Response(new Uint8Array(image), {headers: {'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800'}});
   }
-  const rawSymbol = await readFile(path.join(process.cwd(), 'public/narrax-symbol.svg'), 'utf8');
+  const rawSymbol = await readFile(path.join(process.cwd(), 'public/narrax-logo-dark.svg'), 'utf8');
   const symbolWhite = rawSymbol.replaceAll('#050609', '#ffffff');
   const logoWhite = `data:image/svg+xml;base64,${Buffer.from(symbolWhite).toString('base64')}`;
   const id = locale === 'id';

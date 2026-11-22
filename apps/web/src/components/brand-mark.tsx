@@ -1,4 +1,18 @@
-// The supplied Narrax symbol is an SVG mask, so theme changes never fetch another image.
-export function BrandMark({className=''}:{className?:string}) {
- return <span className={`brand-mark ${className}`} aria-hidden="true"/>;
+import {BrandLogo} from './brand-logo';
+
+/** Renders the theme-aware Narrax brand emblem using `/narrax-logo-dark.svg` and `/narrax-logo-light.svg`. */
+export function BrandMark({
+  className = '',
+  inverted = false,
+}: {
+  className?: string;
+  inverted?: boolean;
+}) {
+  return (
+    <BrandLogo
+      brand="narrax"
+      inverted={inverted}
+      className={`brand-mark ${className}`.trim()}
+    />
+  );
 }
