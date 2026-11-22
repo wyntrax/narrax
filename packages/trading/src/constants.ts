@@ -44,6 +44,7 @@ export const UNSPECIFIED_EXIT_CODE = 'UNSPECIFIED';
 
 export const entryKey = (decisionId: string, userId: string) => `entry:${decisionId}:${userId}`;
 export const exitKey = (evaluationId: string, attempt: number) => `exit:${evaluationId}:${attempt}`;
-export const confirmKey = (confirmationId: string) => `confirm:${confirmationId}`;
+/** BullMQ rejects custom job ids containing ':' unless they have exactly three segments. */
+export const confirmKey = (confirmationId: string) => `confirm-${confirmationId}`;
 /** Unique while a position is open, so a user cannot hold two open positions in one token. */
 export const openPositionKey = (userId: string, tokenId: string) => `${userId}:${tokenId}`;

@@ -12,7 +12,7 @@ test('public product answers and preview metadata are readable without JavaScrip
  for(const agent of ['Twitterbot/1.0','TelegramBot (like TwitterBot)']){
   const response=await request.get('/',{headers:{'user-agent':agent}}),html=await response.text(),head=html.split('</head>')[0];
   expect(response.status()).toBe(200);
-  expect(head).toContain('summary_large_image');expect(head).toContain('/share/en/home.png?v=5');
+  expect(head).toContain('summary_large_image');expect(head).toContain('/share/en/home.png?v=6');
   expect(html).toContain(productFacts.en.summary);
   for(const item of productFacts.en.questions)expect(html).toContain(item.question);
   expect(html).toContain('FAQPage');
@@ -43,7 +43,7 @@ for(const locale of ['en','id'] as const)test(`public SEO: ${locale} canonicals,
   await expect(page.locator('head link[rel="canonical"]')).toHaveCount(1);
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content',indexable?/^index,/:/noindex/);
   const image=await page.locator('meta[property="og:image"]').getAttribute('content');
-  if(path==='') expect(image).toContain(`/share/${locale}/home.png?v=5`);
+  if(path==='') expect(image).toContain(`/share/${locale}/home.png?v=6`);
   else expect(image).toContain(`/share/${locale}/`);
   await expect(page.locator('meta[name="twitter:image"]')).toHaveAttribute('content',image!);
   const scripts=await page.locator('script[type="application/ld+json"]').evaluateAll(nodes=>nodes.map(node=>({nonce:(node as HTMLScriptElement).nonce,data:JSON.parse(node.textContent!)})));
@@ -83,7 +83,7 @@ test('unknown guides return a real 404 and are not indexed',async({request})=>{
 
 test('localized social preview images are valid PNGs',async({request})=>{
  test.setTimeout(120000);
- for(const path of ['/opengraph-image','/id/opengraph-image',...(['en','id'] as const).flatMap(locale=>['home','research','methodology',...researchGuides[locale].map(g=>g.slug)].map(key=>`/share/${locale}/${key}.png?${key==='home'?'v=5':'v=4'}`))]){
+ for(const path of ['/opengraph-image','/id/opengraph-image',...(['en','id'] as const).flatMap(locale=>['home','research','methodology',...researchGuides[locale].map(g=>g.slug)].map(key=>`/share/${locale}/${key}.png?${key==='home'?'v=6':'v=5'}`))]){
   const response=await request.get(path,{headers:{'user-agent':'TelegramBot (like TwitterBot)'}});expect(response.status()).toBe(200);
   expect(response.headers()['content-type']).toContain('image/png');const bytes=await response.body();
   expect(bytes.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');

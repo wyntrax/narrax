@@ -46,6 +46,17 @@ describe.skipIf(!up)('queues (needs Redis)', () => {
   it('refuses an invalid execution job before it is queued', async () => {
     await expect(queues.enqueueExecution({ userId: 'u', idempotencyKey: 'short', mint: 'x', decision: {} } as never)).rejects.toThrow();
   });
+
+  it('enqueues AI screening with a BullMQ-safe job id', async () => {
+    await queues.aiScreening.obliterate({ force: true });
+    const job = await queues.enqueueAiScreening({
+      mint: 'M'.padEnd(40, '1'), sourceSignature: `sig${Date.now()}`.padEnd(64, '0'),
+      wallet: 'W'.padEnd(40, '1'), reason: 'HIGH_SCORE_WALLET_BUY',
+    });
+    expect(job.id).not.toContain(':');
+    expect(job.id).toMatch(/^[a-f0-9]{64}$/);
+    await queues.aiScreening.obliterate({ force: true });
+  });
 });
 
 describe.skipIf(!up)('wallet intelligence schedule (needs Redis)', () => {

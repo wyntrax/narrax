@@ -140,9 +140,9 @@ describe('processExecution: B4 paths', () => {
     expect(recordRisk).not.toHaveBeenCalled();
   });
   describe('a confirmed order (job has a confirmationId)', () => {
-    const confirmed = (): ExecutionJob => ({ ...job(), idempotencyKey: 'confirm:abc-0001', confirmationId: 'abc' });
+    const confirmed = (): ExecutionJob => ({ ...job(), idempotencyKey: 'confirm-abc-0001', confirmationId: 'abc' });
     it('re-runs the Governor with a fresh quote, and with no Executor stops at execution_disabled', async () => {
-      const { d, getQuote, recordRisk } = deps({}, context({ mode: 'SEMI_AUTO', idempotencyKey: 'confirm:abc-0001' }));
+      const { d, getQuote, recordRisk } = deps({}, context({ mode: 'SEMI_AUTO', idempotencyKey: 'confirm-abc-0001' }));
       const r = await processExecution(confirmed(), d);
       expect(r.status).toBe('execution_disabled');
       expect(getQuote).toHaveBeenCalledTimes(1);
@@ -150,21 +150,21 @@ describe('processExecution: B4 paths', () => {
     });
     it('is rejected, not executed, when the fresh quote now breaks a limit', async () => {
       const execute = vi.fn(async (_i: { sizeSol: number }) => ({ signature: 'x' }));
-      const { d } = deps({ executor: { execute }, jupiter: { getQuote: async () => quote({ priceImpactPct: 9 }) } }, context({ mode: 'SEMI_AUTO', idempotencyKey: 'confirm:abc-0001' }));
+      const { d } = deps({ executor: { execute }, jupiter: { getQuote: async () => quote({ priceImpactPct: 9 }) } }, context({ mode: 'SEMI_AUTO', idempotencyKey: 'confirm-abc-0001' }));
       const r = await processExecution(confirmed(), d);
       expect(r.status).toBe('rejected');
       expect(execute).not.toHaveBeenCalled();
     });
     it('is rejected when the agent was paused or AI access revoked after the user was asked', async () => {
       for (const over of [{ agentPaused: true }, { aiAccessEnabled: false }]) {
-        const { d, getQuote } = deps({}, context({ mode: 'SEMI_AUTO', idempotencyKey: 'confirm:abc-0001', ...over }));
+        const { d, getQuote } = deps({}, context({ mode: 'SEMI_AUTO', idempotencyKey: 'confirm-abc-0001', ...over }));
         const r = await processExecution(confirmed(), d);
         expect(r.status).toBe('rejected');
         expect(getQuote).not.toHaveBeenCalled();
       }
     });
     it('never becomes a paper fill if the user has since moved to PAPER', async () => {
-      const { d } = deps({}, context({ mode: 'PAPER', idempotencyKey: 'confirm:abc-0001' }));
+      const { d } = deps({}, context({ mode: 'PAPER', idempotencyKey: 'confirm-abc-0001' }));
       const r = await processExecution(confirmed(), d);
       expect(r.status).toBe('rejected');
       expect(r.result.violations.map((v) => v.code)).toContain('MODE_CHANGED');
