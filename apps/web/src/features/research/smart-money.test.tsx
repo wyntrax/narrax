@@ -6,7 +6,7 @@ import type {ReactNode} from 'react';
 import messages from '../../../messages/research/en.json';
 import {SmartMoneyPage,SmartWalletPage} from './smart-money';
 import {empty} from '@/test/fixtures';
-const fixture=vi.hoisted(()=>({profile:null as unknown,hasTrade:false,paths:[] as string[],dirItem:null as unknown,rankingsAllowed:true,admin:false}));
+const fixture=vi.hoisted(()=>({profile:null as unknown,hasTrade:false,paths:[] as string[],dirItem:null as unknown,flowItem:null as unknown,rankingsAllowed:true,admin:false}));
 const at='2026-10-18T05:29:31.064Z';
 const intelligence={checkedAt:at,windowDays:30,observedTrades:299,observedBuys:296,observedSells:3,unmatchedSells:1,closedTrades:2,requiredClosedTrades:5,status:'INSUFFICIENT_HISTORY'};
 vi.mock('@/i18n/navigation',()=>({useRouter:()=>({push:vi.fn()}),Link:({href,children}:{href:string;children:ReactNode})=><a href={href}>{children}</a>}));
@@ -14,7 +14,7 @@ vi.mock('./session',async importOriginal=>({...await importOriginal<typeof impor
  fixture.paths.push(path);
   const result={isPending:false,isError:false,isFetching:false,refetch:vi.fn()};
    if(path.startsWith('smart-money/rankings'))return {...result,data:{items:[],pipeline:null}};
-   if(path.startsWith('smart-money/flows'))return {...result,data:{items:[],nextCursor:null}};
+   if(path.startsWith('smart-money/flows'))return {...result,data:{items:fixture.flowItem?[fixture.flowItem]:[],nextCursor:null}};
    if(path.startsWith('smart-money/emerging'))return {...result,data:{snapshot:null}};
  if(path.startsWith('smart-money/')){
   const wallet={address:'wallet',source:'MANUAL',observedTrades:299,intelligence};
@@ -23,7 +23,7 @@ vi.mock('./session',async importOriginal=>({...await importOriginal<typeof impor
  if(path.includes('/trades'))return {...result,data:{items:fixture.hasTrade?[{id:'t',at,side:'BUY',amountSol:1,signature:'sig',token:{mint:'mint',symbol:'REAL',name:'Resolved Token'}}]:[],nextCursor:null}};
  return {...result,data:{address:'wallet',source:'MANUAL',trackedSince:at,profile:fixture.profile,intelligence,history:{checkedAt:at,scanned:300,accepted:299,skipped:0,capped:true,windowDays:30},performance:{},narrativeHistory:{scannedTrades:0,lookbackDays:90,items:[]},cluster:null,funding:null}};
 }}));
-afterEach(()=>{cleanup();fixture.profile=null;fixture.hasTrade=false;fixture.paths=[];fixture.dirItem=null;fixture.rankingsAllowed=true;fixture.admin=false;});
+afterEach(()=>{cleanup();fixture.profile=null;fixture.hasTrade=false;fixture.paths=[];fixture.dirItem=null;fixture.flowItem=null;fixture.rankingsAllowed=true;fixture.admin=false;});
 function view(node:ReactNode){return render(<NextIntlClientProvider locale="en" messages={{workspace:messages}}>{node}</NextIntlClientProvider>);}
 it('locks rankings without fetching them and keeps the other tabs usable',async()=>{
  fixture.rankingsAllowed=false;view(<SmartMoneyPage/>);
@@ -96,6 +96,13 @@ it('opens only rankings initially and supports keyboard tab navigation without f
  await userEvent.click(screen.getByRole('tab',{name:'Emerging wallets'}));
  expect(fixture.paths).toContain('smart-money/emerging');
 });
+it('warns when a historical flow token is below the liquidity gate',async()=>{
+ fixture.flowItem={id:'flow',side:'BUY',createdAt:at,stale:false,walletCount:2,independentEntities:2,netFlowSol:1,entryPriceUsd:1,entryAt:at,currentLiquidityUsd:'0',currentMarketAt:at,token:{mint:'mint',symbol:'TURTLE',name:'Token',imageUrl:null},evidence:{trades:[]},measurements:[{horizonHours:1,status:'UNKNOWN',dueAt:at,returnPct:null,priceAt:null,reason:'THIN_LIQUIDITY'}]};
+ view(<SmartMoneyPage/>);
+ await userEvent.click(screen.getByRole('tab',{name:'Token flows'}));
+ expect(await screen.findByText(messages.smartResearch.illiquid)).toBeVisible();
+});
+
 it('renders real recorded-profile values on the detail page and keeps a missing pattern unknown',()=>{
  fixture.profile={score:81.5,leaderScore:70,style:'SNIPER',medianHoldSeconds:3600,bestPattern:null,weakPattern:'Slow exits',updatedAt:at};
  view(<SmartWalletPage address="wallet"/>);

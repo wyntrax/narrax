@@ -263,16 +263,19 @@ export async function publishWalletResearch(db: PrismaClient, clock: () => Date 
 }
 
 /** Measured token returns, including SELL observations, are never presented as wallet PnL.
- * Every horizon uses a source-backed price at/before its own due time, never a later recovery. */
+ * Every horizon uses a source-backed price at/before its own due time, never a later recovery.
+ * A horizon whose price came from a pool below the flow liquidity gate is UNKNOWN, not a return. */
 export async function measureWalletResearch(db: PrismaClient, now = new Date()) {
   const pending = await db.walletResearchMeasurement.findMany({ where: { status: 'PENDING', dueAt: { lte: now } }, orderBy: [{ dueAt: 'asc' }, { id: 'asc' }], take: 200, include: { signal: true } });
   let measured = 0, unknown = 0;
   for (const row of pending) {
     const market = await walletMarketEvidence(db, row.signal.tokenId, row.dueAt);
     const entry = Number(row.signal.entryPriceUsd);
-    const result = market && entry > 0 ? (market.priceUsd / entry - 1) * 100 : null;
+    const liquid = market !== null && Number.isFinite(market.liquidityUsd) && market.liquidityUsd >= WALLET_FLOW_LIMITS.minLiquidityUsd;
+    const result = liquid && entry > 0 ? (market!.priceUsd / entry - 1) * 100 : null;
     const valid = result !== null && Number.isFinite(result);
-    const updated = await db.walletResearchMeasurement.updateMany({ where: { id: row.id, status: 'PENDING' }, data: valid ? { status: 'MEASURED', priceUsd: market!.priceUsd, priceAt: new Date(market!.at), metricId: market!.metricId, returnPct: result, measuredAt: now } : { status: 'UNKNOWN', reason: 'NO_FRESH_SOURCE_BACKED_HORIZON_PRICE', measuredAt: now } });
+    const reason = !market ? 'NO_FRESH_SOURCE_BACKED_HORIZON_PRICE' : !liquid ? 'THIN_LIQUIDITY' : entry <= 0 ? 'INVALID_ENTRY_PRICE' : 'NO_FRESH_SOURCE_BACKED_HORIZON_PRICE';
+    const updated = await db.walletResearchMeasurement.updateMany({ where: { id: row.id, status: 'PENDING' }, data: valid ? { status: 'MEASURED', priceUsd: market!.priceUsd, priceAt: new Date(market!.at), metricId: market!.metricId, returnPct: result, measuredAt: now } : { status: 'UNKNOWN', reason, measuredAt: now } });
     if (updated.count) { if (valid) measured++; else unknown++; }
   }
   return { measured, unknown };

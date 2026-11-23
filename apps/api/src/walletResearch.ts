@@ -30,12 +30,13 @@ export function registerWalletResearchRoutes(app: FastifyInstance, deps: Pick<Ac
     if (!q.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
     const now = clock();
     if (q.data.cursor && !await db.walletResearchSignal.count({ where: { id: q.data.cursor, ...(q.data.side ? { side: q.data.side } : {}), token: { blacklisted: false }, createdAt: { lte: now } } })) return reply.code(400).send({ error: 'INVALID_INPUT' });
-    const rows = await db.walletResearchSignal.findMany({ where: { token: { blacklisted: false }, createdAt: { lte: now }, ...(q.data.side ? { side: q.data.side } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: q.data.limit + 1, ...(q.data.cursor ? { cursor: { id: q.data.cursor }, skip: 1 } : {}), include: { token: { select: { mint: true, symbol: true, name: true } }, measurements: { orderBy: { horizonHours: 'asc' } } } });
+    const rows = await db.walletResearchSignal.findMany({ where: { token: { blacklisted: false }, createdAt: { lte: now }, ...(q.data.side ? { side: q.data.side } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: q.data.limit + 1, ...(q.data.cursor ? { cursor: { id: q.data.cursor }, skip: 1 } : {}), include: { token: { select: { mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1, select: { liquidityUsd: true, at: true } } } }, measurements: { orderBy: { horizonHours: 'asc' } } } });
     const page = rows.slice(0,q.data.limit);
     const images=await marketTokenImages(db,page.map(s=>({id:s.tokenId,mint:s.token.mint})));
-    return { asOf: now, nextCursor: rows.length > page.length ? page.at(-1)!.id : null, items: page.map(s => ({ id: s.id, token: {...s.token,imageUrl:images.get(s.tokenId)??null}, side: s.side, createdAt: s.createdAt,
+    return { asOf: now, nextCursor: rows.length > page.length ? page.at(-1)!.id : null, items: page.map(s => ({ id: s.id, token: { mint: s.token.mint, symbol: s.token.symbol, name: s.token.name, imageUrl: images.get(s.tokenId) ?? null }, side: s.side, createdAt: s.createdAt,
       stale: +now - +s.createdAt > 15 * 60_000, walletCount: s.walletCount, independentEntities: s.independentEntities, netFlowSol: Number(s.netFlowSol),
       entryPriceUsd: Number(s.entryPriceUsd), entryAt: s.entryAt, evidence: s.evidence,
+      currentLiquidityUsd: s.token.metrics[0]?.liquidityUsd?.toString() ?? null, currentMarketAt: s.token.metrics[0]?.at ?? null,
       measurements: s.measurements.map(m => ({ horizonHours: m.horizonHours, status: m.status, dueAt: m.dueAt, returnPct: m.returnPct, priceAt: m.priceAt, reason: m.reason })) })) };
   });
 

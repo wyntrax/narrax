@@ -63,6 +63,17 @@ it('creates one immutable flow with three outcomes across concurrent publishers;
  expect(Number((await db.walletResearchSignal.findUniqueOrThrow({where:{id:s.id}})).entryPriceUsd)).toBe(1);
 });
 
+it('marks a horizon UNKNOWN when the due-time pool is below the flow liquidity gate',async()=>{
+ const {token}=await setup();
+ await publishWalletResearch(db,()=>now);
+ const s=await db.walletResearchSignal.findFirstOrThrow({where:{tokenId:token.id}});
+ const due=new Date(+now+H);
+ await db.$transaction(tx=>storeMarketSnapshot(tx,token.id,snapshot('mint',{priceUsd:2,liquidityUsd:0,marketCapUsd:100000,marketCapIsFdv:false}),'dexscreener',due));
+ await measureWalletResearch(db,new Date(+due+1000));
+ const m=await db.walletResearchMeasurement.findUniqueOrThrow({where:{signalId_horizonHours:{signalId:s.id,horizonHours:1}}});
+ expect(m).toMatchObject({status:'UNKNOWN',reason:'THIN_LIQUIDITY',priceUsd:null,priceAt:null,metricId:null,returnPct:null});
+});
+
 it.each(['provisional','cluster','stale','blacklist','unverified','holders','history','market-stale','future','honeypot','authority'] as const)('withholds %s evidence',async mode=>{
  const {token,pair}=await setup();
  if(mode==='provisional')await db.trackedWallet.update({where:{id:pair[0]!.id},data:{researchReview:'PROVISIONAL'}});
