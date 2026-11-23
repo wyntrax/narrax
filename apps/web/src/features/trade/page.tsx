@@ -40,7 +40,7 @@ export function TradePage({initialMint=''}:{initialMint?:string}){
 }
 
 function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.infer<typeof TradeConfig>;onBusy:(busy:boolean)=>void;onConfigChanged:()=>Promise<void>}){
- const c=useCopy(),f=useFormat(),auth=useAuth(),{send,read}=useResearch();
+ const c=useCopy(),f=useFormat(),locale=useLocale(),auth=useAuth(),{send,read}=useResearch();
  const [review,setReview]=useState<TradeReviewData|null>(null),[reviewed,setReviewed]=useState(false),[phase,setPhase]=useState<'research'|'quote'|'sign'|'send'|null>('research'),[error,setError]=useState<string|null>(null);
  const [side,setSide]=useState<'BUY'|'SELL'>('BUY'),[amount,setAmount]=useState(''),[slippage,setSlippage]=useState(100),[address,setAddress]=useState(''),[preview,setPreview]=useState<Preview|null>(null),[active,setActive]=useState<string|null>(null),[clock,setClock]=useState(Date.now());
  const [walletBusy,setWalletBusy]=useState<string|null>(null),[pendingWallet,setPendingWallet]=useState<string|null>(null),[copied,setCopied]=useState<string|null>(null);
@@ -52,6 +52,33 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
  const status=useResearchQuery(`manual-trades/${active??''}`,TradeRecord,!!active,active?10000:false);
  const finished=!!status.data&&['CONFIRMED','FAILED','EXPIRED'].includes(status.data.status),pending=!!active&&!finished;
  const quoteExpired=!!preview&&Date.parse(preview.expiresAt)<=clock,reviewExpired=!!review&&Date.parse(review.expiresAt)<=clock;
+ const limitCodes=review?Array.from(new Set([...review.buyBlockers,...review.notes])):[];
+ const freshFlow=!!review?.smartMoney.items.some(i=>i.fresh),latestFlow=review?.smartMoney.items[0];
+ const unknownRisk=!!review?.risk?.flags.some(flag=>/UNKNOWN|STALE/.test(flag));
+ const age=(value:string|null|undefined)=>{
+  if(!value)return null;
+  const ms=clock-Date.parse(value);
+  if(!Number.isFinite(ms)||ms<0)return null;
+  const rtf=new Intl.RelativeTimeFormat(locale,{numeric:'auto',style:'short'}),abs=Math.abs(ms);
+  if(abs>=86400000)return rtf.format(-Math.round(ms/86400000),'day');
+  if(abs>=3600000)return rtf.format(-Math.round(ms/3600000),'hour');
+  if(abs>=60000)return rtf.format(-Math.round(ms/60000),'minute');
+  return rtf.format(-Math.round(ms/1000),'second');
+ };
+ const observed=(value:string)=>`${c.lastObserved}: ${f.date(value)}${age(value)?` (${age(value)})`:''}`;
+ const limitDetail=(code:string)=>{
+  if(!review)return null;
+  switch(code){
+   case 'MARKET_MISSING':return review.market?observed(review.market.at):c.noObservation;
+   case 'LIQUIDITY_LOW':return review.market?`${c.liquidity}: ${f.usd(review.market.liquidityUsd)}`:c.noObservation;
+   case 'HOLDERS_MISSING':return review.holders?observed(review.holders.at):c.noObservation;
+   case 'RISK_MISSING':return review.risk?observed(review.risk.at):c.noObservation;
+   case 'RISK_FLAGS':return review.risk?.flags.length?review.risk.flags.map(flag=>c.riskFlags[flag]??flag).join(' · '):null;
+   case 'CONCENTRATED':return review.holders?`${c.top10}: ${f.number(review.holders.top10Pct)}%`:null;
+   case 'SMART_MONEY_MISSING':return latestFlow?`${c.latestFlow}: ${f.date(latestFlow.at)}`:c.noFlowRecorded;
+   default:return null;
+  }
+ };
  const busy=!!phase;
  useEffect(()=>{onBusy(busy||pending);return()=>onBusy(false);},[busy,pending,onBusy]);
  useEffect(()=>{const ids=connectedKey?connectedKey.split(','):[];let next=address;if(address&&!ids.includes(address))next=ids.length===1?ids[0]!:'';else if(!address&&ids.length===1)next=ids[0]!;if(next!==address)setAddress(next);},[address,connectedKey]);
@@ -65,7 +92,7 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
  }
  useEffect(()=>{void research();},[]); // eslint-disable-line react-hooks/exhaustive-deps
  function change(work:()=>void){setPreview(null);setError(null);work();}
- async function copyAddress(value:string){try{await navigator.clipboard.writeText(value);setCopied(value);window.setTimeout(()=>{if(mounted.current)setCopied(current=>current===value?null:current);},1800);}catch{if(mounted.current)setError(c.errors.copyFailed!);}}
+ async function copyAddress(value:string){try{await navigator.clipboard.writeText(value);setCopied(value);window.setTimeout(()=>{if(mounted.current)setCopied(current=>current===value?null:current);},1800);}catch{if(mounted.current)setError(c.copyFailed);}}
  async function verifyWallet(w:ResearchWallet){
   if(walletBusy||busy||operation.current)return;
   setWalletBusy(w.address);setError(null);
@@ -82,7 +109,7 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
   operation.current=true;setPhase('quote');setError(null);setPreview(null);
   try{
    if(Date.parse(review.expiresAt)<=Date.now())throw Error('REVIEW_EXPIRED');
-   if(!balances.data||balances.isError)throw Error('TRADE_UNAVAILABLE');
+   if(!balances.data||balances.isError)throw Error('BALANCES_UNAVAILABLE');
    const units=tradeBaseUnits(amount,side==='BUY'?9:balances.data.decimals);
    if(units>BigInt(side==='BUY'?balances.data.sol:balances.data.token))throw Error('INVALID_AMOUNT');
    const q=await send('manual-trades/preview',TradePreview,'POST',{reviewId:review.id,mint,wallet:address,side,amount,slippageBps:slippage});
@@ -112,21 +139,28 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
    <div className="trade-research">
     {!review?<div className="trade-panel trade-loading" aria-busy={busy}><Activity size={24}/><h2>{c.research}</h2><p role="status">{busy?c.loading:c.unknown}</p></div>:<>
      <header className="trade-token"><TokenAvatar symbol={review.symbol} imageUrl={review.imageUrl}/><div><h2>{review.symbol}<span>{review.name}</span></h2><code>{mint}</code></div><Link href={`/app/tokens/${mint}`} aria-label={c.details} title={c.details}><ArrowUpRight size={20}/></Link></header>
-     <div className="trade-panel"><div className="trade-panel-title"><h3><BookOpen size={17}/>{c.research}</h3><span className="trade-tag">{review.buyBlockers.length?c.blocked:c.ready}</span></div><p>{c.reviewNote}</p><p className="trade-stamp">{f.date(review.at)}</p>
-      {(review.buyBlockers.length>0||review.notes.length>0)&&<div className="trade-evidence-notes"><h4>{c.limits}</h4><ul>{[...review.buyBlockers,...review.notes].map(code=><li key={code}>{c.reasons[code]??code}</li>)}</ul></div>}
+     <div className="trade-panel"><div className="trade-panel-title"><h3><BookOpen size={17}/>{c.research}</h3><span className="trade-tag">{review.buyBlockers.length?c.blocked:c.ready}</span></div><p>{c.reviewNote}</p><p className="trade-stamp">{c.generated}: {f.date(review.at)}</p>
+      <ul className="trade-review-status">
+       <li><span>{c.market}</span><Fresh at={review.market}/></li>
+       <li><span>{c.holders}</span><Fresh at={review.holders}/></li>
+       <li><span>{c.risk}</span><Fresh at={review.risk}/></li>
+       <li><span>{c.smart}</span><span className="trade-fresh" data-fresh={freshFlow}>{!review.smartMoney.access?c.restricted:freshFlow?c.fresh:review.smartMoney.items.length?c.stale:c.none}</span></li>
+      </ul>
+      <div className="trade-evidence-notes"><h4>{c.limits}</h4><p className="trade-stamp">{c.limitsNote}</p>{limitCodes.length?<ul>{limitCodes.map(code=>{const detail=limitDetail(code);return <li key={code}><span>{c.reasons[code]??code}</span>{detail&&<small>{detail}</small>}</li>;})}</ul>:<p className="trade-stamp">{c.noLimits}</p>}</div>
      </div>
      <div className="trade-evidence-grid">
-      <section className="trade-panel"><div className="trade-panel-title"><h3><Activity size={17}/>{c.market}</h3><Fresh at={review.market}/></div><dl className="trade-facts"><Fact label={c.price} value={f.usd(review.market?.priceUsd)}/><Fact label={c.liquidity} value={f.usd(review.market?.liquidityUsd)}/><Fact label={c.volume} value={f.usd(review.market?.volume24hUsd)}/><Fact label={review.market?.marketCapIsFdv?c.fdv:c.cap} value={f.usd(review.market?.marketCapUsd)}/></dl><p className="trade-stamp">{review.market?`${review.market.source} · ${f.date(review.market.at)}`:c.unknown}</p></section>
-      <section className="trade-panel"><div className="trade-panel-title"><h3><Layers size={17}/>{c.holders}</h3><Fresh at={review.holders}/></div><dl className="trade-facts"><Fact label={c.count} value={review.holders?f.number(review.holders.count,0):c.unknown}/><Fact label={c.top10} value={review.holders?`${f.number(review.holders.top10Pct)}%`:c.unknown}/></dl><p className="trade-stamp">{review.holders?f.date(review.holders.at):c.unknown}</p></section>
+      <section className="trade-panel"><div className="trade-panel-title"><h3><Activity size={17}/>{c.market}</h3><Fresh at={review.market}/></div><dl className="trade-facts"><Fact label={c.price} value={f.usd(review.market?.priceUsd)}/><Fact label={c.liquidity} value={f.usd(review.market?.liquidityUsd)}/><Fact label={c.volume} value={f.usd(review.market?.volume24hUsd)}/><Fact label={review.market?.marketCapIsFdv?c.fdv:c.cap} value={f.usd(review.market?.marketCapUsd)}/></dl>{review.market&&!review.market.fresh&&<p className="trade-warning">{c.marketStale}</p>}<p className="trade-stamp">{review.market?`${review.market.source} · ${f.date(review.market.at)}`:c.unknown}</p></section>
+      <section className="trade-panel"><div className="trade-panel-title"><h3><Layers size={17}/>{c.holders}</h3><Fresh at={review.holders}/></div><dl className="trade-facts"><Fact label={c.count} value={review.holders?f.number(review.holders.count,0):c.unknown}/><Fact label={c.top10} value={review.holders?`${f.number(review.holders.top10Pct)}%`:c.unknown}/></dl><p className="trade-stamp">{review.holders?observed(review.holders.at):c.unknown}</p>{review.holders&&!review.holders.fresh&&<p className="trade-warning">{c.holdersStale}</p>}</section>
      </div>
-     <section className="trade-panel"><div className="trade-panel-title"><h3><ShieldCheck size={17}/>{c.risk}</h3><Fresh at={review.risk}/></div>{!review.risk?<p>{c.unknown}</p>:<><p>{review.risk.flags.length?review.risk.flags.join(' · '):c.noFlags}</p><p className="trade-stamp">{f.date(review.risk.at)}</p></>}</section>
-     <section className="trade-panel"><h3><Wallet size={17}/>{c.smart}</h3>{!review.smartMoney.access?<p>{c.locked}</p>:<>{!review.smartMoney.items.some(i=>i.fresh)&&<p>{c.noFlows}</p>}{review.smartMoney.items.map(flow=><div className="trade-flow" key={flow.id}><span className="trade-tag">{flow.side==='BUY'?c.buy:c.sell} · {flow.fresh?c.fresh:c.stale}</span><strong>{f.number(flow.netSol)} SOL</strong><p>{flow.entities} {c.entities} · {flow.wallets} {c.wallets}</p><time className="trade-stamp">{f.date(flow.at)}</time></div>)}<p className="trade-stamp">{c.flowNote}</p></>}</section>
+     <section className="trade-panel"><div className="trade-panel-title"><h3><ShieldCheck size={17}/>{c.risk}</h3><Fresh at={review.risk}/></div>{!review.risk?<p>{c.unknown}</p>:<>{review.risk.flags.length?<ul className="trade-risk-flags">{review.risk.flags.map(flag=><li key={flag}>{c.riskFlags[flag]??flag}</li>)}</ul>:<p>{c.noFlags}</p>}{!review.risk.fresh?<p className="trade-warning">{c.riskStale}</p>:unknownRisk?<p className="trade-warning">{c.riskUnknown}</p>:null}<p className="trade-stamp">{observed(review.risk.at)}</p></>}</section>
+     <section className="trade-panel"><div className="trade-panel-title"><h3><Wallet size={17}/>{c.smart}</h3>{review.smartMoney.access&&review.smartMoney.items.length>0&&<span className="trade-fresh" data-fresh={freshFlow}>{freshFlow?c.fresh:c.stale}</span>}</div>{!review.smartMoney.access?<p>{c.locked}</p>:<>{!review.smartMoney.items.length?<p>{c.noFlowRecorded}</p>:<>{!freshFlow&&<p>{c.noFlows}</p>}{latestFlow&&<p className="trade-stamp">{c.latestFlow}: {f.date(latestFlow.at)}{age(latestFlow.at)?` (${age(latestFlow.at)})`:''}</p>}{review.smartMoney.items.map(flow=><div className="trade-flow" key={flow.id}><span className="trade-tag">{flow.side==='BUY'?c.buy:c.sell} · {flow.fresh?c.fresh:c.stale}</span><strong>{f.number(flow.netSol)} SOL</strong><p>{flow.entities} {c.entities} · {flow.wallets} {c.wallets}</p><time className="trade-stamp">{f.date(flow.at)}</time></div>)}</>}<p className="trade-stamp">{c.flowNote}</p></>}</section>
      <section className="trade-panel"><h3><Layers size={17}/>{c.narratives}</h3>{!review.narratives.access?<p>{c.locked}</p>:review.narratives.items.length?<ul className="trade-narratives">{review.narratives.items.map(n=><li key={n.slug}><Link href={`/app/narratives/${n.slug}`}>{n.name}<ArrowUpRight size={14}/></Link><span>{n.relation}</span></li>)}</ul>:<p>{c.noNarrative}</p>}</section>
-     <div className="trade-research-actions"><button className="research-control" disabled={busy||pending} onClick={()=>void research()}><RefreshCw size={14}/>{c.refresh}</button><button className="trade-primary" disabled={busy||pending||reviewExpired||reviewed} onClick={()=>setReviewed(true)}>{reviewed?<Check size={16}/>:null}{c.continue}<ArrowRight size={16}/></button></div>
+     <div className="trade-research-actions"><button className="research-control" disabled={busy||pending} onClick={()=>void research()}><RefreshCw size={14}/>{c.refresh}</button><button className="trade-primary" disabled={busy||pending||reviewExpired||reviewed} onClick={()=>setReviewed(true)}>{reviewed?<Check size={16}/>:null}{c.continue}<ArrowRight size={16}/></button><p className="trade-stamp trade-refresh-note">{c.refreshNote}</p></div>
     </>}
    </div>
    <aside className="trade-swap trade-panel" aria-label={c.swap}>
     <div className="trade-panel-title"><h2><ArrowDownUp size={19}/>{c.swap}</h2><span className="trade-tag">Mainnet</span></div>
+    {review&&side==='BUY'&&review.buyBlockers.length>0&&<p className="trade-notice trade-blocked" role="status"><ShieldCheck size={15}/>{c.buyBlocked}</p>}
     <div className="trade-side" role="group" aria-label={c.swap}>{(['BUY','SELL'] as const).map(s=><button key={s} disabled={busy||pending} aria-pressed={side===s} onClick={()=>change(()=>setSide(s))}>{s==='BUY'?c.buy:c.sell}</button>)}</div>
     <fieldset disabled={!reviewed||busy||pending||!!walletBusy||!config.enabled}>
      <label htmlFor="trade-wallet">{c.wallet}</label><select id="trade-wallet" value={address} onChange={e=>change(()=>setAddress(e.target.value))}><option value="">{c.chooseWallet}</option>{connected.map(w=><option key={w.address} value={w.address}>{w.name} · {short(w.address)}</option>)}</select>

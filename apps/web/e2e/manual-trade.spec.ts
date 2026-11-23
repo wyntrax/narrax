@@ -1,5 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import type {TradeReviewData} from '@narra/shared';
 import {responses} from './research-fixtures';
 import {ADDRESS} from '../src/test/fixtures';
 
@@ -10,13 +11,17 @@ const at=new Date(now).toISOString();
 const expiresAt=new Date(now+3600000).toISOString();
 const quote={inputMint:'So11111111111111111111111111111111111111112',outputMint:mint,inAmount:'10000000',outAmount:'1250000',minOut:'1237500',inputDecimals:9,outputDecimals:5,slippageBps:100,priceImpactPct:0.12,networkFeeLamports:'5000',priorityFeeLamports:'12000',maxOverheadLamports:'5000000'};
 const record={id:'swap-1',mint,wallet:ADDRESS,side:'BUY',status:'CONFIRMED',signature:'5'.repeat(64),createdAt:at,expiresAt,quote};
-const review={id:'review-1',mint,symbol:'BONK',name:'Bonk',at,expiresAt,buyBlockers:[],notes:['CONCENTRATED'],
+const review:TradeReviewData={id:'review-1',mint,symbol:'BONK',name:'Bonk',at,expiresAt,buyBlockers:[],notes:['CONCENTRATED'],
  market:{at,source:'dexscreener',priceUsd:0.000024,liquidityUsd:420000,volume24hUsd:180000,marketCapUsd:1800000,marketCapIsFdv:false,fresh:true},
  holders:{at,count:1240,top10Pct:41.2,fresh:true},risk:{at,flags:[],fresh:true},
  narratives:{access:true,items:[{slug:'dog-coins',name:'Dog coins',relation:'LIKELY_OG',confidence:0.72}]},
  smartMoney:{access:true,items:[{id:'flow-1',at,side:'BUY',wallets:4,entities:2,netSol:12.5,fresh:true}]}};
+const staleReview={...review,id:'review-stale',buyBlockers:['HOLDERS_MISSING','RISK_MISSING'],notes:['SMART_MONEY_MISSING'],
+ holders:{at:new Date(now-3*86400000).toISOString(),count:137786,top10Pct:42.2559,fresh:false},
+ risk:{at:new Date(now-5*3600000).toISOString(),flags:['HOLDERS_UNKNOWN','DEV_HOLDING_UNKNOWN','CONCENTRATION_UNKNOWN','HOLDER_OBSERVATION_STALE_OR_UNKNOWN'],fresh:false},
+ smartMoney:{access:true,items:[]}};
 
-async function mockApi(page:Page){
+async function mockApi(page:Page,research=review){
  const writes:{path:string;body:unknown}[]=[];
  await page.route('http://localhost:4000/**',async route=>{
   const request=route.request(),url=new URL(request.url());
@@ -25,7 +30,7 @@ async function mockApi(page:Page){
   if(request.method()==='POST'){
    writes.push({path:url.pathname,body:request.postDataJSON()});
    expect(request.headers().authorization).toBe('Bearer fixture-public-test-token');
-   if(url.pathname==='/v1/manual-trades/research')return route.fulfill({headers,json:{...review,expiresAt:new Date(Date.now()+300000).toISOString()}});
+   if(url.pathname==='/v1/manual-trades/research')return route.fulfill({headers,json:{...research,expiresAt:new Date(Date.now()+300000).toISOString()}});
    if(url.pathname==='/v1/manual-trades/preview')return route.fulfill({headers,json:{...record,status:'PREPARED',signature:null,expiresAt:new Date(Date.now()+60000).toISOString(),transaction:btoa('unsigned-fixture-transaction')}});
    if(url.pathname==='/v1/manual-trades/submit')return route.fulfill({headers,json:{...record,status:'SUBMITTED',signature:null}});
    return route.fulfill({headers,status:404,json:{error:'NOT_FOUND'}});
@@ -106,4 +111,38 @@ test('manual trade Indonesian copy at 390px light',async({page})=>{
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
  await page.screenshot({path:'test-results/trade-id-390-light.png',fullPage:true});
+});
+
+test('manual trade explains stale evidence and blocks the buy quote',async({page})=>{
+ test.setTimeout(120000);
+ await page.setViewportSize({width:1440,height:1000});
+ await mockApi(page,staleReview);
+ await openTrade(page,'en');
+ await page.getByLabel('Token mint address').fill(mint);
+ await page.getByRole('button',{name:'Review token'}).click();
+ await expect(page.getByText('BONK').first()).toBeVisible();
+ await expect(page.locator('.trade-blocked')).toContainText('Buy evidence is incomplete');
+ await expect(page.getByText('This holder snapshot is stale. A buy quote requires a holder observation within one hour.')).toBeVisible();
+ await expect(page.getByText(/Last observed:.*2026/).first()).toBeVisible();
+ await expect(page.getByText('Holder count is unknown')).toBeVisible();
+ await expect(page.getByText('This observation is stale; old or unknown checks are not passes. A buy quote requires a risk observation within one hour.')).toBeVisible();
+ const flows=page.locator('section.trade-panel').filter({has:page.getByRole('heading',{name:'Qualified-wallet flows'})});
+ await expect(flows.getByText('No qualified-wallet flow is recorded. This does not mean wallets are absent or selling.')).toBeVisible();
+ await expect(page.getByText('Reloads stored evidence. It does not request new provider data.')).toBeVisible();
+ await page.getByRole('button',{name:'Continue to swap'}).click();
+ await expect(page.getByRole('button',{name:'Get swap quote'})).toBeDisabled();
+ await page.getByRole('button',{name:'Sell'}).click();
+ await expect(page.locator('.trade-blocked')).toHaveCount(0);
+ await expect(page.locator('.trade-swap')).toHaveCSS('margin-top','6px');
+ await expect(page.locator('.trade-swap')).toHaveCSS('top','6px');
+ await page.locator('.research-main').evaluate(el=>el.scrollTo(0,0));
+ const gap=await page.evaluate(()=>{
+  const steps=document.querySelector('.trade-steps')!.getBoundingClientRect();
+  const swap=document.querySelector('.trade-swap')!.getBoundingClientRect();
+  return swap.top-steps.bottom;
+ });
+ expect(gap).toBeGreaterThanOrEqual(5);
+ expect(gap).toBeLessThanOrEqual(8);
+ expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
+ await page.screenshot({path:'test-results/trade-stale-evidence.png',fullPage:true});
 });
