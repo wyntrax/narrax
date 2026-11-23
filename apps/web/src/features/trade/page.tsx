@@ -75,7 +75,7 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
    case 'RISK_MISSING':return review.risk?observed(review.risk.at):c.noObservation;
    case 'RISK_FLAGS':return review.risk?.flags.length?review.risk.flags.map(flag=>c.riskFlags[flag]??flag).join(' · '):null;
    case 'CONCENTRATED':return review.holders?`${c.top10}: ${f.number(review.holders.top10Pct)}%`:null;
-   case 'SMART_MONEY_MISSING':return latestFlow?`${c.latestFlow}: ${f.date(latestFlow.at)}`:c.noFlowRecorded;
+   case 'SMART_MONEY_MISSING':return latestFlow?`${c.latestFlow}: ${f.date(latestFlow.at)}`:c.none;
    default:return null;
   }
  };
