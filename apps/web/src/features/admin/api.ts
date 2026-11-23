@@ -4,6 +4,9 @@ import {ResearchWalletsSchema,CandidatesSchema,ResearchHealthSchema} from '@/fea
 import {GrantSchema, OkSchema} from '@/lib/schemas';
 import {GrantListSchema, LookupSchema, SettingsSchema, StatsSchema, RuntimeSettingsSchema,DataHealthSchema,IntegrationsSchema,HeliusSchema,HeliusTestSchema,TelegramTestSchema} from './contracts';
 
+/** Data health runs several 2,000-token scans and can exceed the default 10s transport timeout. */
+const ADMIN_DATA_HEALTH_TIMEOUT_MS = 25_000;
+
 /** Admin calls. The API rejects anyone who is not an admin with 403, so nothing here is a security boundary. */
 export function createAdminApi(getToken: () => Promise<string | null>, base = process.env.NEXT_PUBLIC_API_URL ?? '', fetcher: typeof fetch = fetch, getIdentityToken?: () => Promise<string | null>) {
   const request = createTransport(base, getToken, fetcher, getIdentityToken);
@@ -36,7 +39,7 @@ export function createAdminApi(getToken: () => Promise<string | null>, base = pr
     testTelegram: (chatId?: string, botToken?: string) => request('/v1/admin/integrations/telegram/test', TelegramTestSchema, 'POST', {
       ...(chatId ? {chatId} : {}), ...(botToken ? {botToken} : {}),
     }),
-    dataHealth:()=>request('/v1/admin/data-health',DataHealthSchema),
+    dataHealth:()=>request('/v1/admin/data-health',DataHealthSchema,'GET',undefined,true,undefined,ADMIN_DATA_HEALTH_TIMEOUT_MS),
     checkPrivy: (appId: string, verificationKey: string) => request('/v1/admin/runtime-settings/check-privy', OkSchema, 'POST', {appId, verificationKey}),
     grant: (userId: string, validUntil: string, reason: string) => request(`${user(userId)}/grants`, GrantSchema, 'POST', {tier: 'EARLY_ACCESS', validUntil, reason}),
     revoke: (userId: string, grantId: string, reason: string) => request(`${user(userId)}/grants/${encodeURIComponent(grantId)}/revoke`, OkSchema, 'POST', {reason}),

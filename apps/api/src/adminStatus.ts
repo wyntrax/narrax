@@ -18,6 +18,8 @@ const EXPECTED_MINUTES = { tokenMetric: 5, portfolioSnapshot: 5, outcomeTracking
 const STALE_AFTER_EXPECTED = 3;
 const QUEUE_BACKLOG_WARN = 100;
 const BUDGET_WARN_FRACTION = 0.8;
+/** Data health runs several 2,000-token scans. Cache one computation and share an in-flight run. */
+const DATA_HEALTH_CACHE_MS = 15_000;
 
 export interface OpsDeps extends HealthPorts {
   /** Answers whether Redis responds. Absent when the API was started without one. */
@@ -41,7 +43,20 @@ export function registerAdminStatusRoutes(app: FastifyInstance, deps: Pick<Accou
   const ops = deps.ops ?? {};
   const opts = { preHandler: makeRequireAdmin(deps), config: { rateLimit: { max: 30, timeWindow: '1 minute' } } };
   const json = (v: unknown) => v as Prisma.InputJsonValue;
-  app.get('/v1/admin/data-health',opts,async()=>dataHealth(db,ops,now()));
+  let dataHealthCache: { at: number; value: Awaited<ReturnType<typeof dataHealth>> } | null = null;
+  let dataHealthPending: Promise<Awaited<ReturnType<typeof dataHealth>>> | null = null;
+  app.get('/v1/admin/data-health', opts, async () => {
+    const at = Date.now();
+    if (dataHealthCache && at - dataHealthCache.at < DATA_HEALTH_CACHE_MS) return dataHealthCache.value;
+    // A second admin request (or a browser retry) joins the first computation instead of
+    // starting another pair of 2,000-token scans. The first request keeps running even if
+    // the browser aborts at its transport timeout, so the retry receives that result.
+    if (dataHealthPending) return dataHealthPending;
+    dataHealthPending = dataHealth(db, ops, now())
+      .then((value) => { dataHealthCache = { at: Date.now(), value }; return value; })
+      .finally(() => { dataHealthPending = null; });
+    return dataHealthPending;
+  });
 
   async function timed(fn: () => Promise<unknown>): Promise<{ ok: boolean; latencyMs: number | null }> {
     const t = Date.now();
