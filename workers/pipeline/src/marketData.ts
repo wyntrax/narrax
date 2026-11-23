@@ -21,10 +21,10 @@ export const MARKET_DATA_LIMITS = {
   maxTokensPerRun: 150,
   /** Of those, at most this many go to tokens with an early-radar measurement still open (see the refresh set below), so they cannot crowd out everything else. */
   maxEarlyRadarTokensPerRun: 100,
-  /** Rotating coverage for completed wallet-discovery scans, within the same total cap. */
-  maxDiscoveryTokensPerRun: 25,
-  /** Never-priced narrative candidates: newest first, small enough not to starve priced tokens. */
-  maxUnpricedTokensPerRun: 10,
+  /** Rotating coverage for completed wallet-discovery scans. Most have no pair; keep a small rotation. */
+  maxDiscoveryTokensPerRun: 10,
+  /** Never-priced narrative candidates: newest first. Most have no DEX pair; half the old budget. */
+  maxUnpricedTokensPerRun: 5,
   /** Placeholder tokens with no resolved symbol: bounded retries for metadata backfill. */
   maxUnknownTokensPerRun: 5,
   /** Recent tracked-wallet tokens rotate independently of the general backlog. */
@@ -34,8 +34,8 @@ export const MARKET_DATA_LIMITS = {
   walletFlowWindowMs: 60 * 60_000,
   walletFlowMinSol: 0.25,
   walletFlowPriceFreshMs: 10 * 60_000,
-  /** Bounded lane for active monitors, emerging-narrative tokens, and recently refreshed tokens. */
-  maxFocusTokensPerRun: 25,
+  /** Bounded lane for active monitors and top narratives. Half is reserved for narrative tokens. */
+  maxFocusTokensPerRun: 50,
   /** Only the strongest active narratives feed the focus lane; this keeps the set small enough to refresh often. */
   maxFocusNarratives: 8,
   focusNarrativeWindowMs: 24 * 3_600_000,
@@ -194,6 +194,7 @@ export async function refreshMarketData(
   // The internal override is used by isolated integration fixtures; production uses the fixed 150-token budget.
   const cap = opts.maxTokens ?? L.maxTokensPerRun;
   const tokenSelect = { id: true, mint: true, symbol: true, createdOnChainAt: true, marketQuoteFailures: true, marketQuarantineUntil: true, marketPriorityUntil: true, risk: { orderBy: { at: 'desc' }, take: 1, select: { at: true } } } satisfies Prisma.TokenSelect;
+  const quoteEligible: Prisma.TokenWhereInput = { OR: [{ marketQuarantineUntil: null }, { marketQuarantineUntil: { lte: now } }] };
   const waiting = await db.earlyRadarMeasurement.findMany({ where: { status: 'PENDING' }, orderBy: [{ nextCheckAt: 'asc' }, { id: 'asc' }], take: 500, select: { outcome: { select: { tokenId: true } } } });
   const priorityIds = [...new Set(waiting.map((w) => w.outcome.tokenId))].slice(0, Math.min(L.maxEarlyRadarTokensPerRun, cap));
   if (process.env.SMART_MONEY_RESEARCH_ENABLED === 'true' && priorityIds.length < cap) {
@@ -201,14 +202,14 @@ export async function refreshMarketData(
     priorityIds.push(...[...new Set(research.map(r => r.signal.tokenId))].filter(id => !priorityIds.includes(id)).slice(0,Math.min(10,cap-priorityIds.length)));
   }
   const priority = priorityIds.length
-    ? await db.token.findMany({ where: { id: { in: priorityIds }, blacklisted: false, mint: { not: WSOL_MINT } }, orderBy: { id: 'asc' }, take: cap, select: tokenSelect })
+    ? await db.token.findMany({ where: { id: { in: priorityIds }, blacklisted: false, mint: { not: WSOL_MINT }, AND: [quoteEligible] }, orderBy: { id: 'asc' }, take: cap, select: tokenSelect })
     : [];
   // Discovery cannot judge early buyers without both an initial and a later price.
   // Reserve at most half the remaining slots and rotate, including tokens already priced.
   const cursorRow = await db.systemSetting.findUnique({ where: { key: DISCOVERY_PRICE_CURSOR_KEY } });
   const cursor = typeof cursorRow?.value === 'string' ? cursorRow.value : null;
   const discoveryIds = await discoveryPriceCandidates(db, now, Math.min(L.maxDiscoveryTokensPerRun, Math.floor((cap - priority.length) / 2)), priority.map(t => t.id), cursor);
-  const discoveryRows = discoveryIds.length ? await db.token.findMany({ where: { id: { in: discoveryIds } }, select: tokenSelect }) : [];
+  const discoveryRows = discoveryIds.length ? await db.token.findMany({ where: { id: { in: discoveryIds }, blacklisted: false, mint: { not: WSOL_MINT }, AND: [quoteEligible] }, select: tokenSelect }) : [];
   const discoveryById = new Map(discoveryRows.map(t => [t.id, t]));
   const discovery = discoveryIds.flatMap(id => { const token = discoveryById.get(id); return token ? [token] : []; });
   const priorIds = [...priority, ...discovery].map(t => t.id);
@@ -219,7 +220,7 @@ export async function refreshMarketData(
   const flowBudget = Math.min(10, Math.floor(walletBudget / 2));
   const flowPriority = flowBudget ? await db.token.findMany({
     where: {
-      blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: priorIds },
+      blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: priorIds }, AND: [quoteEligible],
       metrics: { none: { at: { gte: flowFreshCutoff } } },
       walletTrades: {
         some: {
@@ -235,7 +236,7 @@ export async function refreshMarketData(
   }) : [];
   const flowPriorityIds = flowPriority.map(t => t.id);
   const rotatingWalletBudget = walletBudget - flowPriority.length;
-  const walletWhere: Prisma.TokenWhereInput = { blacklisted:false, mint:{not:WSOL_MINT}, id:{notIn:[...priorIds, ...flowPriorityIds]},
+  const walletWhere: Prisma.TokenWhereInput = { blacklisted:false, mint:{not:WSOL_MINT}, id:{notIn:[...priorIds, ...flowPriorityIds]}, AND:[quoteEligible],
     walletTrades:{some:{at:{gte:new Date(+now-L.activeWindowMs),lte:now},wallet:{active:true,researchReview:{not:'REJECTED'}}}} };
   const rotatingWallets = rotatingWalletBudget ? await db.token.findMany({where:{AND:[walletWhere,...(walletCursor?[{id:{gt:walletCursor}}]:[])]},orderBy:{id:'asc'},take:rotatingWalletBudget,select:tokenSelect}) : [];
   if (walletCursor && rotatingWallets.length<rotatingWalletBudget) rotatingWallets.push(...await db.token.findMany({where:{AND:[walletWhere,{id:{lte:walletCursor}}]},orderBy:{id:'asc'},take:rotatingWalletBudget-rotatingWallets.length,select:tokenSelect}));
@@ -246,7 +247,7 @@ export async function refreshMarketData(
   const socialCursor = await readCursor(db, SOCIAL_PRICE_CURSOR_KEY);
   const sortedSocialIds = [...socialIds].sort();
   const rotatedSocialIds = socialCursor ? [...sortedSocialIds.filter(id => id > socialCursor), ...sortedSocialIds.filter(id => id <= socialCursor)] : sortedSocialIds;
-  const socialRows = socialIds.length ? await db.token.findMany({ where: { id: { in: socialIds, notIn: priorIds }, blacklisted: false, mint: { not: WSOL_MINT } }, select: tokenSelect }) : [];
+  const socialRows = socialIds.length ? await db.token.findMany({ where: { id: { in: socialIds, notIn: priorIds }, blacklisted: false, mint: { not: WSOL_MINT }, AND: [quoteEligible] }, select: tokenSelect }) : [];
   const socialById = new Map(socialRows.map(t => [t.id, t]));
   const social = rotatedSocialIds.flatMap(id => { const t = socialById.get(id); return t ? [t] : []; })
     .slice(0, Math.min(COVERAGE_LIMITS.maxSocialPriceSlots, Math.floor((cap - priorIds.length) / 2)));
@@ -259,7 +260,6 @@ export async function refreshMarketData(
   }) : [];
   out.launchTokensSelected = launches.length;
   const reservedIds = [...priorIds, ...launches.map(t => t.id)];
-  const quoteEligible: Prisma.TokenWhereInput = { OR: [{ marketQuarantineUntil: null }, { marketQuarantineUntil: { lte: now } }] };
   // A token with no price row at all is invisible to every screen, and the id-ordered cap below would take older ids
   // first, so a freshly linked candidate could age out of the set before its first reading. Give unpriced narrative
   // candidates a first price ahead of the general set, newest token id first. The budget is deliberately small: most
@@ -274,12 +274,15 @@ export async function refreshMarketData(
   // A bounded focus lane protects explicit user interest and the strongest live narratives
   // from the general backlog. It is scheduling only: no evidence or admission rule changes.
   const focusBudget = Math.min(L.maxFocusTokensPerRun, Math.max(0, cap - takenBeforeFocus.length));
+  // Reserve half the focus lane for top narratives; user monitors, priorities and
+  // opportunities keep the other half instead of filling every slot first.
+  const userFocusBudget = Math.ceil(focusBudget / 2);
   const focusFreshCutoff = new Date(now.getTime() - L.focusRefreshAfterMs);
   const focus: typeof priority = [];
   const focusIds = new Set<string>();
-  const addFocus = (rows: typeof priority) => {
+  const addFocus = (rows: typeof priority, limit = focusBudget) => {
     for (const token of rows) {
-      if (focus.length >= focusBudget) return;
+      if (focus.length >= limit) return;
       if (focusIds.has(token.id)) continue;
       focusIds.add(token.id);
       focus.push(token);
@@ -288,9 +291,9 @@ export async function refreshMarketData(
   if (focusBudget) {
     addFocus(await db.token.findMany({
       where: { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenBeforeFocus }, marketPriorityUntil: { gt: now }, metrics: { none: { at: { gte: focusFreshCutoff } } }, AND: [quoteEligible] },
-      orderBy: { marketPriorityUntil: 'desc' }, take: focusBudget, select: tokenSelect,
-    }));
-    if (focus.length < focusBudget) {
+      orderBy: { marketPriorityUntil: 'desc' }, take: userFocusBudget, select: tokenSelect,
+    }), userFocusBudget);
+    if (focus.length < userFocusBudget) {
       const monitors = await db.researchMonitor.findMany({
         where: { active: true, OR: [{ mint: { not: null } }, { narrativeSlug: { not: null } }] },
         orderBy: { updatedAt: 'desc' }, take: 500, select: { mint: true, narrativeSlug: true },
@@ -306,11 +309,11 @@ export async function refreshMarketData(
               ...(watchedSlugs.length ? [{ narratives: { some: { narrative: { slug: { in: watchedSlugs } } } } }] : []),
             ] }],
           },
-          orderBy: { id: 'desc' }, take: focusBudget - focus.length, select: tokenSelect,
-        }));
+          orderBy: { id: 'desc' }, take: userFocusBudget - focus.length, select: tokenSelect,
+        }), userFocusBudget);
       }
     }
-    if (focus.length < focusBudget) {
+    if (focus.length < userFocusBudget) {
       addFocus(await db.token.findMany({
         where: {
           blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: [...takenBeforeFocus, ...focusIds] }, metrics: { none: { at: { gte: focusFreshCutoff } } },
@@ -321,8 +324,8 @@ export async function refreshMarketData(
             ],
           }],
         },
-        orderBy: { id: 'desc' }, take: focusBudget - focus.length, select: tokenSelect,
-      }));
+        orderBy: { id: 'desc' }, take: userFocusBudget - focus.length, select: tokenSelect,
+      }), userFocusBudget);
     }
     if (focus.length < focusBudget) {
       const topNarratives = await db.narrative.findMany({
@@ -343,7 +346,7 @@ export async function refreshMarketData(
         if (ids.length) {
           const rows = await db.token.findMany({ where: { id: { in: ids } }, select: tokenSelect });
           const byId = new Map(rows.map(t => [t.id, t]));
-          addFocus(ids.flatMap(id => { const t = byId.get(id); return t ? [t] : []; }));
+          addFocus(ids.flatMap(id => { const t = byId.get(id); return t ? [t] : []; }), focusBudget);
         }
       }
     }
@@ -365,7 +368,7 @@ export async function refreshMarketData(
         { narratives: { some: { narrative: { stage: { not: 'DEAD' } } } } }, { positions: { some: { status: 'OPEN' } } },
       ] }],
     };
-  const unknownWhere: Prisma.TokenWhereInput = { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenIds }, symbol: 'UNKNOWN' };
+  const unknownWhere: Prisma.TokenWhereInput = { blacklisted: false, mint: { not: WSOL_MINT }, id: { notIn: takenIds }, symbol: 'UNKNOWN', AND: [quoteEligible] };
   const generalCursor = await readCursor(db, GENERAL_PRICE_CURSOR_KEY);
   const remaining = cap - takenIds.length;
   const unknownBudget = Math.min(L.maxUnknownTokensPerRun, remaining);
@@ -413,10 +416,11 @@ export async function refreshMarketData(
     // provider throttling leaves this batch and all unattempted batches in place.
     for (const mint of mints.slice(i, i + L.quoteBatch)) attempted.add(mint);
   }
-  // Dead-pool backoff is scoped to the unpriced/general lanes. Priority sets
-  // (social, launches, outcomes, wallets, discovery) still get their attempt.
+  // Dead-pool backoff covers the unpriced, general, focus and discovery lanes.
+  // Social, launches, outcomes and wallets still get their attempt unless another
+  // lane already quarantined them.
   const DEAD_QUOTE_REASONS = new Set<SnapshotOmissionReason>(['NO_MATCHING_PAIR', 'INVALID_PAIR', 'LIQUIDITY_UNAVAILABLE']);
-  for (const t of [...unpriced, ...generalTokens, ...focus]) {
+  for (const t of [...unpriced, ...generalTokens, ...focus, ...discovery]) {
     if (snaps.has(t.mint)) {
       if (t.marketQuoteFailures !== 0 || t.marketQuarantineUntil) {
         await db.token.update({ where: { id: t.id }, data: { marketQuoteFailures: 0, marketQuarantineUntil: null } });
