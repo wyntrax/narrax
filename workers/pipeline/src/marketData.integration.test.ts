@@ -223,6 +223,28 @@ describe.skipIf(!up)('market data refresh on a real Postgres', () => {
     }
   });
 
+  it('reserves half the focus lane for top narratives when user priorities fill the other half', async () => {
+    const priorities = await Promise.all(Array.from({ length: 30 }, (_, i) => db.token.create({
+      data: {
+        mint: mint(`FP${i}`), symbol: `FP${i}${tag}`, name: `Focus priority ${i}`,
+        marketPriorityUntil: new Date(NOW.getTime() + 100 * H),
+        metrics: { create: { priceUsd: 1, marketCapUsd: 100_000, liquidityUsd: 50_000, volume24hUsd: 1_000, at: ago(48) } },
+      },
+    })));
+    const narrative = await db.narrative.create({ data: { name: `Focus split ${tag}`, slug: `focus-split-${tag}`, stage: 'EMERGING', score: 1_000_000_000, velocity: 1 } });
+    const token = await db.token.create({ data: { mint: mint('FSPLIT'), symbol: `FS${tag}`, name: 'Focus split token', metrics: { create: { priceUsd: 1, marketCapUsd: 100_000, liquidityUsd: 50_000, volume24hUsd: 1_000, at: ago(48) } } } });
+    await db.narrativeTokenRelation.create({ data: { narrativeId: narrative.id, tokenId: token.id, relation: 'DERIVATIVE', ogScore: 10, matchScore: 1, confidence: 1 } });
+    try {
+      const good = { name: 'focus-split-probe', getSnapshots: async (mints: string[]) => new Map(mints.map(m => [m, snapshot(m, { liquidityUsd: 300_000, priceUsd: 0.01 })])) };
+      const r = await refreshMarketData(db, { quotes: good as never, info: null, launches: null }, new Date(NOW.getTime() + H), ROOMY);
+      expect(r.priceCoverage.focus.selected).toBeGreaterThanOrEqual(26);
+      expect((await tok(token.mint)).metrics).toHaveLength(2);
+    } finally {
+      await db.token.deleteMany({ where: { id: { in: [...priorities.map(p => p.id), token.id] } } });
+      await db.narrative.deleteMany({ where: { id: narrative.id } });
+    }
+  });
+
   it('backs off dead general-lane pools and clears the backoff after a real quote', async () => {
     const dead = await db.token.create({ data: { mint: mint('DEAD'), symbol: `DEAD${tag}`, name: 'Dead pool' } });
     await db.narrativeTokenRelation.create({ data: { narrativeId, tokenId: dead.id, relation: 'DERIVATIVE', matchScore: 0.5, ogScore: 10, confidence: 0.5 } });
