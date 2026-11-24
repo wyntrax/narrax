@@ -1,7 +1,16 @@
 import type { PrismaClient } from '@narra/database';
-import { isSolanaAddress } from '@narra/shared';
+import { isSolanaAddress, WalletPerformance } from '@narra/shared';
 import { z } from 'zod';
 import { DISCOVERY_HOLD_LIMITS } from './walletDiscovery';
+
+const hasProvenSmallCapSample = (perfValue: unknown): boolean => {
+  const parsed = WalletPerformance.safeParse(perfValue);
+  if (!parsed.success) return false;
+  const smallCap = parsed.data.bands.find(b => b.band === 'SMALL_CAP');
+  return !!smallCap && smallCap.closedPositions >= 5 && smallCap.closedTokens >= 5 && smallCap.observedDays >= 7 &&
+    (smallCap.winRateLowerBound ?? 0) >= 0.5 && smallCap.realisedPnlSol !== null &&
+    Number(smallCap.realisedPnlSol) > 0 && (smallCap.medianRoi ?? 0) > 0 && (smallCap.fastCloseRate ?? 0) <= 0.5;
+};
 
 export const WALLET_INTAKE_KEY = 'wallet.evaluation.intake';
 /** `evictMaxScore` is a reversible capacity policy: stale provisional wallets below it can be released to make room for new candidates. History is kept and they can be reactivated. */
@@ -56,8 +65,13 @@ export async function intakeEmergingWallets(db: PrismaClient, now = new Date()) 
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           take: WALLET_INTAKE_LIMITS.perCycle * 5,
         });
-        const evictIds = stalePool
-          .filter(row => typeof (row as { id?: unknown }).id === 'string')
+        const validPool = stalePool.filter(row => typeof (row as { id?: unknown }).id === 'string');
+        const perfRows = validPool.length > 0 && typeof tx.systemSetting.findMany === 'function'
+          ? await tx.systemSetting.findMany({ where: { key: { in: validPool.map(w => `wallet.performance.${w.id}`) } }, select: { key: true, value: true } })
+          : [];
+        const perfByKey = new Map(perfRows.map(s => [s.key, s.value]));
+        const evictIds = validPool
+          .filter(row => !hasProvenSmallCapSample(perfByKey.get(`wallet.performance.${row.id}`)))
           .sort((a, b) => (a.profile?.score ?? -1) - (b.profile?.score ?? -1) || (a.profile?.medianHoldSeconds ?? -1) - (b.profile?.medianHoldSeconds ?? -1))
           .slice(0, Math.min(WALLET_INTAKE_LIMITS.perCycle, pending.length))
           .map(w => w.id);
