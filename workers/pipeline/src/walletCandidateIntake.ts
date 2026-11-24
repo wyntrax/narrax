@@ -5,7 +5,7 @@ import { DISCOVERY_HOLD_LIMITS } from './walletDiscovery';
 
 export const WALLET_INTAKE_KEY = 'wallet.evaluation.intake';
 /** `evictMaxScore` is a reversible capacity policy: stale provisional wallets below it can be released to make room for new candidates. History is kept and they can be reactivated. */
-export const WALLET_INTAKE_LIMITS = { capacity: 200, perCycle: 2, staleProvisionalMs: 7 * 86_400_000, evictMaxScore: 50, minMedianQuoteSol: 0.01 } as const;
+export const WALLET_INTAKE_LIMITS = { capacity: 200, perCycle: 2, staleProvisionalMs: 7 * 86_400_000, evictMaxScore: 50, evictMaxHoldSeconds: 300, minMedianQuoteSol: 0.01 } as const;
 const SpendSummary = z.object({ matchedTokens: z.number().int().nonnegative(),
   medianMatchedQuoteSol: z.union([z.number().finite(), z.string().regex(/^\d+(\.\d+)?$/)]).nullable() }).optional();
 const Hold = z.object({ checkedAt: z.string().datetime(), tokenId: z.string(), mint: z.string(), stillHolding: z.boolean(),
@@ -29,12 +29,13 @@ export async function intakeEmergingWallets(db: PrismaClient, now = new Date()) 
         !(w.spend && w.spend.matchedTokens >= 2 && w.spend.medianMatchedQuoteSol !== null && Number(w.spend.medianMatchedQuoteSol) < WALLET_INTAKE_LIMITS.minMedianQuoteSol),
       );
       const existing = new Set((await tx.trackedWallet.findMany({ where: { address: { in: candidates.map(w => w.address) } }, select: { address: true } })).map(w => w.address));
-      const holdRank = (w: typeof candidates[number]) => w.hold?.stillHolding ? (w.hold.heldMs != null && w.hold.heldMs >= DISCOVERY_HOLD_LIMITS.minHeldMs ? 2 : 1) : 0;
+      const holdRank = (w: typeof candidates[number]) =>
+        w.hold?.stillHolding ? (w.hold.heldMs != null && w.hold.heldMs >= DISCOVERY_HOLD_LIMITS.minHeldMs ? 3 : 2) : w.hold?.stillHolding === false ? 0 : 1;
       const spendSize = (w: typeof candidates[number]) => {
         const value = w.spend?.medianMatchedQuoteSol;
         return w.spend && w.spend.matchedTokens >= 2 && value != null && Number.isFinite(Number(value)) ? Number(value) : -1;
       };
-      // Prefer observed holders first, then known size, then repeat participation. Ties retain snapshot order.
+      // Prefer observed holders first, then unprobed candidates, then confirmed dumpers; break ties by known size and repeat participation.
       const pending = candidates.filter(w => !existing.has(w.address)).sort((a,b) =>
         holdRank(b) - holdRank(a) || spendSize(b) - spendSize(a) || b.scannedTokens - a.scannedTokens);
       if (out.capacity === 0 && pending.length > 0 && typeof tx.trackedWallet.updateMany === 'function') {
@@ -45,15 +46,19 @@ export async function intakeEmergingWallets(db: PrismaClient, now = new Date()) 
             active: true,
             researchReview: 'PROVISIONAL',
             createdAt: { lte: staleCutoff },
-            OR: [{ profile: { is: null } }, { profile: { is: { score: { lt: WALLET_INTAKE_LIMITS.evictMaxScore } } } }],
+            OR: [
+              { profile: { is: null } },
+              { profile: { is: { score: { lt: WALLET_INTAKE_LIMITS.evictMaxScore } } } },
+              { profile: { is: { medianHoldSeconds: { lt: WALLET_INTAKE_LIMITS.evictMaxHoldSeconds } } } },
+            ],
           },
-          select: { id: true, profile: { select: { score: true } } },
+          select: { id: true, profile: { select: { score: true, medianHoldSeconds: true } } },
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           take: WALLET_INTAKE_LIMITS.perCycle * 5,
         });
         const evictIds = stalePool
-          .filter((row): row is { id: string; profile: { score: number } | null } => typeof (row as { id?: unknown }).id === 'string')
-          .sort((a, b) => (a.profile?.score ?? -1) - (b.profile?.score ?? -1))
+          .filter(row => typeof (row as { id?: unknown }).id === 'string')
+          .sort((a, b) => (a.profile?.score ?? -1) - (b.profile?.score ?? -1) || (a.profile?.medianHoldSeconds ?? -1) - (b.profile?.medianHoldSeconds ?? -1))
           .slice(0, Math.min(WALLET_INTAKE_LIMITS.perCycle, pending.length))
           .map(w => w.id);
         if (evictIds.length) {

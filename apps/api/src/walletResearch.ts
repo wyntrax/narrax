@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { makeRequireAdmin } from './admin';
-import { walletQualifications } from '@narra/worker-pipeline';
+import { WALLET_FLOW_LIMITS, walletQualifications } from '@narra/worker-pipeline';
 import { InvestigationDiscovery, TOKEN_DISCOVERY_KEY_PREFIX, sanitizeUntrusted } from '@narra/shared';
 import { RESEARCH_QUALIFICATION } from '@narra/smart-money';
 import { marketTokenImages } from './marketEvidence';
@@ -14,6 +14,22 @@ export function registerWalletResearchRoutes(app: FastifyInstance, deps: Pick<Ac
   const opts = { preHandler: makeAuthenticate(deps), config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
   const admin = { ...opts, preHandler: makeRequireAdmin(deps) };
   const paging = z.object({ limit: z.coerce.number().int().min(1).max(100).default(25), cursor: z.string().max(128).optional(), side: z.enum(['BUY','SELL']).optional() });
+  const flowQuery = paging.extend({ includeFiltered: z.enum(['true','false']).default('false') });
+  const entryTop10 = (evidence: unknown): number | null => {
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
+    const holder = (evidence as { holder?: unknown }).holder;
+    if (!holder || typeof holder !== 'object' || Array.isArray(holder)) return null;
+    const top10Pct = (holder as { top10Pct?: unknown }).top10Pct;
+    return typeof top10Pct === 'number' && Number.isFinite(top10Pct) ? top10Pct : null;
+  };
+  const isLowQualityFlow = (s: { evidence: unknown; token: { metrics: { liquidityUsd: { toString(): string } }[] }; measurements: { status: string; reason: string | null }[] }) => {
+    const currentLiq = s.token.metrics[0]?.liquidityUsd;
+    if (currentLiq !== undefined && Number(currentLiq.toString()) < WALLET_FLOW_LIMITS.minLiquidityUsd) return true;
+    const top10 = entryTop10(s.evidence);
+    if (top10 !== null && top10 > WALLET_FLOW_LIMITS.maxTop10Pct) return true;
+    const settled = s.measurements.filter(m => m.status !== 'PENDING');
+    return settled.length > 0 && settled.every(m => m.status === 'UNKNOWN' && m.reason === 'THIN_LIQUIDITY');
+  };
 
   app.get('/v1/smart-money/rankings', opts, async (req, reply) => {
     const query = z.object({ band: WalletEntryBand.default('SMALL_CAP'), limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -26,16 +42,20 @@ export function registerWalletResearchRoutes(app: FastifyInstance, deps: Pick<Ac
   });
 
   app.get('/v1/smart-money/flows', opts, async (req, reply) => {
-    const q = paging.safeParse(req.query);
+    const q = flowQuery.safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
     const now = clock();
     if (q.data.cursor && !await db.walletResearchSignal.count({ where: { id: q.data.cursor, ...(q.data.side ? { side: q.data.side } : {}), token: { blacklisted: false }, createdAt: { lte: now } } })) return reply.code(400).send({ error: 'INVALID_INPUT' });
-    const rows = await db.walletResearchSignal.findMany({ where: { token: { blacklisted: false }, createdAt: { lte: now }, ...(q.data.side ? { side: q.data.side } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: q.data.limit + 1, ...(q.data.cursor ? { cursor: { id: q.data.cursor }, skip: 1 } : {}), include: { token: { select: { mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1, select: { liquidityUsd: true, at: true } } } }, measurements: { orderBy: { horizonHours: 'asc' } } } });
-    const page = rows.slice(0,q.data.limit);
+    const includeFiltered = q.data.includeFiltered === 'true';
+    const scanLimit = includeFiltered ? q.data.limit + 1 : Math.min(200, Math.max(q.data.limit * 4, 50));
+    const rows = await db.walletResearchSignal.findMany({ where: { token: { blacklisted: false }, createdAt: { lte: now }, ...(q.data.side ? { side: q.data.side } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: scanLimit, ...(q.data.cursor ? { cursor: { id: q.data.cursor }, skip: 1 } : {}), include: { token: { select: { mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1, select: { liquidityUsd: true, at: true } } } }, measurements: { orderBy: { horizonHours: 'asc' } } } });
+    const filteredCount = rows.filter(isLowQualityFlow).length;
+    const eligible = includeFiltered ? rows : rows.filter(s => !isLowQualityFlow(s));
+    const page = eligible.slice(0,q.data.limit);
     const images=await marketTokenImages(db,page.map(s=>({id:s.tokenId,mint:s.token.mint})));
-    return { asOf: now, nextCursor: rows.length > page.length ? page.at(-1)!.id : null, items: page.map(s => ({ id: s.id, token: { mint: s.token.mint, symbol: s.token.symbol, name: s.token.name, imageUrl: images.get(s.tokenId) ?? null }, side: s.side, createdAt: s.createdAt,
+    return { asOf: now, filteredCount, nextCursor: eligible.length > page.length ? page.at(-1)!.id : null, items: page.map(s => ({ id: s.id, token: { mint: s.token.mint, symbol: s.token.symbol, name: s.token.name, imageUrl: images.get(s.tokenId) ?? null }, side: s.side, createdAt: s.createdAt,
       stale: +now - +s.createdAt > 15 * 60_000, walletCount: s.walletCount, independentEntities: s.independentEntities, netFlowSol: Number(s.netFlowSol),
-      entryPriceUsd: Number(s.entryPriceUsd), entryAt: s.entryAt, evidence: s.evidence,
+      entryPriceUsd: Number(s.entryPriceUsd), entryAt: s.entryAt, entryTop10Pct: entryTop10(s.evidence), evidence: s.evidence,
       currentLiquidityUsd: s.token.metrics[0]?.liquidityUsd?.toString() ?? null, currentMarketAt: s.token.metrics[0]?.at ?? null,
       measurements: s.measurements.map(m => ({ horizonHours: m.horizonHours, status: m.status, dueAt: m.dueAt, returnPct: m.returnPct, priceAt: m.priceAt, reason: m.reason })) })) };
   });
