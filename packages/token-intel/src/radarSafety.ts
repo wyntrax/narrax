@@ -25,33 +25,37 @@ export type RadarSafetyRoute = 'NARRATIVE' | 'SOCIAL';
 export type RadarSafetyCheckSeverity = 'CRITICAL' | 'WARN';
 
 export const RADAR_SAFETY_POLICY = {
-  version: 'radar-safety-v2',
+  version: 'radar-safety-v3',
   /** Reported top-10 share. A source may or may not include the pool; see top10ExLpPct for the real check. */
-  maxTop10Pct: 35,
+  maxTop10Pct: 30,
   /** Top-10 excluding the pool, burn and known infrastructure. This is the one that matters for supply overhang. */
-  maxTop10ExLpPct: 35,
-  maxDevHoldingPct: { trencher: 10, holder: 5 } as const,
-  maxBundlePct: 25,
-  maxInsiderPct: 10,
-  maxBundleSniperInsiderPct: 35,
+  maxTop10ExLpPct: 30,
+  maxDevHoldingPct: { trencher: 8, holder: 5 } as const,
+  maxBundlePct: 20,
+  maxInsiderPct: 8,
+  maxBundleSniperInsiderPct: 28,
   /** Distinct wallets buying in the same launch slot. Five or more with elevated slot volume is a bundle signature. */
   maxSameSlotBuyers: 4,
   /** Low first-3-slot share threshold under which many same-slot buyers indicates public MEV snipers rather than a single creator bundle. */
-  maxSameSlotWarnBundlePct: 15,
+  maxSameSlotWarnBundlePct: 12,
   /** A deployer with more prior launches than this (>= 3) is treated as a serial launcher. */
   maxDeployerPriorTokens: 2,
   minLpBurnedPct: 80,
+  /** Minimum liquidity-to-market-cap ratio so thin-LP traps that nuke to $1K-$3K cannot pass. */
+  minLiquidityToCap: 0.12,
+  /** Minimum distinct buyers in 24h when buyer telemetry is available. */
+  minUniqueBuyers24h: 15,
   washTurnover: 30,
   minWashUniqueBuyers24h: 50,
-  maxOrganicManipulationRisk: 60,
+  maxOrganicManipulationRisk: 50,
   maxMarketAgeMs: 15 * 60_000,
   maxHoldersAgeMs: 60 * 60_000,
   maxRiskAgeMs: 60 * 60_000,
-  priceExtension1hPct: 50,
-  priceExtension3hPct: 100,
-  maxDrawdownFromPeakPct: 25,
-  maxDrop1hPct: -40,
-  maxDrop3hPct: -50,
+  priceExtension1hPct: 35,
+  priceExtension3hPct: 70,
+  maxDrawdownFromPeakPct: 20,
+  maxDrop1hPct: -35,
+  maxDrop3hPct: -45,
   maxPriceImpactPct: 3,
 } as const;
 
@@ -419,6 +423,23 @@ export function evaluateRadarSafety(i: RadarSafetyFacts, now: Date = new Date())
     ));
   } else if (ddPeak != null || finite(i.priceGrowth1hPct) || finite(i.priceGrowth3hPct)) {
     checks.push(check('PRICE_DRAWDOWN', 'CRITICAL', 'PASS', ddPeak ?? i.priceGrowth1hPct ?? i.priceGrowth3hPct ?? null, `< ${policy.maxDrawdownFromPeakPct}% off peak`));
+  }
+
+  if (i.matchKind === 'TICKER_ONLY') {
+    checks.push(check('TICKER_ONLY_COPYCAT', 'CRITICAL', 'BLOCK', i.matchKind, 'MINT or verified narrative match', 'matched by ticker symbol alone; high copycat risk'));
+  }
+
+  if (finite(i.liquidityUsd) && finite(i.marketCapUsd) && i.marketCapUsd > 0) {
+    const liqRatio = i.liquidityUsd / i.marketCapUsd;
+    if (liqRatio < policy.minLiquidityToCap) {
+      checks.push(check('LIQUIDITY_DEPTH', 'CRITICAL', 'BLOCK', Number((liqRatio * 100).toFixed(1)), `>= ${Math.round(policy.minLiquidityToCap * 100)}% of cap`, 'liquidity is too thin relative to market cap'));
+    } else {
+      checks.push(check('LIQUIDITY_DEPTH', 'CRITICAL', 'PASS', Number((liqRatio * 100).toFixed(1)), `>= ${Math.round(policy.minLiquidityToCap * 100)}% of cap`));
+    }
+  }
+
+  if (finite(i.uniqueBuyers24h) && i.uniqueBuyers24h < policy.minUniqueBuyers24h) {
+    checks.push(check('THIN_BUYER_BASE', 'CRITICAL', 'BLOCK', i.uniqueBuyers24h, `>= ${policy.minUniqueBuyers24h} unique buyers`, 'too few distinct buyers in 24h'));
   }
 
   const critical = checks.filter((c) => c.severity === 'CRITICAL');

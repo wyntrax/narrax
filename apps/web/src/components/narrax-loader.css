@@ -1,0 +1,215 @@
+.research-loading.narrax-loader {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 16px;
+  padding: 44px 24px;
+  margin: 16px 0;
+  border: 1px solid var(--bd);
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse at 50% 35%, color-mix(in srgb, var(--tx) 6%, transparent), transparent 68%),
+    radial-gradient(var(--dot, rgba(255, 255, 255, 0.08)) 0.75px, transparent 0.75px),
+    var(--s1);
+  background-size: 100% 100%, 20px 20px, 100% 100%;
+  overflow: hidden;
+  text-align: center;
+}
+
+/* Avoid double-framing when Loading() renders inside an existing card or section. */
+.workspace-entry :is(.research-section, .admin-card, .trade-panel, .paper-trading, .gate-card) .research-loading.narrax-loader {
+  margin: 0;
+  padding: 32px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--tx) 4%, transparent), transparent 68%);
+}
+
+.narrax-loader-stage {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  display: grid;
+  place-items: center;
+}
+
+.narrax-loader-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  color: var(--tx);
+}
+
+.narrax-loader-ring-outer {
+  transform-origin: 60px 60px;
+  animation: narrax-orbit-cw 28s linear infinite;
+}
+
+.narrax-loader-ring-mid {
+  transform-origin: 60px 60px;
+  animation: narrax-orbit-ccw 18s linear infinite;
+}
+
+.narrax-loader-sweep {
+  transform-origin: 60px 60px;
+  animation: narrax-sweep-spin 2.4s linear infinite;
+}
+
+.narrax-loader-sonar {
+  transform-origin: 60px 60px;
+  animation: narrax-sonar-pulse 2.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.narrax-loader-sonar--delayed {
+  animation-delay: 1.3s;
+}
+
+.narrax-loader-blip {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: narrax-blip-lock 2.4s ease-out infinite;
+}
+
+.narrax-loader-blip--2 {
+  animation-delay: 0.78s;
+}
+
+.narrax-loader-blip--3 {
+  animation-delay: 1.56s;
+}
+
+.narrax-loader-core {
+  position: relative;
+  z-index: 1;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--tx) 24%, var(--bd));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--tx) 5%, transparent);
+  animation: narrax-core-breathe 2.4s ease-in-out infinite;
+}
+
+.narrax-loader-core .brand-mark {
+  width: 24px;
+  height: 24px;
+}
+
+.narrax-loader-meta {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.research-loading.narrax-loader > .narrax-loader-meta > span.narrax-loader-label {
+  display: block;
+  margin: 0;
+  font: 500 11px/1.4 var(--font-workspace-mono, var(--font-mono, monospace));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--tx2);
+}
+
+.narrax-loader-trace {
+  position: relative;
+  width: 148px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--bd);
+  overflow: hidden;
+}
+
+.narrax-loader-trace::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--tx), transparent);
+  animation: narrax-trace-scan 1.5s cubic-bezier(0.37, 0, 0.63, 1) infinite;
+}
+
+@keyframes narrax-orbit-cw {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes narrax-orbit-ccw {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+@keyframes narrax-sweep-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes narrax-sonar-pulse {
+  0% {
+    transform: scale(0.45);
+    opacity: 0.42;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+@keyframes narrax-blip-lock {
+  0%, 100% {
+    opacity: 0.18;
+    transform: scale(0.85);
+  }
+  14% {
+    opacity: 1;
+    transform: scale(1.25);
+  }
+  40% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+}
+
+@keyframes narrax-core-breathe {
+  0%, 100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tx) 4%, transparent);
+    transform: scale(0.98);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--tx) 10%, transparent);
+    transform: scale(1.02);
+  }
+}
+
+@keyframes narrax-trace-scan {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(260%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .narrax-loader-ring-outer,
+  .narrax-loader-ring-mid,
+  .narrax-loader-sweep,
+  .narrax-loader-sonar,
+  .narrax-loader-blip,
+  .narrax-loader-core,
+  .narrax-loader-trace::after {
+    animation: none;
+  }
+  .narrax-loader-sonar {
+    opacity: 0.18;
+  }
+  .narrax-loader-blip {
+    opacity: 0.7;
+  }
+  .narrax-loader-trace::after {
+    width: 100%;
+    opacity: 0.35;
+  }
+}

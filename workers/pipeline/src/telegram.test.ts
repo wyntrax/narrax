@@ -24,8 +24,8 @@ const alert = (over: Partial<TelegramAlertRow> = {}): TelegramAlertRow => ({
   id: 'alert-1',
   kind: 'EARLY_RADAR_TRENCHER',
   priority: 'IMPORTANT',
-  title: 'MC: early trencher candidate for Lowcap Gems ($3K cap)',
-  body: 'trencher score 70.3 (strong). Market cap $3K, liquidity $4K, 561 holders, top 10 hold 15%. Research signal only, not a prediction or a recommendation to buy.',
+  title: 'MC: early trencher candidate for Lowcap Gems ($8K cap)',
+  body: 'trencher score 70.3 (strong). Market cap $8K, liquidity $4K, 561 holders, top 10 hold 15%. Research signal only, not a prediction or a recommendation to buy. Safety evidence: PASS.',
   refType: 'TOKEN',
   refId: 'token-1',
   createdAt: ago(5),
@@ -130,7 +130,7 @@ describe('telegram Early Radar delivery', () => {
     expect(text).toContain('• Same-slot buyers: 2 · Deployer prior: 0 tokens (rugs —)');
     expect(text).toContain('• Social (Mint match): 12 accounts, 16 posts (48h)');
     expect(text).toContain('• Chatter manipulation risk: 14/100');
-    expect(text).toContain('• Blocked: Bundle + sniper + insider 47.0% (&gt; 20%)');
+    expect(text).toContain('• Blocked: Bundle + sniper + insider 47.0% (&gt; 28%)');
     expect(text).toContain('• Missing: Deployer history incomplete');
     expect(text).not.toContain('AUTHORITY_NOT_PROVEN');
     expect(text).toContain(`<code>${token.mint}</code>`);
@@ -140,13 +140,13 @@ describe('telegram Early Radar delivery', () => {
   });
 
   it('formats a readable fallback card when no frozen safety snapshot is loaded', () => {
-    const text = formatTelegramAlert(alert(), token);
+    const text = formatTelegramAlert(alert({ body: 'trencher score 70.3 (strong). Market cap $8K, liquidity $4K, 561 holders, top 10 hold 15%. Research signal only, not a prediction or a recommendation to buy.' }), token);
     expect(text).toContain('⚪ <b>Marketcat (MC)</b>');
     expect(text).toContain('TRENCHER · STRONG · Score 70.3');
     expect(text).toContain('ℹ️ <b>Safety: Unavailable</b>');
     expect(text).toContain(alert().title);
     expect(text).toContain('💬 <b>Why it surfaced</b>');
-    expect(text).toContain('trencher score 70.3 (strong).\n\nMarket cap $3K');
+    expect(text).toContain('trencher score 70.3 (strong).\n\nMarket cap $8K');
     expect(text).not.toContain('not a prediction or a recommendation to buy');
     expect(text).toContain(`<code>${token.mint}</code>`);
     expect(text).toContain(`<a href="https://dexscreener.com/solana/${token.mint}">DexScreener</a> · 2026-10-20 13:55:00 UTC`);
@@ -172,7 +172,7 @@ describe('telegram Early Radar delivery', () => {
 
   it('keeps zero scores but labels missing or invalid scores and absent safety evidence explicitly', () => {
     for (const score of [null, Number.NaN, Number.POSITIVE_INFINITY]) {
-      const text = formatTelegramAlert(alert({earlyRadarOutcome: {...alert().earlyRadarOutcome!, score}}), null);
+      const text = formatTelegramAlert(alert({ body: 'Legacy body without safety.', earlyRadarOutcome: {...alert().earlyRadarOutcome!, score}}), null);
       expect(text).toContain('Score unavailable');
       expect(text).toContain('ℹ️ <b>Safety: Unavailable</b>');
       expect(text).not.toContain('Safety: PASS');
@@ -191,7 +191,7 @@ describe('telegram Early Radar delivery', () => {
     expect(text).toContain('⚠️ <b>Safety: INCOMPLETE</b> <i>(shadow)</i>');
     expect(text).toContain('• Missing: Top-10 (ex-LP) share missing; LP lock/burn status missing');
     expect(text).toContain('• Top-10 (ex-LP): 22.0%');
-    expect(text).toContain('• Warnings: Price already up ≥50% (1h)');
+    expect(text).toContain('• Warnings: Price already up ≥35% (1h)');
     expect(text.indexOf('Gate Details')).toBeGreaterThan(text.indexOf('Why it surfaced'));
   });
 
@@ -252,11 +252,24 @@ describe('telegram Early Radar delivery', () => {
       tradeabilityAt: ago(1),
       tradeability: testTradeability(token.mint, ago(1), 0.5),
     }, NOW);
-    const fake = fakeDb([alert()], null, [{ key: 'research.radarSafety.alert-1', value: snapshot as unknown as Prisma.JsonValue }]);
+    const fake = fakeDb([alert()], null, [
+      { key: 'research.radarSafety.alert-1', value: snapshot as unknown as Prisma.JsonValue },
+      { key: 'research.market.token-1', value: { websiteUrl: 'https://marketcat.example', twitterUrl: 'https://x.com/marketcat' } },
+    ]);
     const transport = new FakeTransport();
     const result = await deliverEarlyRadarTelegram(fake.db, { chatId: '-100123', now: NOW, transport, delayMs: 0, dryRun: true });
     expect(result.messages[0]?.text).toContain('🟢 <b>Marketcat (MC)</b>');
     expect(result.messages[0]?.text).toContain('• Bundle 2.0% · Sniper 3.0% · Insider 1.0%');
+    expect(result.messages[0]?.text).toContain('<a href="https://x.com/marketcat">X</a>');
+    expect(result.messages[0]?.text).toContain('<a href="https://marketcat.example/">Website</a>');
+
+    const blockedAlert = alert({ id: 'alert-2', body: 'Blocked token. Safety evidence: BLOCK (BUNDLE_SNIPER_INSIDER).' });
+    const unknownAlert = alert({ id: 'alert-3', body: 'Incomplete token. Safety evidence: UNKNOWN (LP_CONTROL).' });
+    const filteredDb = fakeDb([blockedAlert, unknownAlert]);
+    const filtered = await deliverEarlyRadarTelegram(filteredDb.db, { chatId: '-100123', now: NOW, transport, delayMs: 0, dryRun: false });
+    expect(filtered.skippedUnsafe).toBe(2);
+    expect(filtered.sent).toBe(0);
+    expect(filteredDb.getWrites()).toBe(2);
 
     const drawdownSnap = evaluateRadarSafety({
       ...snapshot.facts,

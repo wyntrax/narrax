@@ -2,7 +2,7 @@ import { render as rtlRender, screen, fireEvent, cleanup } from '@testing-librar
 import {NextIntlClientProvider} from 'next-intl';
 import type {ReactNode} from 'react';
 import { afterEach, it, expect, vi } from 'vitest';
-import { DataTable } from './ui';
+import { DataTable, Loading } from './ui';
 import {Link} from '@/i18n/navigation';
 const push = vi.hoisted(() => vi.fn());
 function render(node:ReactNode){return rtlRender(<NextIntlClientProvider locale="en" messages={{}}>{node}</NextIntlClientProvider>);}
@@ -34,4 +34,12 @@ it('keeps buttons and selected text intact',()=>{
  fireEvent.click(screen.getByText('Review'));expect(clicked).toHaveBeenCalledOnce();expect(push).not.toHaveBeenCalled();
  const selection=vi.spyOn(window,'getSelection').mockReturnValue({toString:()=> 'TOKEN'} as Selection);
  fireEvent.click(screen.getByText('TOKEN'));expect(push).not.toHaveBeenCalled();selection.mockRestore();
+});
+it('renders the Narrax Observatory radar loader with accessible status text',()=>{
+ const {container}=rtlRender(<NextIntlClientProvider locale="en" messages={{workspace:{loading:'Loading research...'}}}><Loading/></NextIntlClientProvider>);
+ const status=screen.getByRole('status');
+ expect(status).toHaveClass('research-loading','narrax-loader');
+ expect(screen.getByText('Loading research...')).toBeInTheDocument();
+ expect(container.querySelector('.narrax-loader-svg')).toBeInTheDocument();
+ expect(container.querySelector('[data-brand="narrax"]')).toBeInTheDocument();
 });
