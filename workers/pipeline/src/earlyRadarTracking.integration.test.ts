@@ -93,7 +93,7 @@ describe('early radar frozen outcomes on isolated PostgreSQL',()=>{
       const created=await createEarlyRadarAlert(db,shadow.input,at);
       expect(created).toMatchObject({created:true});
       if(!created.created)throw Error('shadow alert was not created');
-      expect(created.safety).toMatchObject({policyVersion:'radar-safety-v2',mode:'shadow',status:'UNKNOWN'});
+      expect(created.safety).toMatchObject({policyVersion:'radar-safety-v3',mode:'shadow',status:'UNKNOWN'});
       expect(created.safety?.unknowns).toEqual(expect.arrayContaining(['TOP10_EX_LP','LP_CONTROL','BUNDLE_SNIPER_INSIDER','ORGANIC_EVIDENCE','RISK_EVIDENCE','TRADEABILITY']));
       const alert=await db.alert.findFirstOrThrow({where:{refId:shadow.token.id}});
       expect(alert.body).toMatch(/Safety evidence: UNKNOWN/);

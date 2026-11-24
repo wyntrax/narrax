@@ -136,7 +136,7 @@ test('manual trade explains stale evidence and blocks the buy quote',async({page
  await expect(page.locator('.trade-research')).toHaveCSS('padding-top','16px');
  await expect(page.locator('.trade-swap')).toHaveCSS('margin-top','0px');
  await expect(page.locator('.trade-swap')).toHaveCSS('top','0px');
- await page.locator('.research-main').evaluate(el=>el.scrollTo(0,300));
+ await page.locator('.research-main').evaluate(el=>el.scrollTo(0,500));
  const stickyGap=await page.evaluate(()=>{
   const main=document.querySelector('.research-main')!.getBoundingClientRect();
   const swap=document.querySelector('.trade-swap')!.getBoundingClientRect();

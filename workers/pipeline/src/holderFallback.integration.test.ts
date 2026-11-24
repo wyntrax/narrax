@@ -32,7 +32,7 @@ afterAll(async()=>{
  for(const key of progressKeys)if(previous[key]!==undefined)await db.systemSetting.create({data:{key,value:previous[key] as Prisma.InputJsonValue}});
  await db.$disconnect();
 });
-function source(){return {get:vi.fn(async(mint:string):Promise<HolderRpcResult>=>({ok:true,mint,holders:200,top10Pct:30,sourceAt:new Date(+now-10000),slot:123,accounts:205,program:'test-program'}))};}
+function source(){return {get:vi.fn(async(mint:string):Promise<HolderRpcResult>=>({ok:true,mint,holders:200,top10Pct:24,sourceAt:new Date(+now-10000),slot:123,accounts:205,program:'test-program'}))};}
 it('writes at most two real observations with immutable provenance; rotates and skips fresh holders',async()=>{
  const rpc=source(),first=await refreshHolderFallback(db,rpc,tokens,()=>now,budget);expect(first).toMatchObject({holderFallbackAttempts:2,holderFallbackWritten:2});
  expect(await db.tokenHolderMetric.count({where:{tokenId:{in:tokens.map(t=>t.id)}}})).toBe(2);
@@ -135,7 +135,7 @@ it('fresh RPC holders can cross publication and delivery gates; failed fallback 
  const transport={send:vi.fn(async()=>({ok:true,messageId:'fixture'}))};
  // Isolate this test's delivery selection without altering the production cursor logic.
  const isolated={...db,alert:{findMany:async(args:any)=>db.alert.findMany({...args,where:{AND:[args.where,{refId:t.id}]}})}} as unknown as typeof db;
- const delivered=await deliverEarlyRadarTelegram(isolated,{chatId:tag,now,transport,dryRun:false,delayMs:0});
+ const delivered=await deliverEarlyRadarTelegram(isolated,{chatId:tag,now,transport,dryRun:false,delayMs:0,requireSafetyPass:false});
  expect(delivered).toMatchObject({sent:1,failed:0,stopped:false});expect(transport.send).toHaveBeenCalledOnce();
 });
 it('market collection invokes fallback for eligible stale-holder tokens even without primary info',async()=>{
