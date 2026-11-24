@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@narra/database';
 import { FrozenRadarSafetySchema, INTEGRATION_SETTING_KEYS, effectiveIntegrations, type FrozenRadarSafety } from '@narra/shared';
-import { radarSafetySettingKey } from '@narra/token-intel';
+import { RADAR_SAFETY_POLICY, radarSafetySettingKey } from '@narra/token-intel';
 
 /**
  * Read-only Telegram delivery for the research alerts. It reads global Early Radar alerts that the pipeline already
@@ -66,6 +66,8 @@ export interface TelegramTokenRow {
   mint: string;
   symbol: string;
   name: string;
+  websiteUrl?: string | null;
+  twitterUrl?: string | null;
 }
 
 export interface TelegramDeliverySummary {
@@ -75,6 +77,7 @@ export interface TelegramDeliverySummary {
   candidates: number;
   sent: number;
   skippedStale: number;
+  skippedUnsafe: number;
   failed: number;
   stopped: boolean;
   lastError: string | null;
@@ -88,6 +91,8 @@ export interface TelegramDeliveryOptions {
   maxAgeMs?: number;
   limit?: number;
   delayMs?: number;
+  /** Defaults to true so only alerts with Safety: PASS are posted to Telegram. */
+  requireSafetyPass?: boolean;
   /** Defaults to true so an accidental call cannot post. The worker explicitly passes false. */
   dryRun?: boolean;
   sleep?: (ms: number) => Promise<void>;
@@ -181,12 +186,15 @@ const CODE_LABELS: Record<string, { block?: string; unknown?: string; warn?: str
   TOP10_EX_LP: { block: 'Top-10 (ex-LP) share too concentrated', unknown: 'Top-10 (ex-LP) share missing' },
   DEV_HOLDING: { block: 'Dev wallet holds too much supply', unknown: 'Dev holding missing' },
   LP_CONTROL: { block: 'LP unlocked or under-burned', unknown: 'LP lock/burn status missing' },
-  BUNDLE_SNIPER_INSIDER: { block: 'Bundle (>25%), insider (>10%), or combined (>35%)', unknown: 'Bundle/sniper/insider evidence incomplete' },
+  BUNDLE_SNIPER_INSIDER: { block: `Bundle (>${RADAR_SAFETY_POLICY.maxBundlePct}%), insider (>${RADAR_SAFETY_POLICY.maxInsiderPct}%), or combined (>${RADAR_SAFETY_POLICY.maxBundleSniperInsiderPct}%)`, unknown: 'Bundle/sniper/insider evidence incomplete' },
   LAUNCH_BUNDLE: { block: 'Multiple wallets bought in launch slot', unknown: 'Launch-slot buyer count missing', warn: 'Many first-slot buyers (low bundle share)' },
   DEPLOYER_HISTORY: { block: 'Serial deployer or prior rug', unknown: 'Deployer history incomplete', warn: '1–2 untracked prior deployer mints' },
   ORGANIC_EVIDENCE: { block: 'Chatter looks manipulated', unknown: 'Organic chatter score missing' },
   WASH_VOLUME: { block: 'Suspected wash volume', unknown: 'Wash-volume check incomplete' },
   TRADEABILITY: { block: 'High swap slippage ($50 test)', unknown: 'Swap quote unavailable' },
+  TICKER_ONLY_COPYCAT: { block: 'Matched by ticker only (copycat risk)' },
+  LIQUIDITY_DEPTH: { block: `Liquidity too thin (<${Math.round(RADAR_SAFETY_POLICY.minLiquidityToCap * 100)}% of cap)` },
+  THIN_BUYER_BASE: { block: `Too few distinct buyers (<${RADAR_SAFETY_POLICY.minUniqueBuyers24h} in 24h)` },
   RISK_EVIDENCE: { unknown: 'Contract risk check missing or stale' },
   MARKET_EVIDENCE: { unknown: 'Market quote missing or stale' },
   HOLDER_EVIDENCE: { unknown: 'Holder snapshot missing or stale' },
@@ -195,8 +203,8 @@ const CODE_LABELS: Record<string, { block?: string; unknown?: string; warn?: str
   RUGGED: { block: 'Token flagged as rugged' },
   MINT_AUTHORITY_ACTIVE: { block: 'Mint authority still active' },
   FREEZE_AUTHORITY_ACTIVE: { block: 'Freeze authority still active' },
-  PRICE_ALREADY_EXTENDED: { block: 'Price already up ≥50% (1h)', warn: 'Price already up ≥50% (1h)' },
-  PRICE_ALREADY_EXTENDED_3H: { block: 'Price already up ≥100% (3h)', warn: 'Price already up ≥100% (3h)' },
+  PRICE_ALREADY_EXTENDED: { block: `Price already up ≥${RADAR_SAFETY_POLICY.priceExtension1hPct}% (1h)`, warn: `Price already up ≥${RADAR_SAFETY_POLICY.priceExtension1hPct}% (1h)` },
+  PRICE_ALREADY_EXTENDED_3H: { block: `Price already up ≥${RADAR_SAFETY_POLICY.priceExtension3hPct}% (3h)`, warn: `Price already up ≥${RADAR_SAFETY_POLICY.priceExtension3hPct}% (3h)` },
   PRICE_DRAWDOWN: { block: 'Price already dumped from peak' },
   WASH_TURNOVER_HIGH: { warn: 'Very high 24h turnover' },
 };
@@ -216,12 +224,13 @@ function describeSafetyCode(code: string, kind: 'BLOCK' | 'UNKNOWN' | 'WARN', sn
   const base = kind === 'BLOCK' ? mapped?.block : kind === 'UNKNOWN' ? mapped?.unknown : mapped?.warn;
   const check = snapshot?.checks.find((c) => c.code === code);
   if (kind === 'BLOCK' && check && typeof check.value === 'number' && Number.isFinite(check.value)) {
-    if (code === 'BUNDLE_SNIPER_INSIDER') return `Bundle + sniper + insider ${check.value.toFixed(1)}% (&gt; 20%)`;
-    if (code === 'LAUNCH_BUNDLE') return `${Math.round(check.value)} same-slot launch buyers (&gt; 2)`;
-    if (code === 'TOP10_EX_LP') return `Top-10 (ex-LP) ${check.value.toFixed(1)}% (&gt;= 35%)`;
-    if (code === 'TOP10_CONCENTRATION') return `Top-10 (raw) ${check.value.toFixed(1)}% (&gt;= 35%)`;
+    if (code === 'BUNDLE_SNIPER_INSIDER') return `Bundle + sniper + insider ${check.value.toFixed(1)}% (&gt; ${RADAR_SAFETY_POLICY.maxBundleSniperInsiderPct}%)`;
+    if (code === 'LAUNCH_BUNDLE') return `${Math.round(check.value)} same-slot launch buyers (&gt; ${RADAR_SAFETY_POLICY.maxSameSlotBuyers})`;
+    if (code === 'TOP10_EX_LP') return `Top-10 (ex-LP) ${check.value.toFixed(1)}% (&gt;= ${RADAR_SAFETY_POLICY.maxTop10ExLpPct}%)`;
+    if (code === 'TOP10_CONCENTRATION') return `Top-10 (raw) ${check.value.toFixed(1)}% (&gt;= ${RADAR_SAFETY_POLICY.maxTop10Pct}%)`;
     if (code === 'DEV_HOLDING') return `Dev holds ${check.value.toFixed(1)}%`;
-    if (code === 'TRADEABILITY') return `Swap slippage ${check.value.toFixed(1)}% (&gt; 3%)`;
+    if (code === 'TRADEABILITY') return `Swap slippage ${check.value.toFixed(1)}% (&gt; ${RADAR_SAFETY_POLICY.maxPriceImpactPct}%)`;
+    if (code === 'LIQUIDITY_DEPTH') return `Liquidity ${check.value.toFixed(1)}% of cap (&lt; ${Math.round(RADAR_SAFETY_POLICY.minLiquidityToCap * 100)}%)`;
   }
   return escapeHtml(base ?? code);
 }
@@ -352,10 +361,26 @@ export function formatTelegramAlert(
     }
   }
 
+  const safeLink = (raw: string | null | undefined): string | null => {
+    if (!raw || typeof raw !== 'string') return null;
+    try {
+      const u = new URL(raw.trim());
+      if ((u.protocol !== 'https:' && u.protocol !== 'http:') || u.username || u.password) return null;
+      return u.toString();
+    } catch { return null; }
+  };
   const utcTime = alert.createdAt.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
   if (token?.mint) {
+    const xUrl = safeLink(token.twitterUrl);
+    const webUrl = safeLink(token.websiteUrl);
+    const links = [
+      `<a href="https://dexscreener.com/solana/${encodeURIComponent(token.mint)}">DexScreener</a>`,
+      ...(xUrl ? [`<a href="${escapeHtml(xUrl).replace(/"/g, '&quot;')}">X</a>`] : []),
+      ...(webUrl ? [`<a href="${escapeHtml(webUrl).replace(/"/g, '&quot;')}">Website</a>`] : []),
+      utcTime,
+    ];
     lines.push('', '🔗 <b>Token</b>', `<code>${escapeHtml(token.mint)}</code>`);
-    lines.push(`<a href="https://dexscreener.com/solana/${encodeURIComponent(token.mint)}">DexScreener</a> · ${utcTime}`);
+    lines.push(links.join(' · '));
   } else {
     lines.push('', `Alert time: ${utcTime}`);
   }
@@ -451,6 +476,7 @@ export async function deliverEarlyRadarTelegram(
   opts: TelegramDeliveryOptions,
 ): Promise<TelegramDeliverySummary> {
   const dryRun = opts.dryRun ?? true;
+  const requireSafetyPass = opts.requireSafetyPass ?? true;
   const now = opts.now ?? new Date();
   const maxAgeMs = opts.maxAgeMs ?? TELEGRAM_LIMITS.maxAgeMs;
   const limit = Math.max(1, Math.min(Math.floor(opts.limit ?? TELEGRAM_LIMITS.maxPerRun), 20));
@@ -483,6 +509,7 @@ export async function deliverEarlyRadarTelegram(
     candidates: 0,
     sent: 0,
     skippedStale: 0,
+    skippedUnsafe: 0,
     failed: 0,
     stopped: false,
     lastError: null,
@@ -491,12 +518,28 @@ export async function deliverEarlyRadarTelegram(
   if (!dryRun && !opts.transport) throw new Error('telegram transport is required when dryRun is false');
 
   const safetyByAlertId = new Map<string, FrozenRadarSafety>();
+  const marketLinksByTokenId = new Map<string, { websiteUrl: string | null; twitterUrl: string | null }>();
   if (alerts.length && typeof db.systemSetting.findMany === 'function') {
+    const tokenIds = [...new Set(alerts.map((a) => a.refId).filter((id): id is string => Boolean(id)))];
+    const keys = [
+      ...alerts.map((a) => radarSafetySettingKey(a.id)),
+      ...tokenIds.map((id) => `research.market.${id}`),
+    ];
     const rows = await db.systemSetting.findMany({
-      where: { key: { in: alerts.map((a) => radarSafetySettingKey(a.id)) } },
+      where: { key: { in: keys } },
       select: { key: true, value: true },
     });
     for (const row of rows) {
+      if (row.key.startsWith('research.market.')) {
+        const val = row.value as { websiteUrl?: unknown; twitterUrl?: unknown } | null;
+        if (val && typeof val === 'object') {
+          marketLinksByTokenId.set(row.key.slice('research.market.'.length), {
+            websiteUrl: typeof val.websiteUrl === 'string' ? val.websiteUrl : null,
+            twitterUrl: typeof val.twitterUrl === 'string' ? val.twitterUrl : null,
+          });
+        }
+        continue;
+      }
       const parsed = FrozenRadarSafetySchema.safeParse(row.value);
       if (parsed.success) safetyByAlertId.set(row.key, parsed.data);
     }
@@ -510,12 +553,24 @@ export async function deliverEarlyRadarTelegram(
       if (!dryRun) await writeCursor(db, key, cursor);
       continue;
     }
+    const safetySnapshot = safetyByAlertId.get(radarSafetySettingKey(alert.id)) ?? null;
+    const effectiveStatus = safetySnapshot?.status ?? splitTelegramBody(alert.body).safety?.status ?? null;
+    if (requireSafetyPass && effectiveStatus !== 'PASS') {
+      out.skippedUnsafe++;
+      cursor = { at: alert.createdAt, id: alert.id };
+      if (!dryRun) await writeCursor(db, key, cursor);
+      continue;
+    }
     out.candidates++;
     let token: TelegramTokenRow | null = null;
     if (alert.refId) {
-      token = await db.token.findUnique({ where: { id: alert.refId }, select: { mint: true, symbol: true, name: true } });
+      const base = await db.token.findUnique({ where: { id: alert.refId }, select: { mint: true, symbol: true, name: true } });
+      if (base) {
+        const links = marketLinksByTokenId.get(alert.refId);
+        token = { ...base, ...(links ? { websiteUrl: links.websiteUrl, twitterUrl: links.twitterUrl } : {}) };
+      }
     }
-    const text = formatTelegramAlert(alert, token, safetyByAlertId.get(radarSafetySettingKey(alert.id)) ?? null);
+    const text = formatTelegramAlert(alert, token, safetySnapshot);
     if (dryRun) {
       out.messages.push({ alertId: alert.id, text });
       continue;

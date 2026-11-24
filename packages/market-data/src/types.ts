@@ -17,6 +17,10 @@ export interface MarketSnapshot {
   name: string;
   /** Optional provider-supplied token artwork, never a verification badge. */
   imageUrl?: string | null;
+  /** Optional provider-supplied project website URL (https/http only). */
+  websiteUrl?: string | null;
+  /** Optional provider-supplied X / Twitter URL (https/http only). */
+  twitterUrl?: string | null;
   priceUsd: number;
   marketCapUsd: number;
   /** True when the source gave no market cap and the fully diluted value was used instead. */

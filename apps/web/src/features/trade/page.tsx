@@ -132,11 +132,10 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
    if(mounted.current){setPreview(null);await read(`manual-trades/${q.id}`,TradeRecord).catch(()=>undefined);}
   }catch(e){if(mounted.current)report(e);}finally{operation.current=false;if(mounted.current)setPhase(null);}
  }
- return <>
-  <ol className="trade-steps" aria-label={c.title}>{[c.select,c.research,c.swap].map((label,i)=><li key={label} aria-current={i===(reviewed?2:1)?'step':undefined}><span>{i<(reviewed?2:1)?<Check size={14}/>:i+1}</span>{label}</li>)}</ol>
-  {error&&<div className="trade-error" role="alert">{error}{!review&&!busy&&<button className="research-control" onClick={()=>void research()}>{c.retry}</button>}</div>}
-  <div className="trade-layout">
+ return <div className="trade-layout">
    <div className="trade-research">
+    <ol className="trade-steps" aria-label={c.title}>{[c.select,c.research,c.swap].map((label,i)=><li key={label} aria-current={i===(reviewed?2:1)?'step':undefined}><span>{i<(reviewed?2:1)?<Check size={14}/>:i+1}</span>{label}</li>)}</ol>
+    {error&&<div className="trade-error" role="alert">{error}{!review&&!busy&&<button className="research-control" onClick={()=>void research()}>{c.retry}</button>}</div>}
     {!review?<div className="trade-panel trade-loading" aria-busy={busy}><Activity size={24}/><h2>{c.research}</h2><p role="status">{busy?c.loading:c.unknown}</p></div>:<>
      <header className="trade-token"><TokenAvatar symbol={review.symbol} imageUrl={review.imageUrl}/><div><h2>{review.symbol}<span>{review.name}</span></h2><code>{mint}</code></div><Link href={`/app/tokens/${mint}`} aria-label={c.details} title={c.details}><ArrowUpRight size={20}/></Link></header>
      <div className="trade-panel"><div className="trade-panel-title"><h3><BookOpen size={17}/>{c.research}</h3><span className="trade-tag">{review.buyBlockers.length?c.blocked:c.ready}</span></div><p>{c.reviewNote}</p><p className="trade-stamp">{c.generated}: {f.date(review.at)}</p>
@@ -196,8 +195,7 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
     {active&&<div className="trade-result" role="status"><h3>{status.data?.status==='CONFIRMED'?c.confirmed:status.data?.status==='FAILED'?c.failed:status.data?.status==='EXPIRED'?c.expired:c.pending}</h3><p>{status.data?.status==='CONFIRMED'?c.done:finished?'':c.uncertain}</p>{status.data?.signature&&<a href={`https://solscan.io/tx/${status.data.signature}`} target="_blank" rel="noopener noreferrer">{c.explorer} ↗</a>}<button className="research-control" disabled={status.isFetching||busy} onClick={()=>void status.refetch()}>{c.check}</button>{finished&&<button className="research-control" onClick={()=>{setActive(null);setPreview(null);setError(null);setAmount('');}}>{c.reset}</button>}</div>}
     <p className="trade-stamp trade-sign-note"><ShieldCheck size={15}/>{c.walletNote}</p>
    </aside>
-  </div>
- </>;
+  </div>;
 }
 function Fresh({at}:{at:{fresh:boolean}|null}){const c=useCopy();return <span className="trade-fresh" data-fresh={at?.fresh??false}>{at?(at.fresh?c.fresh:c.stale):c.unknown}</span>;}
 function Fact({label,value}:{label:string;value:ReactNode}){return <div><dt>{label}</dt><dd>{value}</dd></div>;}

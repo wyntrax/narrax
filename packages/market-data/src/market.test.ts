@@ -73,6 +73,34 @@ describe('DexScreenerSource', () => {
     expect((await shot()).imageUrl).toBeNull();
   });
 
+  it('extracts safe website and X/Twitter links from pair info and drops unsafe schemes', async () => {
+    const src = new DexScreenerSource({
+      ...fast,
+      fetch: reply([pair({
+        info: {
+          websites: [{ label: 'Website', url: 'https://narrax.fun' }],
+          socials: [{ type: 'twitter', url: 'https://x.com/wyntrax' }, { type: 'telegram', url: 'https://t.me/narrax' }],
+        },
+      })]),
+    });
+    const snap = (await src.getSnapshots([M1])).get(M1)!;
+    expect(snap.websiteUrl).toBe('https://narrax.fun/');
+    expect(snap.twitterUrl).toBe('https://x.com/wyntrax');
+
+    const unsafeSrc = new DexScreenerSource({
+      ...fast,
+      fetch: reply([pair({
+        info: {
+          websites: [{ url: 'javascript:alert(1)' }],
+          socials: [{ type: 'twitter', url: 'ftp://x.com/bad' }],
+        },
+      })]),
+    });
+    const unsafeSnap = (await unsafeSrc.getSnapshots([M1])).get(M1)!;
+    expect(unsafeSnap.websiteUrl).toBeNull();
+    expect(unsafeSnap.twitterUrl).toBeNull();
+  });
+
   it('falls back to FDV when market cap is missing and says so', async () => {
     const s = (await new DexScreenerSource({ ...fast, fetch: reply([pair({ marketCap: undefined, fdv: 9_000_000 })]) }).getSnapshots([M1])).get(M1)!;
     expect(s).toMatchObject({ marketCapUsd: 9_000_000, marketCapIsFdv: true });

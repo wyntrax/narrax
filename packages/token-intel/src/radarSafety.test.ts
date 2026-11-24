@@ -29,7 +29,7 @@ const base: RadarSafetyFacts = {
   liquidityUsd: 15_000,
   volume24hUsd: 30_000,
   holders: 500,
-  top10Pct: 30,
+  top10Pct: 26,
   top10ExLpPct: 25,
   devHoldingPct: 2,
   riskFlags: [],
@@ -85,6 +85,9 @@ describe('radar safety gate', () => {
       [{ priceImpactPct: 3.1,tradeability:testTradeability(base.mint,NOW,3.1) }, 'TRADEABILITY'],
       [{ deployerPriorRugs: 1 }, 'DEPLOYER_HISTORY'],
       [{ deployerPriorTokens: RADAR_SAFETY_POLICY.maxDeployerPriorTokens + 1 }, 'DEPLOYER_HISTORY'],
+      [{ matchKind: 'TICKER_ONLY' }, 'TICKER_ONLY_COPYCAT'],
+      [{ marketCapUsd: 20_000, liquidityUsd: 1_500 }, 'LIQUIDITY_DEPTH'],
+      [{ uniqueBuyers24h: 10 }, 'THIN_BUYER_BASE'],
     ];
     for (const [over, code] of cases) {
       const r = evaluateRadarSafety({ ...base, ...over }, NOW);
@@ -118,7 +121,7 @@ describe('radar safety gate', () => {
       sniperPct: 17.5,
       insiderPct: 0,
       sameSlotBuyers: 10,
-      drawdownFromPeakPct: 24,
+      drawdownFromPeakPct: 18,
       deployerPriorTokens: 2,
       deployerPriorRugs: null,
     }, NOW);

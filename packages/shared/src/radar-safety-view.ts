@@ -4,7 +4,7 @@ import {TradeabilityQuoteSchema,TRADEABILITY_MAX_AGE_MS} from './tradeability';
 const text=z.string().max(20000),date=z.string().datetime({offset:true}),number=z.number().finite().nullable();
 /** Read boundary for frozen radar records. Never evaluates a new verdict. */
 export const FrozenRadarSafetySchema=z.object({
- policyVersion:z.enum(['radar-safety-v1','radar-safety-v2']),mode:z.enum(['shadow','enforce']),status:z.enum(['PASS','BLOCK','UNKNOWN']),wouldBlock:z.boolean(),
+ policyVersion:z.enum(['radar-safety-v1','radar-safety-v2','radar-safety-v3']),mode:z.enum(['shadow','enforce']),status:z.enum(['PASS','BLOCK','UNKNOWN']),wouldBlock:z.boolean(),
  blockers:z.array(text).max(100),unknowns:z.array(text).max(100),warnings:z.array(text).max(100),
  checks:z.array(z.object({code:text,severity:z.enum(['CRITICAL','WARN']),status:z.enum(['PASS','BLOCK','UNKNOWN','WARN']),value:z.union([text,z.number().finite(),z.boolean(),z.null()]),threshold:z.union([text,z.number().finite(),z.null()]),detail:text.optional()})).min(1).max(100),
  facts:z.object({
@@ -21,11 +21,11 @@ export const FrozenRadarSafetySchema=z.object({
  if(value.status!==expected||value.wouldBlock!==(value.status!=='PASS')||!same(value.blockers,codes('BLOCK'))||!same(value.unknowns,codes('UNKNOWN'))||!same(value.warnings,codes('WARN')))
   ctx.addIssue({code:z.ZodIssueCode.custom,message:'Inconsistent frozen safety verdict'});
   const q=value.facts.tradeability;
-  if(value.policyVersion==='radar-safety-v2'){
+  if(value.policyVersion!=='radar-safety-v1'){
    const checks=value.checks.filter(c=>c.code==='TRADEABILITY');
    if(checks.length!==1||checks[0]?.severity!=='CRITICAL')ctx.addIssue({code:z.ZodIssueCode.custom,message:'Missing or duplicated tradeability check'});
   }
- if(value.policyVersion==='radar-safety-v2'&&value.checks.some(c=>c.code==='TRADEABILITY'&&c.status==='PASS')){
+ if(value.policyVersion!=='radar-safety-v1'&&value.checks.some(c=>c.code==='TRADEABILITY'&&c.status==='PASS')){
   const age=q?Date.parse(value.evaluatedAt)-Date.parse(q.sourceAt):NaN;
   if(!q||q.mint!==value.facts.mint||q.priceImpactPct!==value.facts.priceImpactPct||Date.parse(q.sourceAt)!==Date.parse(value.facts.tradeabilityAt??'')||!Number.isFinite(age)||age<0||age>TRADEABILITY_MAX_AGE_MS)
    ctx.addIssue({code:z.ZodIssueCode.custom,message:'Missing or mismatched frozen quote provenance'});
