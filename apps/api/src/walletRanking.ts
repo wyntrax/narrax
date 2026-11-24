@@ -22,7 +22,7 @@ export function rankingReasons(performance: WalletPerformance, band: WalletPerfo
     (smallCap.winRateLowerBound ?? 0) >= 0.5 && smallCap.realisedPnlSol !== null &&
     new Prisma.Decimal(smallCap.realisedPnlSol).gt(0) && (smallCap.medianRoi ?? 0) > 0 && (smallCap.fastCloseRate ?? 0) <= 0.5;
   if (band.band==='UNKNOWN' || band.band==='OVER_1M' || (band.band==='ALL' && !smallCapProven)) reasons.push('SMALL_CAP_UNPROVEN');
-  if ((band.fastCloseRate??0)>0.5 || (scope.fastCloseRate??0)>0.5) reasons.push('FAST_EXITS');
+  if ((band.fastCloseRate??0)>0.5) reasons.push('FAST_EXITS');
   if (linked) reasons.push('LINKED_WALLETS');
   if (developer) reasons.push('KNOWN_DEPLOYER');
   return { historyComplete, reasons };

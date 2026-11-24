@@ -117,3 +117,31 @@ it('deprioritizes confirmed dumpers below unprobed candidates and evicts stale f
  expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['stale-fast-exit']}},data:{active:false}});
  expect(createMany.mock.calls[0]?.[0].data.map(w=>w.address)).toEqual([addresses[1]]);
 });
+it('protects a provisional wallet with a proven small-cap sample from stale-capacity eviction',async()=>{
+ const createMany=vi.fn(async(args:{data:{address:string}[]})=>({count:args.data.length}));
+ const updateMany=vi.fn(async(args:{where:{id:{in:string[]}}})=>({count:args.where.id.in.length}));
+ const upsert=vi.fn(async()=>({}));
+ let findCalls=0;
+ const provenPerf={
+  version:1,checkedAt:now.toISOString(),windowDays:30,observedTrades:100,invalidTrades:0,unmatchedSells:0,capped:false,lastTradeAt:now.toISOString(),
+  bands:[{band:'SMALL_CAP',positions:9,closedPositions:9,closedTokens:9,wins:9,losses:0,breakeven:0,openPositions:0,winRate:1,winRateLowerBound:0.7,realisedPnlSol:'4.9',openCostSol:'0',medianRoi:0.06,medianWinSol:'0.5',medianLossSol:null,profitFactor:null,medianFirstSellSeconds:91,medianCloseSeconds:132,realisedDrawdownSol:'0',observedDays:29,fastCloseRate:0.11}],
+ };
+ const tx={
+  $executeRaw:vi.fn(async()=>0),
+  systemSetting:{
+   findUnique:async()=>({value:{checkedAt:now.toISOString(),items:[{address:addresses[0],scannedTokens:3}]}}),
+   findMany:async()=>[{key:'wallet.performance.protected-small-cap',value:provenPerf}],
+   upsert,
+  },
+  trackedWallet:{
+   count:async()=>200,
+   findMany:async()=>{findCalls++;return findCalls===1?[]:[{id:'protected-small-cap',profile:{score:64,medianHoldSeconds:52}},{id:'evictable-fast-exit',profile:{score:65,medianHoldSeconds:45}}];},
+   updateMany,
+   createMany,
+  },
+  walletCandidate:{findMany:async()=>[]},
+ };
+ const db={$transaction:async(fn:(tx:unknown)=>unknown)=>fn(tx)} as unknown as PrismaClient;
+ expect(await intakeEmergingWallets(db,now)).toMatchObject({evicted:1,capacity:1,added:1});
+ expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['evictable-fast-exit']}},data:{active:false}});
+});

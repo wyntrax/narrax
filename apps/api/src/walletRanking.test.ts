@@ -53,11 +53,11 @@ it('tolerates <=1% skipped history swaps when scanned >= 100 on both uncapped an
  expect(rankingReasons(deepSample,band,{...history,capped:true,scanned:1000,skipped:11},now,false,false).reasons).toContain('HISTORY_INCOMPLETE');
  expect(rankingReasons(sample,band,{...history,skipped:1},now,false,false).reasons).toContain('HISTORY_INCOMPLETE');
 });
-it('accepts a 5+ live small-cap sample when the 30-day ALL band has 20+ closes and overall fast-close rate stays <= 50%',()=>{
+it('accepts a 5+ live small-cap sample when the 30-day ALL band has 20+ closes and band fast-close rate stays <= 50%',()=>{
  const allBand={...band,band:'ALL',closedPositions:200,closedTokens:200,observedDays:30,fastCloseRate:0.5} as WalletPerformance['bands'][number];
  const liveSmall={...band,closedPositions:9,closedTokens:9,observedDays:29,winRateLowerBound:0.7,fastCloseRate:0.11} as WalletPerformance['bands'][number];
  const multi={...sample,bands:[allBand,liveSmall]} as WalletPerformance;
  expect(rankingReasons(multi,liveSmall,history,now,false,false)).toEqual({historyComplete:true,reasons:[]});
  expect(rankingReasons(multi,allBand,history,now,false,false)).toEqual({historyComplete:true,reasons:[]});
- expect(rankingReasons({...multi,bands:[{...allBand,fastCloseRate:0.54},liveSmall]},liveSmall,history,now,false,false).reasons).toContain('FAST_EXITS');
+ expect(rankingReasons(multi,{...liveSmall,fastCloseRate:0.54},history,now,false,false).reasons).toContain('FAST_EXITS');
 });
