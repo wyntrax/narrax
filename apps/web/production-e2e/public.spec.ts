@@ -25,3 +25,20 @@ for(const path of ['/app','/id/app/radar'])test(`production workspace fallback i
 for(const [policy,copy] of [[{enabled:false,seatsLeft:null,inviteRequired:false},'Early access is not open yet.'],[{enabled:true,seatsLeft:0,inviteRequired:false},'Early access is currently full.']] as const)test(`public admission without Privy: ${copy}`,async({page})=>{
  await page.route('http://localhost:4000/v1/early-access/status',route=>route.fulfill({headers:{'access-control-allow-origin':'http://localhost:4010'},json:policy}));await page.goto('/early-access');await expect(page.getByRole('heading',{name:'Privy not configured'})).toBeVisible();await expect(page.getByText(copy)).toBeVisible();
 });
+for(const [path,heading] of [['/app/lol','404 · This page is off the radar.'],['/id/app/lol','404 · Halaman ini tidak ditemukan.']] as const)test(`unknown route renders localized 404 with valid CSP nonce: ${path}`,async({page})=>{
+ const errors:string[]=[],pageErrors:string[]=[],violations:string[]=[];
+ page.on('console',message=>{if(message.type()==='error'&&!message.text().includes('status of 404 (Not Found)'))errors.push(message.text());});
+ page.on('pageerror',error=>pageErrors.push(error.message));
+ await page.exposeFunction('recordCspViolation',(directive:string)=>violations.push(directive));
+ await page.addInitScript(()=>document.addEventListener('securitypolicyviolation',event=>{void (window as unknown as {recordCspViolation:(value:string)=>Promise<void>}).recordCspViolation(event.violatedDirective);}));
+ const response=await page.goto(path),csp=response?.headers()['content-security-policy']??'';
+ expect(response?.status()).toBe(404);
+ expect(response?.headers()['x-robots-tag']).toBe('noindex, nofollow');
+ expect(csp).toMatch(/script-src[^;]*'nonce-[^']+'/);
+ await expect(page.getByRole('heading',{level:1,name:heading})).toBeAttached();
+ await expect(page.locator('svg.conduit-numeral')).toBeVisible();
+ expect(await page.locator('script:not([src])').evaluateAll(nodes=>nodes.length>0&&nodes.every(node=>!!(node as HTMLScriptElement).nonce))).toBe(true);
+ expect(violations).toEqual([]);
+ expect(pageErrors).toEqual([]);
+ expect(errors).toEqual([]);
+});
