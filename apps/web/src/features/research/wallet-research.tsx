@@ -19,11 +19,25 @@ export function WalletResearchViews(){
   return <section><h2>{t('title')}</h2><p className="research-note">{t('help')}</p><div className="research-filters"><button type="button" className="research-control" aria-expanded={view==='flows'} onClick={()=>setView(view==='flows'?null:'flows')}>{t('flows')}</button><button type="button" className="research-control" aria-expanded={view==='emerging'} onClick={()=>setView(view==='emerging'?null:'emerging')}>{t('emerging')}</button></div>{view==='flows'&&<WalletFlows/>}{view==='emerging'&&<EmergingWallets/>}</section>;
 }
 const MIN_FLOW_LIQUIDITY_USD = 20_000; // Matches WALLET_FLOW_LIMITS.minLiquidityUsd.
+const MAX_FLOW_TOP10_PCT = 80; // Matches WALLET_FLOW_LIMITS.maxTop10Pct.
 
 export function WalletFlows(){
- const t=useTranslations('workspace.smartResearch'),f=useFormat(),paging=usePagination();
- const query=useResearchQuery(pagePath('smart-money/flows',{},paging.cursor),FlowPageSchema,true,30000);
- return <>{query.isError?<ResourceError error={query.error} retry={()=>void query.refetch()}/>:query.isPending?<Loading/>:!query.data.items.length?<Empty body={t('noFlows')}/>:<><p>{t('outcomeNote')}</p><DataTable caption={t('flows')} headers={[t('time'),t('token'),t('direction'),t('entities'),t('netSol'),t('evidence'),t('outcomes')]} rows={query.data.items.map(s=>({key:s.id,cells:[<span key="at">{f.date(s.createdAt)}{s.stale&&<small>{t('stale')}</small>}</span>,<Link key="token" href={`/app/tokens/${encodeURIComponent(s.token.mint)}`}><TokenIdentity {...s.token}/></Link>,t(s.side),f.number(s.independentEntities,0),f.number(s.netFlowSol,4),<details key="evidence"><summary>{t('transactions',{count:s.evidence.trades.length})}</summary><ul>{s.evidence.trades.map(trade=><li key={trade.id}><Link href={`/app/smart-money/${encodeURIComponent(trade.wallet)}`}>{trade.wallet.slice(0,6)}…</Link> · {trade.side} · {f.number(trade.amountSol,4)} SOL · {f.date(trade.at)} {(/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(trade.signature))&&<a href={`https://solscan.io/tx/${encodeURIComponent(trade.signature)}`} target="_blank" rel="noopener noreferrer">Solscan ↗</a>}</li>)}</ul></details>,<ul key="outcomes">{s.measurements.map(m=><li key={m.horizonHours}>{m.horizonHours}h: {m.status==='MEASURED'?`${f.number(m.returnPct,2)}%`:t(m.status)}</li>)}{(s.currentLiquidityUsd!=null&&Number(s.currentLiquidityUsd)<MIN_FLOW_LIQUIDITY_USD)&&<li className="research-notice">{t('illiquid')}</li>}</ul>]}))}/></>}
+ const t=useTranslations('workspace.smartResearch'),f=useFormat(),paging=usePagination(),[includeFiltered,setIncludeFiltered]=useState(false);
+ const query=useResearchQuery(pagePath('smart-money/flows',includeFiltered?{includeFiltered:'true'}:{},paging.cursor),FlowPageSchema,true,30000);
+ const isLowQuality=(s:NonNullable<typeof query.data>['items'][number])=>{
+  if(s.currentLiquidityUsd!=null&&Number(s.currentLiquidityUsd)<MIN_FLOW_LIQUIDITY_USD)return true;
+  if(s.entryTop10Pct!=null&&s.entryTop10Pct>MAX_FLOW_TOP10_PCT)return true;
+  const settled=s.measurements.filter(m=>m.status!=='PENDING');
+  return settled.length>0&&settled.every(m=>m.status==='UNKNOWN'&&m.reason==='THIN_LIQUIDITY');
+ };
+ const rawItems=query.data?.items??[];
+ const items=includeFiltered?rawItems:rawItems.filter(s=>!isLowQuality(s));
+ const hiddenCount=query.data?.filteredCount??rawItems.filter(isLowQuality).length;
+ return <>{query.isError?<ResourceError error={query.error} retry={()=>void query.refetch()}/>:query.isPending?<Loading/>:<>
+  <div className="research-filters"><p className="research-note">{t('qualityNote')}</p>{(hiddenCount>0||includeFiltered)&&<button type="button" className="research-control" aria-pressed={includeFiltered} onClick={()=>setIncludeFiltered(!includeFiltered)}>{includeFiltered?t('hideFiltered'):t('showFiltered')}</button>}</div>
+  {!includeFiltered&&hiddenCount>0&&<p className="research-note">{t('filteredHidden',{count:hiddenCount})}</p>}
+  {!items.length?<Empty body={t('noFlows')}/>:<><p>{t('outcomeNote')}</p><DataTable caption={t('flows')} headers={[t('time'),t('token'),t('direction'),t('entities'),t('netSol'),t('evidence'),t('outcomes')]} rows={items.map(s=>({key:s.id,cells:[<span key="at">{f.date(s.createdAt)}{s.stale&&<small>{t('stale')}</small>}</span>,<Link key="token" href={`/app/tokens/${encodeURIComponent(s.token.mint)}`}><TokenIdentity {...s.token}/></Link>,t(s.side),f.number(s.independentEntities,0),f.number(s.netFlowSol,4),<details key="evidence"><summary>{t('transactions',{count:s.evidence.trades.length})}</summary><ul>{s.evidence.trades.map(trade=><li key={trade.id}><Link href={`/app/smart-money/${encodeURIComponent(trade.wallet)}`}>{trade.wallet.slice(0,6)}…</Link> · {trade.side} · {f.number(trade.amountSol,4)} SOL · {f.date(trade.at)} {(/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(trade.signature))&&<a href={`https://solscan.io/tx/${encodeURIComponent(trade.signature)}`} target="_blank" rel="noopener noreferrer">Solscan ↗</a>}</li>)}</ul></details>,<ul key="outcomes">{s.measurements.map(m=><li key={m.horizonHours}>{m.horizonHours}h: {m.status==='MEASURED'?`${f.number(m.returnPct,2)}%`:t(m.status)}</li>)}{(s.currentLiquidityUsd!=null&&Number(s.currentLiquidityUsd)<MIN_FLOW_LIQUIDITY_USD)&&<li className="research-notice">{t('illiquid')}</li>}{(s.entryTop10Pct!=null&&s.entryTop10Pct>MAX_FLOW_TOP10_PCT)&&<li className="research-notice">{t('concentrated')}</li>}</ul>]}))}/></>}
+ </>}
  <Pager page={paging.page} previous={paging.previous} next={()=>paging.next(query.data?.nextCursor??null)} canNext={!query.isFetching&&!query.isError&&!!query.data?.nextCursor}/></>;
 }
 export function EmergingWallets(){

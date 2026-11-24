@@ -11,13 +11,18 @@ export function rankingReasons(performance: WalletPerformance, band: WalletPerfo
   if (performance.capped) reasons.push('TRADE_LIMIT');
   const unmatchedLimit = scope.closedPositions >= 100 ? Math.floor(scope.closedPositions * 0.015) : 0;
   if (performance.invalidTrades || performance.unmatchedSells > unmatchedLimit) reasons.push('INCOMPLETE_COST_BASIS');
-  if (band.closedPositions<20 || band.closedTokens<5 || band.observedDays<7) reasons.push('SMALL_SAMPLE');
+  const minBandCloses = scope !== band && scope.closedPositions >= 20 && scope.closedTokens >= 5 && scope.observedDays >= 7 ? 5 : 20;
+  if (scope.closedPositions < 20 || band.closedPositions < minBandCloses || band.closedTokens < 5 || band.observedDays < 7) reasons.push('SMALL_SAMPLE');
   if (band.medianClosedPositionSol == null) reasons.push('POSITION_SIZE_UNKNOWN');
   else if (new Prisma.Decimal(band.medianClosedPositionSol).lt(minMedianPositionSol)) reasons.push('SMALL_POSITIONS');
   if (band.realisedPnlSol===null || new Prisma.Decimal(band.realisedPnlSol).lte(0) || (band.medianRoi??0)<=0) reasons.push('POSITIVE_RESULTS_REQUIRED');
   if ((band.winRateLowerBound??0)<0.5) reasons.push('LOW_WIN_CONFIDENCE');
-  if (band.band==='UNKNOWN' || band.band==='ALL' || band.band==='OVER_1M') reasons.push('SMALL_CAP_UNPROVEN');
-  if ((band.fastCloseRate??0)>0.5) reasons.push('FAST_EXITS');
+  const smallCap = performance.bands?.find((b) => b.band === 'SMALL_CAP');
+  const smallCapProven = !!smallCap && smallCap.closedPositions >= 5 && smallCap.closedTokens >= 5 && smallCap.observedDays >= 7 &&
+    (smallCap.winRateLowerBound ?? 0) >= 0.5 && smallCap.realisedPnlSol !== null &&
+    new Prisma.Decimal(smallCap.realisedPnlSol).gt(0) && (smallCap.medianRoi ?? 0) > 0 && (smallCap.fastCloseRate ?? 0) <= 0.5;
+  if (band.band==='UNKNOWN' || band.band==='OVER_1M' || (band.band==='ALL' && !smallCapProven)) reasons.push('SMALL_CAP_UNPROVEN');
+  if ((band.fastCloseRate??0)>0.5 || (scope.fastCloseRate??0)>0.5) reasons.push('FAST_EXITS');
   if (linked) reasons.push('LINKED_WALLETS');
   if (developer) reasons.push('KNOWN_DEPLOYER');
   return { historyComplete, reasons };

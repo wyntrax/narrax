@@ -93,3 +93,27 @@ it('prefers an emerging candidate that still holds an observed early buy, even w
  expect(await intakeEmergingWallets(db,now)).toMatchObject({added:2});
  expect(createMany.mock.calls[0]?.[0].data.map(w=>w.address)).toEqual([addresses[1],addresses[0]]);
 });
+it('deprioritizes confirmed dumpers below unprobed candidates and evicts stale fast-exit provisional wallets',async()=>{
+ const createMany=vi.fn(async(args:{data:{address:string}[]})=>({count:args.data.length}));
+ const updateMany=vi.fn(async(args:{where:{id:{in:string[]}}})=>({count:args.where.id.in.length}));
+ const upsert=vi.fn(async()=>({}));
+ let findCalls=0;
+ const tx={
+  $executeRaw:vi.fn(async()=>0),
+  systemSetting:{findUnique:async()=>({value:{checkedAt:now.toISOString(),items:[
+   {address:addresses[0],scannedTokens:6,spend:{matchedTokens:3,medianMatchedQuoteSol:2.5},hold:{checkedAt:now.toISOString(),tokenId:'t',mint:'m',stillHolding:false,heldMs:null}},
+   {address:addresses[1],scannedTokens:3,spend:{matchedTokens:3,medianMatchedQuoteSol:0.5}},
+  ]}}),upsert},
+  trackedWallet:{
+   count:async()=>200,
+   findMany:async()=>{findCalls++;return findCalls===1?[]:[{id:'stale-fast-exit',profile:{score:65,medianHoldSeconds:45}}];},
+   updateMany,
+   createMany,
+  },
+  walletCandidate:{findMany:async()=>[]},
+ };
+ const db={$transaction:async(fn:(tx:unknown)=>unknown)=>fn(tx)} as unknown as PrismaClient;
+ expect(await intakeEmergingWallets(db,now)).toMatchObject({evicted:1,capacity:1,added:1});
+ expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['stale-fast-exit']}},data:{active:false}});
+ expect(createMany.mock.calls[0]?.[0].data.map(w=>w.address)).toEqual([addresses[1]]);
+});

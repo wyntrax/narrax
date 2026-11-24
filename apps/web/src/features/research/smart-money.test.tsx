@@ -96,11 +96,15 @@ it('opens only rankings initially and supports keyboard tab navigation without f
  await userEvent.click(screen.getByRole('tab',{name:'Emerging wallets'}));
  expect(fixture.paths).toContain('smart-money/emerging');
 });
-it('warns when a historical flow token is below the liquidity gate',async()=>{
- fixture.flowItem={id:'flow',side:'BUY',createdAt:at,stale:false,walletCount:2,independentEntities:2,netFlowSol:1,entryPriceUsd:1,entryAt:at,currentLiquidityUsd:'0',currentMarketAt:at,token:{mint:'mint',symbol:'TURTLE',name:'Token',imageUrl:null},evidence:{trades:[]},measurements:[{horizonHours:1,status:'UNKNOWN',dueAt:at,returnPct:null,priceAt:null,reason:'THIN_LIQUIDITY'}]};
+it('hides illiquid or high-concentration flows by default and warns when filtered history is revealed',async()=>{
+ fixture.flowItem={id:'flow',side:'BUY',createdAt:at,stale:false,walletCount:2,independentEntities:2,netFlowSol:1,entryPriceUsd:1,entryAt:at,entryTop10Pct:94.5,currentLiquidityUsd:'0',currentMarketAt:at,token:{mint:'mint',symbol:'TURTLE',name:'Token',imageUrl:null},evidence:{trades:[]},measurements:[{horizonHours:1,status:'UNKNOWN',dueAt:at,returnPct:null,priceAt:null,reason:'THIN_LIQUIDITY'}]};
  view(<SmartMoneyPage/>);
  await userEvent.click(screen.getByRole('tab',{name:'Token flows'}));
+ expect(await screen.findByText('1 illiquid or high-concentration historical flows hidden.')).toBeVisible();
+ expect(screen.queryByText('TURTLE')).toBeNull();
+ await userEvent.click(screen.getByRole('button',{name:messages.smartResearch.showFiltered}));
  expect(await screen.findByText(messages.smartResearch.illiquid)).toBeVisible();
+ expect(screen.getByText(messages.smartResearch.concentrated)).toBeVisible();
 });
 
 it('renders real recorded-profile values on the detail page and keeps a missing pattern unknown',()=>{

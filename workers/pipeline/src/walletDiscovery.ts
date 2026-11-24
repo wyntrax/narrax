@@ -266,11 +266,12 @@ export async function discoverCandidates(db: PrismaClient, now: Date = new Date(
     const hold = holds.get(item.address);
     return hold ? { ...item, hold } : item;
   });
-  // Keep the bounded snapshot aligned with intake: holders first, then known spend and repeat
-  // count. Otherwise the spend-prioritised hold evidence can fall outside the top 50 by repeats.
+  // Keep the bounded snapshot aligned with intake: holders first, then unprobed candidates,
+  // then confirmed dumpers; break ties by known spend and repeat count.
+  const holdTier = (item: typeof probed[number]) => item.hold?.stillHolding ? 2 : item.hold?.stillHolding === false ? 0 : 1;
   const holdScore = (item: typeof probed[number]) => item.hold?.stillHolding ? (item.hold.heldMs ?? 0) : -1;
   const snapshotItems = [...probed].sort((a,b) =>
-    Number(holdScore(b) >= 0) - Number(holdScore(a) >= 0) ||
+    holdTier(b) - holdTier(a) ||
     holdScore(b) - holdScore(a) ||
     spendScore(b) - spendScore(a) ||
     b.scannedTokens - a.scannedTokens);

@@ -1,17 +1,18 @@
 import { createHash } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@narra/database';
+import { parseFlowSuitability } from '@narra/shared';
 import { qualifyWallet } from '@narra/smart-money';
 import { walletMarketEvidence } from './walletResearchEvidence';
 
 /** Unvalidated research thresholds. Separate from the existing trading consensus and Early Radar. */
 export const WALLET_FLOW_LIMITS = { windowMs: 60 * 60_000, newestTradeMs: 15 * 60_000, minEntities: 2,
-  minEntityNetSol: 0.5, minLiquidityUsd: 20_000, minHolders: 50, maxHolderAgeMs: 60 * 60_000,
+  minEntityNetSol: 0.5, minLiquidityUsd: 20_000, minHolders: 50, maxTop10Pct: 80, maxHolderAgeMs: 60 * 60_000,
   maxRiskAgeMs: 60 * 60_000, maxTokens: 100, maxTrades: 10_000, pendingMs: 60 * 60_000, horizons: [1,4,24] } as const;
 
 /** Why a candidate token produced no published flow. Counted in `wallet.research.flowHealth`. */
 export const WALLET_FLOW_WITHHELD_REASONS = ['TOKEN_UNAVAILABLE','NO_NEW_TRADES','TOO_MANY_TRADES',
   'NO_QUALIFIED_WALLETS','TRADE_STALE','FLOW_BELOW_MINIMUM','FEW_INDEPENDENT_ENTITIES',
-  'NO_MARKET_EVIDENCE','THIN_LIQUIDITY','NO_HOLDER_OBSERVATION','FEW_HOLDERS','NO_RISK_OBSERVATION',
+  'NO_MARKET_EVIDENCE','THIN_LIQUIDITY','NO_HOLDER_OBSERVATION','FEW_HOLDERS','HIGH_CONCENTRATION','NO_RISK_OBSERVATION',
   'RISK_BLOCKED','DUPLICATE_SIGNAL'] as const;
 export type WalletFlowWithheldReason = typeof WALLET_FLOW_WITHHELD_REASONS[number];
 
@@ -22,13 +23,13 @@ const PENDING_EVIDENCE_REASONS = new Set<WalletFlowWithheldReason>([
 export interface FlowGateFacts {
   tokenAvailable: boolean; trades: number; tooManyTrades: boolean; qualifiedTrades: number;
   newestQualifiedTradeAgeMs: number | null; netSol: number; supportingEntities: number;
-  liquidityUsd: number | null; holders: number | null; riskFlags: readonly string[] | null;
+  liquidityUsd: number | null; holders: number | null; top10Pct?: number | null; riskFlags: readonly string[] | null;
 }
 
 const BLOCKING_RISK_FLAGS = new Set(['HONEYPOT','MINT_AUTHORITY_ACTIVE','FREEZE_AUTHORITY_ACTIVE']);
 
 /** Wallet-flow gates only. Pending retries use this without the newest-trade age gate. */
-export function flowGateReason(f: Omit<FlowGateFacts,'liquidityUsd'|'holders'|'riskFlags'>): WalletFlowWithheldReason | null {
+export function flowGateReason(f: Omit<FlowGateFacts,'liquidityUsd'|'holders'|'top10Pct'|'riskFlags'>): WalletFlowWithheldReason | null {
   const L = WALLET_FLOW_LIMITS;
   if (!f.tokenAvailable) return 'TOKEN_UNAVAILABLE';
   if (!f.trades) return 'NO_NEW_TRADES';
@@ -49,6 +50,7 @@ export function flowWithholdReason(f: FlowGateFacts): WalletFlowWithheldReason |
   if (f.liquidityUsd < L.minLiquidityUsd) return 'THIN_LIQUIDITY';
   if (f.holders == null) return 'NO_HOLDER_OBSERVATION';
   if (f.holders < L.minHolders) return 'FEW_HOLDERS';
+  if (f.top10Pct != null && f.top10Pct > L.maxTop10Pct) return 'HIGH_CONCENTRATION';
   if (f.riskFlags == null) return 'NO_RISK_OBSERVATION';
   if (f.riskFlags.some(flag => BLOCKING_RISK_FLAGS.has(flag))) return 'RISK_BLOCKED';
   return null;
@@ -74,8 +76,17 @@ type TradeWithWallet = Prisma.WalletTradeGetPayload<{
 
 async function evaluateFlowTrades(db: Pick<Prisma.TransactionClient, 'systemSetting'>, trades: TradeWithWallet[], now: Date) {
   const wallets = [...new Map(trades.map(t => [t.wallet.id, t.wallet])).values()];
-  const qualifications = await walletQualifications(db, wallets, now);
-  const qualified = trades.filter(t => qualifications.get(t.walletId)?.eligible);
+  const [qualifications, perfRows] = await Promise.all([
+    walletQualifications(db, wallets, now),
+    db.systemSetting.findMany({ where: { key: { in: wallets.flatMap(w => [`wallet.performance.${w.id}`, `wallet.history.${w.id}`]) } } }),
+  ]);
+  const byKey = new Map(perfRows.map(s => [s.key, s.value]));
+  const flowEligible = new Set(wallets.filter(w => {
+    if (!qualifications.get(w.id)?.eligible) return false;
+    const perf = byKey.get(`wallet.performance.${w.id}`);
+    return perf === undefined || parseFlowSuitability(perf, byKey.get(`wallet.history.${w.id}`), now).suitable;
+  }).map(w => w.id));
+  const qualified = trades.filter(t => flowEligible.has(t.walletId));
   const entities = new Map<string, number>();
   for (const t of qualified) {
     const key = entityKeyForWallet(t.wallet);
@@ -166,7 +177,7 @@ async function processPendingFlows(db: PrismaClient, clock: () => Date) {
       const evidence = await flowEvidence(tx, row.tokenId, attemptAt);
       const reason = flowWithholdReason({ tokenAvailable: true, trades: trades.length, tooManyTrades: trades.length > L.maxTrades,
         qualifiedTrades: facts.qualified.length, newestQualifiedTradeAgeMs: 0, netSol: facts.net, supportingEntities: facts.supporting,
-        liquidityUsd: evidence[0]?.liquidityUsd ?? null, holders: evidence[1]?.holders ?? null, riskFlags: evidence[2]?.flags ?? null });
+        liquidityUsd: evidence[0]?.liquidityUsd ?? null, holders: evidence[1]?.holders ?? null, top10Pct: evidence[1]?.top10Pct ?? null, riskFlags: evidence[2]?.flags ?? null });
       if (reason) {
         if (PENDING_EVIDENCE_REASONS.has(reason)) {
           const signatures = facts.qualified.map(t => t.signature).sort();
@@ -236,7 +247,7 @@ export async function publishWalletResearch(db: PrismaClient, clock: () => Date 
       const reason = flowWithholdReason({ tokenAvailable: true, trades: trades.length, tooManyTrades: trades.length > L.maxTrades,
         qualifiedTrades: facts.qualified.length, newestQualifiedTradeAgeMs: facts.qualified.at(-1) ? +now - +facts.qualified.at(-1)!.at : null,
         netSol: facts.net, supportingEntities: facts.supporting,
-        liquidityUsd: evidence[0]?.liquidityUsd ?? null, holders: evidence[1]?.holders ?? null, riskFlags: evidence[2]?.flags ?? null });
+        liquidityUsd: evidence[0]?.liquidityUsd ?? null, holders: evidence[1]?.holders ?? null, top10Pct: evidence[1]?.top10Pct ?? null, riskFlags: evidence[2]?.flags ?? null });
       if (reason) {
         if (PENDING_EVIDENCE_REASONS.has(reason)) {
           await rememberPending(tx, tokenId, facts, now, reason);

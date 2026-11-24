@@ -25,6 +25,7 @@ describe('flowWithholdReason', () => {
     [{ liquidityUsd: WALLET_FLOW_LIMITS.minLiquidityUsd - 1 }, 'THIN_LIQUIDITY'],
     [{ holders: null }, 'NO_HOLDER_OBSERVATION'],
     [{ holders: WALLET_FLOW_LIMITS.minHolders - 1 }, 'FEW_HOLDERS'],
+    [{ top10Pct: WALLET_FLOW_LIMITS.maxTop10Pct + 0.1 }, 'HIGH_CONCENTRATION'],
     [{ riskFlags: null }, 'NO_RISK_OBSERVATION'],
     [{ riskFlags: ['HONEYPOT'] }, 'RISK_BLOCKED'],
     [{ riskFlags: ['MINT_AUTHORITY_ACTIVE'] }, 'RISK_BLOCKED'],
