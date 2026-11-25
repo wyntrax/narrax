@@ -129,8 +129,17 @@ describe('detectTimingClusters', () => {
     const r = detectTimingClusters([...co('X', 5, 0), ...co('Y', 5, 20), ...co('Z', 3, 40)]);
     expect(r.edges.find((e) => e.a === 'X' && e.b === 'Y')).toMatchObject({ sharedTokens: 5, confidence: 'MEDIUM' });
     expect(r.edges.find((e) => e.a === 'X' && e.b === 'Z')?.confidence).toBe('LOW');
-    expect(r.clusters).toEqual([{ wallets: ['X', 'Y', 'Z'], confidence: 'LOW' }]); // weakest link wins
+    expect(r.clusters).toEqual([{ wallets: ['X', 'Y'], confidence: 'MEDIUM' }]);
     expect(r.edges.some((e) => e.confidence === ('HIGH' as never))).toBe(false);
+  });
+  it('does not chain unrelated wallets through a single weak link', () => {
+    const r = detectTimingClusters([...co('A', 3, 0), ...co('B', 3, 20), ...co('C', 3, 40)]);
+    expect(r.edges.every((e) => e.confidence === 'LOW')).toBe(true);
+    expect(r.clusters).toEqual([]);
+  });
+  it('still chains repeated MEDIUM co-entry across more than two wallets', () => {
+    const r = detectTimingClusters([...co('X', 5, 0), ...co('Y', 5, 20), ...co('Z', 5, 40)]);
+    expect(r.clusters).toEqual([{ wallets: ['X', 'Y', 'Z'], confidence: 'MEDIUM' }]);
   });
   it('does not link wallets with too few shared tokens or entries far apart', () => {
     expect(detectTimingClusters([...co('X', 2, 0), ...co('Y', 2, 20)]).clusters).toEqual([]);
