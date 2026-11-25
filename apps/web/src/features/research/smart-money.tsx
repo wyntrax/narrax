@@ -66,18 +66,43 @@ function WalletList({search,source,sort}:{search:string;source:string;sort:Sort}
   {history&&<><p className="research-notice">{t('trench.walletEvidence')}</p><DataTable caption={t('trench.historicalModels')} headers={[t('smWallet'),t('score'),t('smStyle'),t('smWinRate'),t('smPnl'),t('smTrades'),t('smAvgRoi')]} rows={items.map(w=>({key:w.address,cells:[<WalletName key="wallet" address={w.address} label={w.label}/>,f.number(w.score),w.style??t('unknown'),f.percent(w.winRate),f.number(w.pnl30dSol,2),f.number(w.closedTrades,0),f.percent(w.avgRoi)]}))}/></>}
   </>}<Pager page={paging.page} previous={paging.previous} next={()=>paging.next(query.data?.nextCursor??null)} canNext={!query.isFetching&&!query.isError&&!!query.data?.nextCursor}/></>;
 }
+function EquityCurve({points}:{points:{at:string;cumulativePnlSol:number}[]}){
+ const id=useLocale()==='id',f=useFormat();
+ if(points.length<2)return null;
+ const vals=points.map(p=>p.cumulativePnlSol),min=Math.min(0,...vals),max=Math.max(0,...vals),span=max-min||1;
+ const w=520,h=120,pad=10;
+ const x=(i:number)=>pad+(i/(points.length-1))*(w-pad*2);
+ const y=(v:number)=>h-pad-((v-min)/span)*(h-pad*2);
+ const d=points.map((p,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(p.cumulativePnlSol).toFixed(1)}`).join(' ');
+ const last=points.at(-1)!.cumulativePnlSol;
+ return <div>
+  <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} role="img" aria-label={id?'Kurva ekuitas terealisasi 30 hari':'30-day realised equity curve'} style={{display:'block',maxWidth:640}}>
+   <line x1={pad} x2={w-pad} y1={y(0)} y2={y(0)} stroke="currentColor" strokeOpacity="0.25" strokeDasharray="3 3"/>
+   <path d={d} fill="none" stroke={last>=0?'#22c55e':'#ef4444'} strokeWidth="2"/>
+  </svg>
+  <p className="research-note">{id?'P&L terealisasi kumulatif (30h)':'Cumulative realised P&L (30d)'}: <strong>{f.number(last,4)} SOL</strong> · {id?'Rentang':'Range'}: {f.number(min,4)} → {f.number(max,4)} SOL ({f.date(points[0]!.at)} – {f.date(points.at(-1)!.at)})</p>
+ </div>;
+}
 export function SmartWalletPage({address}:{address:string}){
- const t=useTranslations('workspace'),f=useFormat(),hold=useHold(),[side,setSide]=useState(''),query=useResearchQuery(`wallets/${encodeURIComponent(address)}`,WalletDetailSchema,true,60000);
+ const id=useLocale()==='id',t=useTranslations('workspace'),f=useFormat(),hold=useHold(),[side,setSide]=useState(''),query=useResearchQuery(`wallets/${encodeURIComponent(address)}`,WalletDetailSchema,true,60000);
  const back=<Link className="research-back" href="/app/smart-money">← {t('smartMoney')}</Link>;
  if(query.isError)return <>{back}<ResourceError error={query.error} retry={()=>void query.refetch()}/></>;
  if(query.isPending)return <>{back}<Loading/></>;
   const w=query.data;
    const openPositions=w.openPositions?[...w.openPositions.positions].sort((a,b)=>Number(b.remainingCostSol)-Number(a.remainingCostSol)).slice(0,10):[];
    const totalOpenPositions=w.openPositions?.totalPositions??openPositions.length;
+   const automation=w.intelligence?.automation;
    const profileNote=<div className="research-notice" role="status">{!w.profile&&<><strong>{t(w.intelligence?'enhance.insufficientHistory':'enhance.awaitingProfile')}</strong><p>{t('enhance.profileRequirement')}</p>{w.intelligence&&<p>{t('enhance.profileProgress',{closed:w.intelligence.closedTrades,required:w.intelligence.requiredClosedTrades,observed:w.intelligence.observedTrades,days:w.intelligence.windowDays,at:f.date(w.intelligence.checkedAt)})}</p>}</>}{w.intelligence?.observedBuys!=null&&<p>{t('enhance.tradeSample',{buys:w.intelligence.observedBuys,sells:w.intelligence.observedSells??0,unmatched:w.intelligence.unmatchedSells??0})}</p>}{w.history&&<p>{t('enhance.historyRepair',{scanned:w.history.scanned,accepted:w.history.accepted,at:f.date(w.history.checkedAt)})}{w.history.capped&&` ${t('enhance.historyCapped')}`}</p>}<button className="research-control" disabled={query.isFetching} onClick={()=>void query.refetch()}>{t('refresh')}</button></div>;
    return <>{back}<PageHeading title={w.label??short(w.address)} body={t('enhance.walletDetailBody')} actions={validAddress(w.address)?<a className="research-control" href={`https://solscan.io/account/${encodeURIComponent(w.address)}`} target="_blank" rel="noopener noreferrer">Solscan ↗</a>:<small>{t('enhance.invalidAddress')}</small>}/><p className="token-address"><code>{w.address}</code></p><Facts items={[{label:t('trench.source'),value:w.source},{label:t('enhance.trackedSince'),value:f.date(w.trackedSince)},{label:t('enhance.profileStatus'),value:w.profile?t('enhance.profileRecorded'):t(w.intelligence?'enhance.insufficientHistory':'enhance.awaitingProfile')}]}/>
-    <QualificationBadge value={w.qualification}/>{profileNote}
+    <QualificationBadge value={w.qualification}/>{automation?.automated&&<div className="research-notice" role="status"><strong>{id?'Pola swap otomatis / bot terdeteksi':'Automated / bot-like swap pattern detected'}</strong><p>{id?`${f.number(automation.tradesPerDay,1)} swap/hari · ${automation.openPositionCount} posisi terbuka · Sinyal: ${automation.reasons.join(', ')}`:`${f.number(automation.tradesPerDay,1)} swaps/day · ${automation.openPositionCount} open positions · Signals: ${automation.reasons.join(', ')}`}</p></div>}{profileNote}
    {w.profile&&<Section title={t('smRecordedProfile')} action={<span className="sm-badge">{t('trench.unverified')}</span>}><p className="research-note">{t('trench.walletEvidence')}</p><Metrics items={[{label:t('score'),value:f.number(w.profile.score)},{label:t('enhance.leaderScore'),value:f.number(w.profile.leaderScore)},{label:t('smStyle'),value:w.profile.style},{label:t('smMedianHold'),value:hold(w.profile.medianHoldSeconds)}]}/><Facts items={[{label:t('smBestPattern'),value:w.profile.bestPattern??t('unknown')},{label:t('smWeakPattern'),value:w.profile.weakPattern??t('unknown')}]}/><Stamp at={w.profile.updatedAt}/></Section>}
+   {w.closedSummary&&(w.closedSummary.equityCurve.length>=2||w.closedSummary.topWinners.length>0||w.closedSummary.topLosers.length>0)&&<Section title={id?'Kurva P&L & posisi tertutup terbaik/terburuk (30h)':'30-day equity curve & top closed tokens'}>
+    <EquityCurve points={w.closedSummary.equityCurve}/>
+    <div className="research-columns">
+     {w.closedSummary.topWinners.length>0&&<Section title={id?'Keuntungan terbesar':'Top winners'}><DataTable caption={id?'Keuntungan terbesar':'Top winners'} headers={[t('token'),'P&L · SOL','ROI',t('smMedianHold')]} rows={w.closedSummary.topWinners.map(p=>({key:`${p.tokenId}:${p.closedAt}`,cells:[p.token?<Link key="t" href={`/app/tokens/${encodeURIComponent(p.token.mint)}`}><TokenIdentity symbol={p.token.symbol==='UNKNOWN'?short(p.token.mint):p.token.symbol} name={p.token.name} imageUrl={p.token.imageUrl}/></Link>:<code key="t">{short(p.tokenId)}</code>,<TradeAmount key="pnl" value={p.pnlSol}/>,f.percent(p.roi),hold(p.holdSeconds)]}))}/></Section>}
+     {w.closedSummary.topLosers.length>0&&<Section title={id?'Kerugian terbesar':'Top losers'}><DataTable caption={id?'Kerugian terbesar':'Top losers'} headers={[t('token'),'P&L · SOL','ROI',t('smMedianHold')]} rows={w.closedSummary.topLosers.map(p=>({key:`${p.tokenId}:${p.closedAt}`,cells:[p.token?<Link key="t" href={`/app/tokens/${encodeURIComponent(p.token.mint)}`}><TokenIdentity symbol={p.token.symbol==='UNKNOWN'?short(p.token.mint):p.token.symbol} name={p.token.name} imageUrl={p.token.imageUrl}/></Link>:<code key="t">{short(p.tokenId)}</code>,<TradeAmount key="pnl" value={p.pnlSol}/>,f.percent(p.roi),hold(p.holdSeconds)]}))}/></Section>}
+    </div>
+   </Section>}
    <Section title={t('enhance.openPositions')}>
     <p className="research-note">{t('enhance.openPositionsScope')}</p>
     {w.openPositions&&<p className="research-note">{t('enhance.openPositionsTop')}</p>}
@@ -86,11 +111,11 @@ export function SmartWalletPage({address}:{address:string}){
     {w.openPositions&&w.openPositions.positions.some(p=>p.token&&(p.token.symbol==='UNKNOWN'||p.token.name==='Unknown'))&&<p className="research-note">{t('enhance.openPositionsUnresolved')}</p>}
     {w.openPositions==null?<p>{t('enhance.openPositionsUnavailable')}</p>:!openPositions.length?<Empty body={t('enhance.noOpenPositions')}/>:<DataTable caption={t('enhance.openPositions')} headers={[t('enhance.openToken'),t('enhance.openQuantity'),t('enhance.openRemainingCost'),t('enhance.openOpened'),t('enhance.openLastSwap'),t('enhance.openPrice')]} rows={openPositions.map(position=>{const unresolved=!!position.token&&(position.token.symbol==='UNKNOWN'||position.token.name==='Unknown');return {key:position.entryTradeId,cells:[
       position.token?<Link key="token" href={`/app/tokens/${encodeURIComponent(position.token.mint)}`}><TokenIdentity symbol={unresolved?short(position.token.mint):position.token.symbol} name={unresolved?t('enhance.unresolvedToken'):position.token.name} imageUrl={position.token.imageUrl}/>{position.partiallySold&&<small>{t('enhance.partiallySold')}</small>}</Link>:<span key="token"><code>{short(position.tokenId)}</code>{position.partiallySold&&<small>{t('enhance.partiallySold')}</small>}</span>,
-      <span key="quantity">{position.quantity}</span>,
+      <span key="quantity">{Number.isFinite(Number(position.quantity))?f.number(Number(position.quantity),2):position.quantity}</span>,
       <TradeAmount key="cost" value={Number(position.remainingCostSol)}/>,
       f.date(position.openedAt),
       f.date(position.lastTradeAt),
-      position.priceUsd==null?t('unknown'):<span key="price">{f.usd(position.priceUsd)}<small>{f.date(position.priceAt)}{position.priceStale&&` · ${t('lastObserved')}`}</small></span>,
+      position.priceUsd==null?t('unknown'):<span key="price">{f.usd(position.priceUsd)}{Number.isFinite(Number(position.quantity))&&<small>{`≈ ${f.usd(Number(position.quantity)*position.priceUsd)}`}</small>}<small>{f.date(position.priceAt)}{position.priceStale&&` · ${t('lastObserved')}`}</small></span>,
     ]}})}/>}
    </Section>
    <Section title={t('enhance.transactions')}><p className="research-note">{t('enhance.walletEvidence')}</p><div className="research-filters"><label>{t('enhance.tradeSide')}<select value={side} onChange={e=>setSide(e.target.value)}><option value="">{t('alAll')}</option><option value="BUY">{t('enhance.buy')}</option><option value="SELL">{t('enhance.sell')}</option></select></label></div><WalletTrades key={`${address}:${side}`} address={address} side={side}/></Section>

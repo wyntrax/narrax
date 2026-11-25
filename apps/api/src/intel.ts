@@ -5,7 +5,7 @@ import type { PrismaClient } from '@narra/database';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { IdCursor, Limit, likeEscape } from './paging';
 import { canReadFeature, requireFeature } from './entitlements/access';
-import { computeWalletOpenPositions, type PerformanceTrade } from '@narra/worker-pipeline';
+import { computeWalletClosedSummary, computeWalletOpenPositions, type PerformanceTrade } from '@narra/worker-pipeline';
 
 const n = (v: { toString(): string } | null | undefined) => (v == null ? null : Number(v.toString()));
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
@@ -77,19 +77,34 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     const f = w.funding;
     const images=await marketTokenImages(db,trades.map(t=>({id:t.tokenId,mint:t.token.mint})));
     const observedAt = now();
-    const open = computeWalletOpenPositions(positionTrades.slice(0, 10_000) as PerformanceTrade[], observedAt, positionTrades.length > 10_000);
+    const slicedTrades = positionTrades.slice(0, 10_000) as PerformanceTrade[];
+    const open = computeWalletOpenPositions(slicedTrades, observedAt, positionTrades.length > 10_000);
+    const closedRaw = computeWalletClosedSummary(slicedTrades, observedAt);
     // The detail page shows only the largest observed inventory lots. Remaining swap cost is the
     // recorded SOL exposure; missing/unsupported swaps are already excluded by the accounting.
     const rankedOpenPositions = [...open.positions]
       .sort((a, b) => Number(b.remainingCostSol) - Number(a.remainingCostSol) || a.entryTradeId.localeCompare(b.entryTradeId))
       .slice(0, WALLET_DETAIL.openPositionsDisplay);
-    const openTokenIds = [...new Set(rankedOpenPositions.map((p) => p.tokenId))];
+    const openTokenIds = [...new Set([
+      ...rankedOpenPositions.map((p) => p.tokenId),
+      ...closedRaw.topWinners.map((p) => p.tokenId),
+      ...closedRaw.topLosers.map((p) => p.tokenId),
+    ])];
     const openTokenRows = openTokenIds.length ? await db.token.findMany({
       where: { id: { in: openTokenIds } },
       select: { id: true, mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1, select: { priceUsd: true, at: true } } },
     }) : [];
     const openImages = await marketTokenImages(db, openTokenRows.map((t) => ({ id: t.id, mint: t.mint })));
     const openById = new Map(openTokenRows.map((t) => [t.id, t]));
+    const attachToken = (tokenId: string) => {
+      const t = openById.get(tokenId);
+      return t ? { mint: t.mint, symbol: t.symbol, name: t.name, imageUrl: openImages.get(t.id) ?? null } : null;
+    };
+    const closedSummary = {
+      equityCurve: closedRaw.equityCurve,
+      topWinners: closedRaw.topWinners.map((p) => ({ ...p, token: attachToken(p.tokenId) })),
+      topLosers: closedRaw.topLosers.map((p) => ({ ...p, token: attachToken(p.tokenId) })),
+    };
     const openPositions = {
       ...open,
       totalPositions: open.positions.length,
@@ -97,7 +112,7 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
         const t = openById.get(p.tokenId), m = t?.metrics[0], priceAt = m?.at ?? null;
         return {
           ...p,
-          token: t ? { mint: t.mint, symbol: t.symbol, name: t.name, imageUrl: openImages.get(t.id) ?? null } : null,
+          token: attachToken(p.tokenId),
           priceUsd: n(m?.priceUsd),
           priceAt,
           priceStale: !priceAt || +priceAt > +observedAt || +observedAt - +priceAt > 15 * 60_000,
@@ -112,6 +127,7 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
       historyAttempt: historyAttempt?.value ?? null,
       profile: w.profile ? { score: w.profile.score, leaderScore: w.profile.leaderScore, style: w.profile.style, medianHoldSeconds: w.profile.medianHoldSeconds, strongestNarrative: w.profile.strongestNarrative, bestPattern: w.profile.bestPattern, weakPattern: w.profile.weakPattern, typicalEntryMarketCapUsd: { min: n(w.profile.typicalEntryMcMin), max: n(w.profile.typicalEntryMcMax) }, updatedAt: w.profile.updatedAt } : null,
       performance,
+      closedSummary,
       // Cluster and relationship links are inferred from timing and funding, so confidence always comes with them.
       cluster: w.cluster ? { id: w.cluster.id, label: w.cluster.label, confidence: w.cluster.confidence, size: w.cluster._count.wallets, members: w.cluster.wallets.filter((m) => m.address !== w.address) } : null,
       relationships: [

@@ -7,3 +7,4 @@ export * from './consensus';
 export * from './funding';
 export * from './discovery';
 export * from './qualification';
+export * from './automation';

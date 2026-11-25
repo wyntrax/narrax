@@ -64,34 +64,59 @@ export async function intakeEmergingWallets(db: PrismaClient, now = new Date()) 
   });
 }
 
-/** Releases the oldest stale provisional wallets that have not established a small-cap record.
- * Returns the number actually deactivated. */
+/** Releases the oldest stale provisional wallets that have not established a small-cap record,
+ * prioritizing automated/spray wallets first (even if survivorship bias inflated their score). */
 async function evictStaleProvisional(tx: Prisma.TransactionClient, now: Date, needed: number): Promise<number> {
   if (needed <= 0 || typeof tx.trackedWallet.updateMany !== 'function') return 0;
   const staleCutoff = new Date(+now - WALLET_INTAKE_LIMITS.staleProvisionalMs);
+  const canReadSettings = typeof tx.systemSetting.findMany === 'function';
   const stalePool = await tx.trackedWallet.findMany({
     where: {
       source: 'DISCOVERED',
       active: true,
       researchReview: 'PROVISIONAL',
       createdAt: { lte: staleCutoff },
-      OR: [
-        { profile: { is: null } },
-        { profile: { is: { score: { lt: WALLET_INTAKE_LIMITS.evictMaxScore } } } },
-        { profile: { is: { medianHoldSeconds: { lt: WALLET_INTAKE_LIMITS.evictMaxHoldSeconds } } } },
-      ],
+      ...(!canReadSettings
+        ? {
+            OR: [
+              { profile: { is: null } },
+              { profile: { is: { score: { lt: WALLET_INTAKE_LIMITS.evictMaxScore } } } },
+              { profile: { is: { medianHoldSeconds: { lt: WALLET_INTAKE_LIMITS.evictMaxHoldSeconds } } } },
+            ],
+          }
+        : {}),
     },
     select: { id: true, profile: { select: { score: true, medianHoldSeconds: true } } },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    take: WALLET_INTAKE_LIMITS.perCycle * 5,
+    take: canReadSettings ? WALLET_INTAKE_LIMITS.capacity : WALLET_INTAKE_LIMITS.perCycle * 5,
   });
-  const perfRows = stalePool.length > 0 && typeof tx.systemSetting.findMany === 'function'
-    ? await tx.systemSetting.findMany({ where: { key: { in: stalePool.map(w => `wallet.performance.${w.id}`) } }, select: { key: true, value: true } })
+  const settingRows = stalePool.length > 0 && canReadSettings
+    ? await tx.systemSetting.findMany({
+        where: { key: { in: stalePool.flatMap(w => [`wallet.performance.${w.id}`, `wallet.intelligence.${w.id}`]) } },
+        select: { key: true, value: true },
+      })
     : [];
-  const byKey = new Map(perfRows.map(s => [s.key, s.value]));
+  const byKey = new Map(settingRows.map(s => [s.key, s.value]));
+  const automatedIds = new Set<string>();
+  for (const row of settingRows) {
+    if (!row.key.startsWith('wallet.intelligence.')) continue;
+    const v = row.value as { automation?: { automated?: unknown } } | null;
+    if (v?.automation?.automated === true) automatedIds.add(row.key.slice('wallet.intelligence.'.length));
+  }
   const evictIds = stalePool
-    .filter(row => !hasProvenSmallCapSample(byKey.get(`wallet.performance.${row.id}`)))
-    .sort((a, b) => (a.profile?.score ?? -1) - (b.profile?.score ?? -1) || (a.profile?.medianHoldSeconds ?? -1) - (b.profile?.medianHoldSeconds ?? -1))
+    .filter(row => {
+      if (hasProvenSmallCapSample(byKey.get(`wallet.performance.${row.id}`))) return false;
+      return (
+        automatedIds.has(row.id) ||
+        row.profile === null ||
+        row.profile.score < WALLET_INTAKE_LIMITS.evictMaxScore ||
+        (row.profile.medianHoldSeconds != null && row.profile.medianHoldSeconds < WALLET_INTAKE_LIMITS.evictMaxHoldSeconds)
+      );
+    })
+    .sort((a, b) =>
+      Number(automatedIds.has(b.id)) - Number(automatedIds.has(a.id)) ||
+      (a.profile?.score ?? -1) - (b.profile?.score ?? -1) ||
+      (a.profile?.medianHoldSeconds ?? -1) - (b.profile?.medianHoldSeconds ?? -1))
     .slice(0, needed)
     .map(row => row.id);
   if (!evictIds.length) return 0;

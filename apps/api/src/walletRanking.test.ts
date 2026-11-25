@@ -53,6 +53,13 @@ it('tolerates <=1% skipped history swaps when scanned >= 100 on both uncapped an
  expect(rankingReasons(deepSample,band,{...history,capped:true,scanned:1000,skipped:11},now,false,false).reasons).toContain('HISTORY_INCOMPLETE');
  expect(rankingReasons(sample,band,{...history,skipped:1},now,false,false).reasons).toContain('HISTORY_INCOMPLETE');
 });
+it('withholds automated/bot wallets from review-ready status with AUTOMATED_BEHAVIOR',()=>{
+ expect(rankingReasons(sample,band,history,now,false,false,0.01,true).reasons).toContain('AUTOMATED_BEHAVIOR');
+});
+it('withholds bag-holding wallets whose dead open bags wipe out realised profit',()=>{
+ expect(rankingReasons(sample,{...band,realisedPnlSol:'5',deadBagPositions:3,deadBagCostSol:'6'},history,now,false,false).reasons).toContain('DEAD_BAG_OVERHANG');
+ expect(rankingReasons(sample,{...band,realisedPnlSol:'10',deadBagPositions:1,deadBagCostSol:'2'},history,now,false,false).reasons).not.toContain('DEAD_BAG_OVERHANG');
+});
 it('accepts a 5+ live small-cap sample when the 30-day ALL band has 20+ closes and band fast-close rate stays <= 50%',()=>{
  const allBand={...band,band:'ALL',closedPositions:200,closedTokens:200,observedDays:30,fastCloseRate:0.5} as WalletPerformance['bands'][number];
  const liveSmall={...band,closedPositions:9,closedTokens:9,observedDays:29,winRateLowerBound:0.7,fastCloseRate:0.11} as WalletPerformance['bands'][number];

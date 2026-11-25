@@ -14,6 +14,11 @@ export const WalletBandPerformance = z.object({
   medianEntrySol: decimal.nullable().optional(), deployedSol: decimal.optional(),
   medianClosedPositionSol: decimal.nullable().optional(),
   entryCapKnownPositions: count.optional(), entryCapTotalPositions: count.optional(),
+  // Optional mark-to-market open-position estimates (dead-bag survivorship check).
+  openValueSol: decimal.nullable().optional(),
+  unrealisedPnlSol: decimal.nullable().optional(),
+  deadBagPositions: count.optional(),
+  deadBagCostSol: decimal.optional(),
 });
 export type WalletBandPerformance = z.infer<typeof WalletBandPerformance>;
 export const WalletPerformance = z.object({
@@ -92,10 +97,27 @@ export const WalletOpenPositions = z.object({
   totalPositions: count.optional(),
 });
 export type WalletOpenPositions = z.infer<typeof WalletOpenPositions>;
+export const WalletAutomationReason = z.enum([
+  'HIGH_FREQUENCY',
+  'SNIPER_EXITS',
+  'DUST_SPRAY',
+  'FIXED_TIMER_EXITS',
+  'OPEN_BAG_OVERHANG',
+]);
+export type WalletAutomationReason = z.infer<typeof WalletAutomationReason>;
+export const WalletAutomationSummary = z.object({
+  automated: z.boolean(),
+  reasons: z.array(WalletAutomationReason),
+  tradesPerDay: n.nonnegative(),
+  medianBuySol: n.nullable(),
+  openPositionCount: count,
+});
+export type WalletAutomationSummary = z.infer<typeof WalletAutomationSummary>;
+
 export const WalletRankingPage = z.object({
   asOf: z.string().datetime(), band: WalletEntryBand, windowDays: z.literal(30), total: count, capped: z.boolean(),
   minMedianPositionSol: n.nonnegative().optional(),
-  counts: z.object({ reviewReady: count, observing: count, flowSuitable: count.optional() }).optional(),
+  counts: z.object({ reviewReady: count, observing: count, flowSuitable: count.optional(), automated: count.optional() }).optional(),
   pipeline: z.object({ checkedAt: z.string().datetime(), historyEnabled: z.boolean(), providerConfigured: z.boolean(),
     intakeAdded: count, scanned: count, failures: count }).nullable(),
   items: z.array(z.object({ address: z.string(), label: z.string().nullable(), review: z.string(),
@@ -103,5 +125,6 @@ export const WalletRankingPage = z.object({
     historyComplete: z.boolean(), linked: z.boolean(), developer: z.boolean(), performance: WalletBandPerformance,
     flowSuitable: z.boolean().optional(), flowReasons: z.array(WalletFlowSuitabilityReason).optional(),
     flowMetrics: WalletFlowSuitabilityMetrics.nullable().optional(),
+    automation: WalletAutomationSummary.nullable().optional(),
   })),
 });

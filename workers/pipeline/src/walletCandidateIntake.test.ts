@@ -93,6 +93,31 @@ it('prefers an emerging candidate that still holds an observed early buy, even w
  expect(await intakeEmergingWallets(db,now)).toMatchObject({added:2});
  expect(createMany.mock.calls[0]?.[0].data.map(w=>w.address)).toEqual([addresses[1],addresses[0]]);
 });
+it('evicts stale automated PROVISIONAL wallets ahead of low-score ones even when survivorship bias inflated their score',async()=>{
+ const createMany=vi.fn(async(args:{data:unknown[]})=>({count:args.data.length}));
+ const updateMany=vi.fn(async(args:{where:{id:{in:string[]}}})=>({count:args.where.id.in.length}));
+ const upsert=vi.fn(async()=>({}));
+ let findCalls=0;
+ const tx={
+  $executeRaw:vi.fn(async()=>0),
+  systemSetting:{
+   findUnique:async()=>({value:{checkedAt:now.toISOString(),items:addresses.map(address=>({address,scannedTokens:3}))}}),
+   findMany:async()=>[{key:'wallet.intelligence.stale-bot',value:{automation:{automated:true,reasons:['DUST_SPRAY','OPEN_BAG_OVERHANG']}}}],
+   upsert,
+  },
+  trackedWallet:{
+   count:async()=>200,
+   findMany:async()=>{findCalls++;return findCalls===1?[]:[{id:'stale-good',profile:{score:80,medianHoldSeconds:1200}},{id:'stale-low',profile:{score:30,medianHoldSeconds:1200}},{id:'stale-bot',profile:{score:98,medianHoldSeconds:601}}];},
+   updateMany,
+   createMany,
+  },
+  walletCandidate:{findMany:async()=>[]},
+ };
+ const db={$transaction:async(fn:(tx:unknown)=>unknown)=>fn(tx)} as unknown as PrismaClient;
+ const res=await intakeEmergingWallets(db,now);
+ expect(res).toMatchObject({evicted:2,capacity:2,added:2,reason:'EVALUATION_ONLY'});
+ expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['stale-bot','stale-low']}},data:{active:false}});
+});
 it('deprioritizes confirmed dumpers below unprobed candidates and evicts stale fast-exit provisional wallets',async()=>{
  const createMany=vi.fn(async(args:{data:{address:string}[]})=>({count:args.data.length}));
  const updateMany=vi.fn(async(args:{where:{id:{in:string[]}}})=>({count:args.where.id.in.length}));

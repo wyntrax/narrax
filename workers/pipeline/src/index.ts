@@ -3,7 +3,7 @@ export * from './execution';
 export * from './prismaStores';
 export * from './chainPorts';
 export * from './walletIntelligence';
-export { computeWalletOpenPositions, type PerformanceTrade } from './walletPerformance';
+export { computeWalletClosedSummary, computeWalletOpenPositions, type ClosedTokenHighlight, type MarkToMarketContext, type PerformanceTrade, type TokenSpotPrice, type WalletClosedSummary } from './walletPerformance';
 export { WALLET_INTAKE_LIMITS } from './walletCandidateIntake';
 export * from './narrativeIngestion';
 export * from './tokenResolution';

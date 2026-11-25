@@ -38,7 +38,7 @@ export function makeWalletEventStore(db: Db): Pick<WalletEventDeps, 'saveWalletT
         return db.token.findUniqueOrThrow({ where: { mint: e.mint }, select: { id: true } });
       });
       try {
-        const evidence = await walletTradeEvidence(db, token.id, new Date(e.at), e.amountSol);
+        const evidence = await walletTradeEvidence(db, token.id, new Date(e.at), e.amountSol, { mint: e.mint, tokenAmount: e.tokenAmount });
         await db.walletTrade.create({
           data: { walletId: wallet.id, tokenId: token.id, side: e.side, amountSol: e.amountSol, tokenAmount: e.tokenAmount, signature: e.signature, at: new Date(e.at), ...evidence },
         });

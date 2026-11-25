@@ -4,6 +4,49 @@ import { z } from 'zod';
 type Db = Pick<Prisma.TransactionClient, 'tokenMetric' | 'systemSetting'>;
 export const WALLET_MARKET_MAX_AGE_MS = 15 * 60_000;
 export const SOL_HISTORY_PREFIX = 'market.solUsd.history.';
+/** Fixed-supply launchpad tokens (pump.fun, letsbonk) have a protocol-enforced 1B supply. */
+export const FIXED_LAUNCHPAD_SUPPLY = 1_000_000_000;
+/** Minimum swap size (SOL) for swap-implied market cap so flat fees/rounding on dust swaps never skew price. */
+export const SWAP_IMPLIED_MIN_SOL = 0.005;
+const SWAP_IMPLIED_MIN_CAP_USD = 1_000;
+const SWAP_IMPLIED_MAX_CAP_USD = 100_000_000_000;
+
+export const isFixedOneBillionMint = (mint: string | null | undefined): boolean =>
+  typeof mint === 'string' && (mint.endsWith('pump') || mint.endsWith('bonk'));
+
+export function swapImpliedMarketCap(
+  mint: string | null | undefined,
+  at: Date,
+  amountSol: number,
+  amountUsd: number | null,
+  tokenAmount: number | null | undefined,
+) {
+  if (
+    !isFixedOneBillionMint(mint) ||
+    !Number.isFinite(amountSol) || amountSol < SWAP_IMPLIED_MIN_SOL ||
+    amountUsd == null || !Number.isFinite(amountUsd) || amountUsd <= 0 ||
+    tokenAmount == null || !Number.isFinite(tokenAmount) || tokenAmount <= 0
+  ) {
+    return null;
+  }
+  const priceUsd = amountUsd / tokenAmount;
+  const marketCapUsd = priceUsd * FIXED_LAUNCHPAD_SUPPLY;
+  if (!Number.isFinite(marketCapUsd) || marketCapUsd < SWAP_IMPLIED_MIN_CAP_USD || marketCapUsd > SWAP_IMPLIED_MAX_CAP_USD) {
+    return null;
+  }
+  return {
+    metricId: null,
+    at: at.toISOString(),
+    priceUsd,
+    marketCapUsd,
+    liquidityUsd: null,
+    source: 'swap_implied' as const,
+    pairAddress: null,
+    marketCapIsFdv: false as const,
+    supply: FIXED_LAUNCHPAD_SUPPLY,
+    supplyBasis: 'FIXED_LAUNCHPAD_1B' as const,
+  };
+}
 const Provenance = z.object({ metricId: z.string(), at: z.string().datetime(), source: z.literal('dexscreener'), marketCapIsFdv: z.boolean(), pairAddress: z.string().min(1) });
 const Sol = z.object({ priceUsd: z.number().finite().positive(), at: z.string().datetime(), source: z.string().min(1) });
 
@@ -36,9 +79,14 @@ export async function walletMarketLookup(db: Db, tokenId: string, at: Date) {
   return { market: null, reason: 'MARKET_LOOKUP_LIMIT' };
 }
 
-export async function walletTradeEvidence(db: Db, tokenId: string, at: Date, amountSol: number) {
+export async function walletTradeEvidence(
+  db: Db,
+  tokenId: string,
+  at: Date,
+  amountSol: number,
+  swapCtx?: { mint?: string | null; tokenAmount?: number | null },
+) {
   const [lookup, solRow] = await Promise.all([walletMarketLookup(db, tokenId, at), db.systemSetting.findUnique({ where: { key: 'market.solUsd' } })]);
-  const market=lookup.market;
   const parsed = Sol.safeParse(solRow?.value);
   let sol = parsed.success && Date.parse(parsed.data.at) <= +at && +at - Date.parse(parsed.data.at) <= WALLET_MARKET_MAX_AGE_MS ? parsed.data : null;
   if (!sol) {
@@ -46,6 +94,10 @@ export async function walletTradeEvidence(db: Db, tokenId: string, at: Date, amo
     const old = Sol.safeParse(historical?.value);
     if (old.success && historical?.key === `${SOL_HISTORY_PREFIX}${old.data.at}` && Date.parse(old.data.at)<=+at && +at-Date.parse(old.data.at)<=WALLET_MARKET_MAX_AGE_MS) sol=old.data;
   }
-  return { amountUsd: sol ? amountSol * sol.priceUsd : null, marketCapUsd: market?.marketCapUsd ?? null,
-    evidence: { version: 1, eventAt: at.toISOString(), market, sol, reasons: [...(!market ? ['NO_CONTEMPORANEOUS_MARKET'] : []), ...(lookup.reason ? [lookup.reason] : []), ...(!sol ? ['NO_CONTEMPORANEOUS_SOL'] : [])] } };
+  const amountUsd = sol ? amountSol * sol.priceUsd : null;
+  const implied = lookup.market?.marketCapUsd == null ? swapImpliedMarketCap(swapCtx?.mint, at, amountSol, amountUsd, swapCtx?.tokenAmount) : null;
+  const market = lookup.market?.marketCapUsd != null ? lookup.market : implied ?? lookup.market;
+  const marketCapUsd = market?.marketCapUsd ?? null;
+  return { amountUsd, marketCapUsd,
+    evidence: { version: 1, eventAt: at.toISOString(), market, sol, reasons: [...(!market ? ['NO_CONTEMPORANEOUS_MARKET'] : []), ...(implied ? [] : lookup.reason ? [lookup.reason] : []), ...(!sol ? ['NO_CONTEMPORANEOUS_SOL'] : [])] } };
 }
