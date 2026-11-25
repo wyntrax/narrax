@@ -6,7 +6,7 @@
 import { Worker } from 'bullmq';
 import { publishWalletResearch, measureWalletResearch } from './walletResearch';
 import { refreshResearchHistory } from './walletResearchHistory';
-import { intakeEmergingWallets } from './walletCandidateIntake';
+import { intakeEmergingWallets, reactivateProvenWallets } from './walletCandidateIntake';
 import {combinedMetadataSource,jupiterMetadataSource} from './tokenMetadata';
 import { createPrisma } from '@narra/database';
 import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, TokenDiscoveryJobSchema, WyntraxHoldingsJobSchema, WyntraxMembershipEventSchema, createQueues, createRedis } from '@narra/queue';
@@ -150,14 +150,17 @@ async function main(): Promise<void> {
       const apiPool = await helius.apiPool();
       const historyEnabled = process.env.SMART_MONEY_HISTORY_ENABLED === 'true', providerConfigured = !!apiPool;
       const intake = historyEnabled && providerConfigured ? await intakeEmergingWallets(db) : null;
-      if (intake?.added) await queues.requestWalletSync();
+      const reactivation = historyEnabled && providerConfigured ? await reactivateProvenWallets(db) : null;
+      if (intake?.added || reactivation?.reactivated) await queues.requestWalletSync();
       const history = historyEnabled && apiPool ? await refreshResearchHistory(db, apiPool) : null;
       const intelligence = await recomputeWalletIntelligence(db);
-      const pipeline = { checkedAt: new Date().toISOString(), historyEnabled, providerConfigured, intakeAdded: intake?.added ?? 0, scanned: history?.scanned ?? 0, failures: history?.failures ?? 0,
+      const pipeline = { checkedAt: new Date().toISOString(), historyEnabled, providerConfigured, intakeAdded: intake?.added ?? 0,
+        intakeReactivated: reactivation?.reactivated ?? 0, intakeEvicted: reactivation?.evicted ?? 0,
+        scanned: history?.scanned ?? 0, failures: history?.failures ?? 0,
         intelligence: { readPages:intelligence.readPages,loadMs:intelligence.loadMs,computeMs:intelligence.computeMs,publishMs:intelligence.publishMs,publicationOperations:intelligence.publicationOperations,tradesUsed:intelligence.tradesUsed } };
       await db.systemSetting.upsert({ where: { key: 'wallet.evaluation.pipeline' }, create: { key: 'wallet.evaluation.pipeline', value: pipeline }, update: { value: pipeline } });
       console.log(JSON.stringify({msg:'wallet_intelligence_complete',...pipeline.intelligence}));
-      return JSON.stringify({ ...intelligence, history, research: research ? await publishWalletResearch(db) : 'disabled' });
+      return JSON.stringify({ ...intelligence, history, reactivation, research: research ? await publishWalletResearch(db) : 'disabled' });
     }, { connection, concurrency: 1 }),
     // Position monitor: recommends exits and raises alerts. It never closes a position or places an order. The AI review is optional.
     new Worker(QUEUE_NAMES.positionMonitor, async () => JSON.stringify(await monitorPositions(db, { llm })), { connection, concurrency: 1 }),

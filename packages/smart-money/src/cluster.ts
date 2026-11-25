@@ -7,7 +7,6 @@ export interface ClusterEdge { a: string; b: string; sharedTokens: number; confi
 export interface Cluster { wallets: string[]; confidence: Confidence }
 
 export const CO_ENTRY_WINDOW_MS = 60_000;
-const RANK: Record<Confidence, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 };
 
 /**
  * Groups wallets that repeatedly enter the same tokens within a minute of each other.
@@ -48,17 +47,21 @@ export function detectTimingClusters(buys: Entry[], opts: { windowMs?: number; m
     edges.push({ a, b, sharedTokens: shared, confidence: shared >= 5 ? 'MEDIUM' : 'LOW' });
   }
 
+  // Only repeated MEDIUM co-entry collapses wallets into one inferred entity. A LOW edge
+  // (3-4 shared tokens) is still recorded for diagnostics, but it must not chain unrelated
+  // wallets through one weak link. The previous weakest-link rule let a single LOW edge
+  // downgrade a dense component to LOW, which then bypassed LINKED_WALLETS entirely.
   const parent = new Map<string, string>();
   const find = (x: string): string => { const p = parent.get(x) ?? x; if (p === x) return x; const r = find(p); parent.set(x, r); return r; };
-  for (const e of edges) parent.set(find(e.a), find(e.b));
+  for (const e of edges) if (e.confidence === 'MEDIUM') parent.set(find(e.a), find(e.b));
 
-  const groups = new Map<string, { wallets: Set<string>; conf: Confidence }>();
+  const groups = new Map<string, Set<string>>();
   for (const e of edges) {
+    if (e.confidence !== 'MEDIUM') continue;
     const root = find(e.a);
-    const g = groups.get(root) ?? { wallets: new Set<string>(), conf: 'MEDIUM' as Confidence };
-    g.wallets.add(e.a); g.wallets.add(e.b);
-    if (RANK[e.confidence] < RANK[g.conf]) g.conf = e.confidence; // a cluster is only as strong as its weakest link
+    const g = groups.get(root) ?? new Set<string>();
+    g.add(e.a); g.add(e.b);
     groups.set(root, g);
   }
-  return { clusters: [...groups.values()].map((g) => ({ wallets: [...g.wallets].sort(), confidence: g.conf })), edges };
+  return { clusters: [...groups.values()].map((wallets) => ({ wallets: [...wallets].sort(), confidence: 'MEDIUM' as const })), edges };
 }
