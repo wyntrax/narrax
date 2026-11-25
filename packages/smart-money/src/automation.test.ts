@@ -22,21 +22,21 @@ describe('detectAutomation', () => {
 
   it('flags micro-dust fixed-timer spray bots with open bag overhang (production 4yUwV2JM pattern)', () => {
     const trades: TradeRow[] = [];
-    // 25 closed trades at exact 601s timer with 0.004 SOL buys
-    for (let i = 0; i < 25; i++) {
+    // 55 closed trades at exact 601s timer with 0.004 SOL buys
+    for (let i = 0; i < 55; i++) {
       const start = i * 3_600_000;
       trades.push({ wallet: 'bot', token: `closed-${i}`, side: 'BUY', sol: 0.004, qty: 1000, at: t(start) });
       trades.push({ wallet: 'bot', token: `closed-${i}`, side: 'SELL', sol: 0.008, qty: 1000, at: t(start + 601_000) });
     }
-    // 60 unclosed open dead bags
-    for (let i = 0; i < 60; i++) {
-      trades.push({ wallet: 'bot', token: `open-${i}`, side: 'BUY', sol: 0.004, qty: 1000, at: t((30 + i) * 600_000) });
+    // 120 unclosed open dead bags (> 2x closed)
+    for (let i = 0; i < 120; i++) {
+      trades.push({ wallet: 'bot', token: `open-${i}`, side: 'BUY', sol: 0.004, qty: 1000, at: t((60 + i) * 600_000) });
     }
     const stats = computeWalletStats(trades);
     const res = detectAutomation(trades, stats);
     expect(res.automated).toBe(true);
     expect(res.reasons).toEqual(expect.arrayContaining(['DUST_SPRAY', 'FIXED_TIMER_EXITS', 'OPEN_BAG_OVERHANG']));
-    expect(res.openPositionCount).toBe(60);
+    expect(res.openPositionCount).toBe(120);
   });
 
   it('flags high-frequency sniper bots exiting within 15 seconds', () => {

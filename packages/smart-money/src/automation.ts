@@ -19,10 +19,11 @@ export const AUTOMATION_RULES = {
   /** Micro-dust spray: many buys with median buy size below 0.01 SOL. */
   minBuysForDustSpray: 20,
   dustMedianBuySol: 0.01,
-  /** Fixed-timer bot: large share of closes clustered within ±5s of the median hold time. */
-  minClosedForTimer: 20,
+  /** Fixed-timer bot: high sample (>= 50 closes) where >= 50% exit within ±5s of a short (<= 30m) median hold time. */
+  minClosedForTimer: 50,
   timerToleranceSeconds: 5,
-  timerClusterShare: 0.4,
+  timerClusterShare: 0.5,
+  maxTimerHoldSeconds: 30 * 60,
   /** Survivorship-bias spray: leaves far more open bags than closed legs. */
   minClosedForBagOverhang: 20,
   minOpenForBagOverhang: 50,
@@ -105,7 +106,7 @@ export function detectAutomation(trades: TradeRow[], stats: WalletStats): Automa
     reasons.push('SNIPER_EXITS');
   }
 
-  if (n >= R.minClosedForTimer && stats.medianHoldSeconds !== null) {
+  if (n >= R.minClosedForTimer && stats.medianHoldSeconds !== null && stats.medianHoldSeconds <= R.maxTimerHoldSeconds) {
     const med = stats.medianHoldSeconds;
     const clustered = stats.legs.filter((l) => Math.abs(l.holdSeconds - med) <= R.timerToleranceSeconds).length;
     if (clustered / n >= R.timerClusterShare) {
