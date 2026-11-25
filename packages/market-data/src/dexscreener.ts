@@ -21,7 +21,11 @@ const Pair = z.object({
   marketCap: z.number().nullish(),
   fdv: z.number().nullish(),
   pairCreatedAt: z.number().nullish(),
-  info: z.object({ imageUrl: z.unknown().optional() }).nullish().catch(null),
+  info: z.object({
+    imageUrl: z.unknown().optional(),
+    websites: z.array(z.object({ label: z.string().nullish(), url: z.string().nullish() })).nullish().catch(null),
+    socials: z.array(z.object({ type: z.string().nullish(), url: z.string().nullish() })).nullish().catch(null),
+  }).nullish().catch(null),
 });
 type Pair = z.infer<typeof Pair>;
 
@@ -122,6 +126,42 @@ function snapshotOmission(p: Pair): SnapshotOmissionReason | null {
   return null;
 }
 
+function safeExternalUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 256) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    if (parsed.username || parsed.password) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function extractLinks(info: Pair['info']): { websiteUrl: string | null; twitterUrl: string | null } {
+  const websites = info?.websites ?? [];
+  const socials = info?.socials ?? [];
+  let websiteUrl: string | null = null;
+  for (const w of websites) {
+    const clean = safeExternalUrl(w?.url);
+    if (clean) { websiteUrl = clean; break; }
+  }
+  let twitterUrl: string | null = null;
+  for (const s of socials) {
+    const clean = safeExternalUrl(s?.url);
+    if (!clean) continue;
+    const type = s?.type?.trim().toLowerCase() ?? '';
+    const host = new URL(clean).hostname.toLowerCase();
+    if (type === 'twitter' || type === 'x' || host === 'x.com' || host === 'www.x.com' || host === 'twitter.com' || host === 'www.twitter.com') {
+      twitterUrl = clean;
+      break;
+    }
+  }
+  return { websiteUrl, twitterUrl };
+}
+
 function toSnapshot(mint: string, p: Pair): MarketSnapshot | null {
   const price = toNumber(p.priceUsd);
   const liquidity = p.liquidity?.usd ?? null;
@@ -129,11 +169,14 @@ function toSnapshot(mint: string, p: Pair): MarketSnapshot | null {
   const cap = p.marketCap ?? null;
   const fdv = p.fdv ?? null;
   if (snapshotOmission(p) || price == null || liquidity == null || volume == null) return null;
+  const { websiteUrl, twitterUrl } = extractLinks(p.info);
   return {
     mint,
     symbol: p.baseToken.symbol ?? '',
     name: p.baseToken.name ?? '',
     imageUrl: tokenImageUrl(p.info?.imageUrl),
+    websiteUrl,
+    twitterUrl,
     priceUsd: price,
     marketCapUsd: (cap ?? fdv)!,
     marketCapIsFdv: cap == null,

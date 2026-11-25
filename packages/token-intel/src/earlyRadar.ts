@@ -18,17 +18,17 @@ import type { TokenRelation } from './og';
 export type EarlyProfile = 'trencher' | 'holder';
 
 export const EARLY_RULES = {
-  /** The ceiling the owner asked for. At or above this a token is out of the early lane. */
-  maxMarketCapUsd: 100_000,
-  /** Below this the cap is dust and the price data is too easy to distort to rank. */
-  minMarketCapUsd: 20_000,
+  /** Ceiling for the early pre-pump lane. At or above $50K a token is out of the early lane. */
+  maxMarketCapUsd: 50_000,
+  /** Floor for very early discovery ($5K-$10K pre-pump zone). Below this is dust. */
+  minMarketCapUsd: 5_000,
   /** Daily volume over this multiple of market cap is flagged as possible wash trading. */
   washTurnover: 30,
-  trencher: { minLiquidityUsd: 6_000, minHolders: 75, maxTop10Pct: 70, maxDevPct: 15, minAgeMinutes: 10, maxAgeMinutes: 72 * 60, minLiquidityToCap: 0.05 },
-  holder: { minLiquidityUsd: 8_000, minHolders: 150, maxTop10Pct: 45, maxDevPct: 5, minAgeMinutes: 12 * 60, maxAgeMinutes: 30 * 24 * 60, minLiquidityToCap: 0.08 },
+  trencher: { minLiquidityUsd: 2_000, minHolders: 35, maxTop10Pct: 55, maxDevPct: 10, minAgeMinutes: 5, maxAgeMinutes: 48 * 60, minLiquidityToCap: 0.12 },
+  holder: { minLiquidityUsd: 4_000, minHolders: 80, maxTop10Pct: 40, maxDevPct: 5, minAgeMinutes: 6 * 60, maxAgeMinutes: 14 * 24 * 60, minLiquidityToCap: 0.15 },
   /** Weights per profile, each set sums to 100. */
   weights: {
-    trencher: { narrative: 30, organic: 8, community: 12, roomToRun: 15, divergence: 10, momentum: 10, structure: 15 },
+    trencher: { narrative: 28, organic: 10, community: 14, roomToRun: 18, divergence: 8, momentum: 7, structure: 15 },
     holder: { narrative: 15, organic: 12, community: 28, roomToRun: 5, divergence: 5, momentum: 0, structure: 35 },
   },
   tiers: { strong: 70, watch: 55 },

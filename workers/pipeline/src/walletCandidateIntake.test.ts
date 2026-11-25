@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import type { PrismaClient } from '@narra/database';
-import { intakeEmergingWallets } from './walletCandidateIntake';
+import { intakeEmergingWallets, reactivateProvenWallets } from './walletCandidateIntake';
 
 const now=new Date('2040-01-01T00:00:00Z');
 const addresses=['So11111111111111111111111111111111111111112','11111111111111111111111111111111'];
@@ -107,7 +107,7 @@ it('evicts stale automated PROVISIONAL wallets ahead of low-score ones even when
   },
   trackedWallet:{
    count:async()=>200,
-   findMany:async()=>{findCalls++;return findCalls===1?[]:[{id:'stale-good',profile:{score:80}},{id:'stale-low',profile:{score:30}},{id:'stale-bot',profile:{score:98}}];},
+   findMany:async()=>{findCalls++;return findCalls===1?[]:[{id:'stale-good',profile:{score:80,medianHoldSeconds:1200}},{id:'stale-low',profile:{score:30,medianHoldSeconds:1200}},{id:'stale-bot',profile:{score:98,medianHoldSeconds:601}}];},
    updateMany,
    createMany,
   },
@@ -117,4 +117,86 @@ it('evicts stale automated PROVISIONAL wallets ahead of low-score ones even when
  const res=await intakeEmergingWallets(db,now);
  expect(res).toMatchObject({evicted:2,capacity:2,added:2,reason:'EVALUATION_ONLY'});
  expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['stale-bot','stale-low']}},data:{active:false}});
+});
+it('deprioritizes confirmed dumpers below unprobed candidates and evicts stale fast-exit provisional wallets',async()=>{
+ const createMany=vi.fn(async(args:{data:{address:string}[]})=>({count:args.data.length}));
+ const updateMany=vi.fn(async(args:{where:{id:{in:string[]}}})=>({count:args.where.id.in.length}));
+ const upsert=vi.fn(async()=>({}));
+ let findCalls=0;
+ const tx={
+  $executeRaw:vi.fn(async()=>0),
+  systemSetting:{findUnique:async()=>({value:{checkedAt:now.toISOString(),items:[
+   {address:addresses[0],scannedTokens:6,spend:{matchedTokens:3,medianMatchedQuoteSol:2.5},hold:{checkedAt:now.toISOString(),tokenId:'t',mint:'m',stillHolding:false,heldMs:null}},
+   {address:addresses[1],scannedTokens:3,spend:{matchedTokens:3,medianMatchedQuoteSol:0.5}},
+  ]}}),upsert},
+  trackedWallet:{
+   count:async()=>200,
+   findMany:async()=>{findCalls++;return findCalls===1?[]:[{id:'stale-fast-exit',profile:{score:65,medianHoldSeconds:45}}];},
+   updateMany,
+   createMany,
+  },
+  walletCandidate:{findMany:async()=>[]},
+ };
+ const db={$transaction:async(fn:(tx:unknown)=>unknown)=>fn(tx)} as unknown as PrismaClient;
+ expect(await intakeEmergingWallets(db,now)).toMatchObject({evicted:1,capacity:1,added:1});
+ expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['stale-fast-exit']}},data:{active:false}});
+ expect(createMany.mock.calls[0]?.[0].data.map(w=>w.address)).toEqual([addresses[1]]);
+});
+it('protects a provisional wallet with a proven small-cap sample from stale-capacity eviction',async()=>{
+ const createMany=vi.fn(async(args:{data:{address:string}[]})=>({count:args.data.length}));
+ const updateMany=vi.fn(async(args:{where:{id:{in:string[]}}})=>({count:args.where.id.in.length}));
+ const upsert=vi.fn(async()=>({}));
+ let findCalls=0;
+ const provenPerf={
+  version:1,checkedAt:now.toISOString(),windowDays:30,observedTrades:100,invalidTrades:0,unmatchedSells:0,capped:false,lastTradeAt:now.toISOString(),
+  bands:[{band:'SMALL_CAP',positions:9,closedPositions:9,closedTokens:9,wins:9,losses:0,breakeven:0,openPositions:0,winRate:1,winRateLowerBound:0.7,realisedPnlSol:'4.9',openCostSol:'0',medianRoi:0.06,medianWinSol:'0.5',medianLossSol:null,profitFactor:null,medianFirstSellSeconds:91,medianCloseSeconds:132,realisedDrawdownSol:'0',observedDays:29,fastCloseRate:0.11}],
+ };
+ const tx={
+  $executeRaw:vi.fn(async()=>0),
+  systemSetting:{
+   findUnique:async()=>({value:{checkedAt:now.toISOString(),items:[{address:addresses[0],scannedTokens:3}]}}),
+   findMany:async()=>[{key:'wallet.performance.protected-small-cap',value:provenPerf}],
+   upsert,
+  },
+  trackedWallet:{
+   count:async()=>200,
+   findMany:async()=>{findCalls++;return findCalls===1?[]:[{id:'protected-small-cap',profile:{score:64,medianHoldSeconds:52}},{id:'evictable-fast-exit',profile:{score:65,medianHoldSeconds:45}}];},
+   updateMany,
+   createMany,
+  },
+  walletCandidate:{findMany:async()=>[]},
+ };
+ const db={$transaction:async(fn:(tx:unknown)=>unknown)=>fn(tx)} as unknown as PrismaClient;
+ expect(await intakeEmergingWallets(db,now)).toMatchObject({evicted:1,capacity:1,added:1});
+ expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['evictable-fast-exit']}},data:{active:false}});
+});
+it('reactivates proven small-cap wallets strongest-first and releases stale non-proven wallets when full',async()=>{
+ const updateMany=vi.fn(async(args:{where:{id:{in:string[]}};data:{active:boolean}})=>({count:args.where.id.in.length}));
+ const upsert=vi.fn(async()=>({}));
+ let findCalls=0;
+ const proven=(winRateLowerBound:number)=>({
+  version:1,checkedAt:now.toISOString(),windowDays:30,observedTrades:100,invalidTrades:0,unmatchedSells:0,capped:false,lastTradeAt:now.toISOString(),
+  bands:[{band:'SMALL_CAP',positions:9,closedPositions:9,closedTokens:9,wins:9,losses:0,breakeven:0,openPositions:0,winRate:1,winRateLowerBound,realisedPnlSol:'4.9',openCostSol:'0',medianRoi:0.06,medianWinSol:'0.5',medianLossSol:null,profitFactor:null,medianFirstSellSeconds:91,medianCloseSeconds:132,realisedDrawdownSol:'0',observedDays:29,fastCloseRate:0.11}],
+ });
+ const tx={
+  $executeRaw:vi.fn(async()=>0),
+  systemSetting:{
+   findMany:async(args:{where:{key:{in:string[]}}})=>args.where.key.in.some(k=>k.startsWith('wallet.performance.proven-'))
+    ? [{key:'wallet.performance.proven-1',value:proven(0.7)},{key:'wallet.performance.proven-2',value:proven(0.6)}]
+    : [],
+   upsert,
+  },
+  trackedWallet:{
+   count:async()=>200,
+   findMany:async()=>{findCalls++;return findCalls===1
+    ? [{id:'proven-1',address:addresses[0]},{id:'proven-2',address:addresses[1]}]
+    : [{id:'stale-1',profile:{score:64,medianHoldSeconds:45}},{id:'stale-2',profile:{score:63,medianHoldSeconds:50}}];},
+   updateMany,
+  },
+ };
+ const db={$transaction:async(fn:(tx:unknown)=>unknown)=>fn(tx)} as unknown as PrismaClient;
+ expect(await reactivateProvenWallets(db,now)).toMatchObject({evicted:2,reactivated:2,capacity:0,candidates:2});
+ expect(updateMany).toHaveBeenNthCalledWith(1,{where:{id:{in:['stale-2','stale-1']}},data:{active:false}});
+ expect(updateMany).toHaveBeenNthCalledWith(2,{where:{id:{in:['proven-1','proven-2']}},data:{active:true}});
+ expect(upsert).toHaveBeenCalledWith(expect.objectContaining({where:{key:'wallet.evaluation.reactivation'}}));
 });

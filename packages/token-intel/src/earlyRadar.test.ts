@@ -2,24 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { EARLY_RULES, evaluateEarly, evaluateEarlyBoth, type EarlyInputs } from './index';
 
 const base: EarlyInputs = {
-  marketCapUsd: 45_000, liquidityUsd: 12_000, volume24hUsd: 60_000, holders: 400, holdersThen: 300, top10Pct: 28, devHoldingPct: 2,
-  smartWalletHolders: 2, tokenAgeMinutes: 3 * 24 * 60, relation: 'OG', ogScore: 80, narrativeScore: 70, narrativeStage: 'EMERGING',
+  marketCapUsd: 9_000, liquidityUsd: 4_500, volume24hUsd: 25_000, holders: 120, holdersThen: 80, top10Pct: 26, devHoldingPct: 2,
+  smartWalletHolders: 2, tokenAgeMinutes: 24 * 60, relation: 'OG', ogScore: 80, narrativeScore: 70, narrativeStage: 'EMERGING',
   narrativeManipulationRisk: 20, divergence: 'POSITIVE', priceGrowth1hPct: 8, riskFlags: [],
 };
 
 describe('early radar', () => {
-  it('keeps the $100K ceiling: at or above it nothing is ranked', () => {
-    expect(evaluateEarly('trencher', { ...base, marketCapUsd: 99_999, liquidityUsd: 12_000 }).eligible).toBe(true);
-    for (const cap of [EARLY_RULES.maxMarketCapUsd, 250_000]) {
+  it('keeps the $50K ceiling and $5K-$10K pre-pump entry window', () => {
+    expect(evaluateEarly('trencher', { ...base, marketCapUsd: 5_000, liquidityUsd: 2_500 }).eligible).toBe(true);
+    expect(evaluateEarly('trencher', { ...base, marketCapUsd: 49_999, liquidityUsd: 8_000 }).eligible).toBe(true);
+    expect(evaluateEarly('trencher', { ...base, marketCapUsd: 8_000, liquidityUsd: 3_000 }).components.roomToRun)
+      .toBeGreaterThan(evaluateEarly('trencher', { ...base, marketCapUsd: 45_000, liquidityUsd: 8_000 }).components.roomToRun);
+    for (const cap of [EARLY_RULES.maxMarketCapUsd, 100_000, 250_000]) {
       const r = evaluateEarly('trencher', { ...base, marketCapUsd: cap, liquidityUsd: 30_000 });
       expect(r).toMatchObject({ eligible: false, score: 0, tier: 'EXCLUDED' });
       expect(r.reasons).toContain('ABOVE_MARKET_CAP_CEILING');
     }
   });
   it('excludes dust caps, thin trencher floors, honeypots, active authorities and suspicious copies', () => {
-    for (const cap of [500, 8_000]) expect(evaluateEarly('trencher', { ...base, marketCapUsd: cap, liquidityUsd: 6_000 }).reasons).toContain('BELOW_MARKET_CAP_FLOOR');
-    expect(evaluateEarly('trencher', { ...base, liquidityUsd: 5_000 }).reasons).toContain('LIQUIDITY_TOO_LOW');
-    expect(evaluateEarly('trencher', { ...base, holders: 50 }).reasons).toContain('TOO_FEW_HOLDERS');
+    for (const cap of [500, 4_999]) expect(evaluateEarly('trencher', { ...base, marketCapUsd: cap, liquidityUsd: 2_500 }).reasons).toContain('BELOW_MARKET_CAP_FLOOR');
+    expect(evaluateEarly('trencher', { ...base, liquidityUsd: 1_500 }).reasons).toContain('LIQUIDITY_TOO_LOW');
+    expect(evaluateEarly('trencher', { ...base, holders: 20 }).reasons).toContain('TOO_FEW_HOLDERS');
     for (const flag of ['HONEYPOT', 'MINT_AUTHORITY_ACTIVE', 'FREEZE_AUTHORITY_ACTIVE']) expect(evaluateEarly('trencher', { ...base, riskFlags: [flag] }).reasons).toContain(flag);
     expect(evaluateEarly('trencher', { ...base, relation: 'SUSPICIOUS' }).reasons).toContain('SUSPICIOUS_COPY');
   });
@@ -30,7 +33,7 @@ describe('early radar', () => {
     expect(evaluateEarly('trencher', { ...base, marketCapUsd: NaN }).reasons).toEqual(['MARKET_DATA_MISSING']);
   });
   it('holder profile is stricter than trencher on age, holders, concentration and dev share', () => {
-    const young = { ...base, tokenAgeMinutes: 90, holders: 80, top10Pct: 55, devHoldingPct: 9, liquidityUsd: 6_000 };
+    const young = { ...base, tokenAgeMinutes: 90, holders: 45, top10Pct: 45, devHoldingPct: 8, liquidityUsd: 2_500 };
     expect(evaluateEarly('trencher', young).eligible).toBe(true);
     const h = evaluateEarly('holder', young);
     expect(h.eligible).toBe(false);
@@ -71,7 +74,7 @@ describe('early radar', () => {
     expect(r.components.organic).toBe(50);
   });
   it('real holder growth beats unknown growth', () => {
-    expect(evaluateEarly('holder', { ...base, holdersThen: 200 }).components.community).toBeGreaterThan(evaluateEarly('holder', { ...base, holdersThen: null }).components.community);
+    expect(evaluateEarly('holder', { ...base, holdersThen: 80 }).components.community).toBeGreaterThan(evaluateEarly('holder', { ...base, holdersThen: null }).components.community);
   });
   it('a token found through social chatter has an unverified origin: neutral, flagged, capped for holders', () => {
     const r = evaluateEarlyBoth({ ...base, relation: 'UNKNOWN', ogScore: null, narrativeScore: 100, narrativeManipulationRisk: 0, divergence: 'STRONG_POSITIVE' });

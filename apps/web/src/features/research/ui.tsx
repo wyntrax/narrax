@@ -5,6 +5,7 @@ import {AlertCircle,ArrowUpRight,LockKeyhole,SearchX} from 'lucide-react';
 import {ApiError} from '@/lib/api';
 import {Link,useRouter} from '@/i18n/navigation';
 import {useAuth} from '@/components/auth/context';
+import {NarraxLoader} from '@/components/narrax-loader';
 
 export function useFormat(){const locale=useLocale(),t=useTranslations('workspace');return {
  number:(value:number|null|undefined,digits=1)=>value==null||!Number.isFinite(value)?t('unknown'):new Intl.NumberFormat(locale,{maximumFractionDigits:digits}).format(value),
@@ -12,7 +13,7 @@ export function useFormat(){const locale=useLocale(),t=useTranslations('workspac
  percent:(value:number|null|undefined)=>value==null?t('unknown'):new Intl.NumberFormat(locale,{style:'percent',maximumFractionDigits:1}).format(value),
  date:(value:string|null|undefined)=>!value||!Number.isFinite(Date.parse(value))?t('unknown'):new Intl.DateTimeFormat(locale,{dateStyle:'medium',timeStyle:'short'}).format(new Date(value))
  };}
-export function Loading(){const t=useTranslations('workspace');return <div className="research-loading" role="status"><span>{t('loading')}</span><div className="skeleton"/><div className="skeleton short"/></div>;}
+export function Loading(){const t=useTranslations('workspace');return <NarraxLoader label={t('loading')}/>;}
 export function Empty({body}:{body?:string}){const t=useTranslations('workspace');return <div className="research-state" role="status"><SearchX aria-hidden="true" size={24}/><h2>{t('empty')}</h2><p>{body??t('emptyBody')}</p></div>;}
 export function Locked({tier}:{tier?:string}){
  const t=useTranslations('workspace');

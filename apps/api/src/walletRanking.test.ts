@@ -60,3 +60,11 @@ it('withholds bag-holding wallets whose dead open bags wipe out realised profit'
  expect(rankingReasons(sample,{...band,realisedPnlSol:'5',deadBagPositions:3,deadBagCostSol:'6'},history,now,false,false).reasons).toContain('DEAD_BAG_OVERHANG');
  expect(rankingReasons(sample,{...band,realisedPnlSol:'10',deadBagPositions:1,deadBagCostSol:'2'},history,now,false,false).reasons).not.toContain('DEAD_BAG_OVERHANG');
 });
+it('accepts a 5+ live small-cap sample when the 30-day ALL band has 20+ closes and band fast-close rate stays <= 50%',()=>{
+ const allBand={...band,band:'ALL',closedPositions:200,closedTokens:200,observedDays:30,fastCloseRate:0.5} as WalletPerformance['bands'][number];
+ const liveSmall={...band,closedPositions:9,closedTokens:9,observedDays:29,winRateLowerBound:0.7,fastCloseRate:0.11} as WalletPerformance['bands'][number];
+ const multi={...sample,bands:[allBand,liveSmall]} as WalletPerformance;
+ expect(rankingReasons(multi,liveSmall,history,now,false,false)).toEqual({historyComplete:true,reasons:[]});
+ expect(rankingReasons(multi,allBand,history,now,false,false)).toEqual({historyComplete:true,reasons:[]});
+ expect(rankingReasons(multi,{...liveSmall,fastCloseRate:0.54},history,now,false,false).reasons).toContain('FAST_EXITS');
+});

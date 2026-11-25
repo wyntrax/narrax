@@ -124,10 +124,10 @@ describe.skipIf(!up)('token resolution on a real Postgres', () => {
     const n = await db.narrative.create({ data: { name: `${word} early`, slug: `early-${tag}`, stage: 'ACCELERATING', score: 91, velocity: 240, firstDetectedAt: ago(3) } });
     await db.narrativeMetric.create({ data: { narrativeId: n.id, score: 91, velocity: 240, acceleration: 5, organicScore: 80, manipulationRisk: 12, mentionVelocity: 240, creatorVelocity: 60, engagementVelocity: 90, at: NOW } });
     const t = await db.token.create({ data: { mint: `SAFE${tag}`.padEnd(40, '1'), symbol: word.toUpperCase(), name: `${word} Token`, deployer: `dep-safe-${tag}`, createdOnChainAt: ago(5) } });
-    const metric = await db.tokenMetric.create({ data: { tokenId: t.id, priceUsd: 0.001, marketCapUsd: 50_000, liquidityUsd: 25_000, volume24hUsd: 100_000, at: NOW } });
+    const metric = await db.tokenMetric.create({ data: { tokenId: t.id, priceUsd: 0.001, marketCapUsd: 25_000, liquidityUsd: 12_000, volume24hUsd: 60_000, at: NOW } });
     await db.systemSetting.create({ data: { key: `research.marketMetric.${metric.id}`, value: { metricId: metric.id, source: 'dexscreener', marketCapIsFdv: false } } });
-    await db.tokenMetric.create({ data: { tokenId: t.id, priceUsd: 0.0009, marketCapUsd: 45_000, liquidityUsd: 24_000, volume24hUsd: 90_000, at: ago(1.1) } });
-    await db.tokenMetric.create({ data: { tokenId: t.id, priceUsd: 0.0007, marketCapUsd: 35_000, liquidityUsd: 20_000, volume24hUsd: 70_000, at: ago(3.2) } });
+    await db.tokenMetric.create({ data: { tokenId: t.id, priceUsd: 0.0009, marketCapUsd: 22_000, liquidityUsd: 11_000, volume24hUsd: 50_000, at: ago(1.1) } });
+    await db.tokenMetric.create({ data: { tokenId: t.id, priceUsd: 0.0007, marketCapUsd: 18_000, liquidityUsd: 10_000, volume24hUsd: 40_000, at: ago(3.2) } });
     await db.tokenHolderMetric.create({ data: { tokenId: t.id, holders: 500, top10Pct: 20, devHoldingPct: null, smartWalletHolders: 5, at: NOW } });
     await db.tokenHolderMetric.create({ data: { tokenId: t.id, holders: 450, top10Pct: 22, devHoldingPct: null, smartWalletHolders: 3, at: ago(3.2) } });
     const calls: string[] = [],tradeabilityCalls: string[] = [];

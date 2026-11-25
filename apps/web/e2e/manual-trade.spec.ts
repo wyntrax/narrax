@@ -133,16 +133,19 @@ test('manual trade explains stale evidence and blocks the buy quote',async({page
  await expect(page.getByRole('button',{name:'Get swap quote'})).toBeDisabled();
  await page.getByRole('button',{name:'Sell'}).click();
  await expect(page.locator('.trade-blocked')).toHaveCount(0);
- await expect(page.locator('.trade-swap')).toHaveCSS('margin-top','6px');
- await expect(page.locator('.trade-swap')).toHaveCSS('top','6px');
+ await expect(page.locator('.trade-research')).toHaveCSS('padding-top','16px');
+ await expect(page.locator('.trade-swap')).toHaveCSS('position','sticky');
+ await expect(page.locator('.trade-swap')).toHaveCSS('margin-top','0px');
+ await expect(page.locator('.trade-swap')).toHaveCSS('top','0px');
  await page.locator('.research-main').evaluate(el=>el.scrollTo(0,0));
- const gap=await page.evaluate(()=>{
+ const alignment=await page.evaluate(()=>{
+  const layout=document.querySelector('.trade-layout')!.getBoundingClientRect();
   const steps=document.querySelector('.trade-steps')!.getBoundingClientRect();
   const swap=document.querySelector('.trade-swap')!.getBoundingClientRect();
-  return swap.top-steps.bottom;
+  return {swapOffset:Math.abs(swap.top-layout.top),leftInset:steps.top-swap.top};
  });
- expect(gap).toBeGreaterThanOrEqual(5);
- expect(gap).toBeLessThanOrEqual(8);
+ expect(alignment.swapOffset).toBeLessThanOrEqual(2);
+ expect(alignment.leftInset).toBeGreaterThanOrEqual(15);
  expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
  await page.screenshot({path:'test-results/trade-stale-evidence.png',fullPage:true});
 });
