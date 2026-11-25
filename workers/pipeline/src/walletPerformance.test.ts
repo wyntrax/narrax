@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { WalletOpenPositions, WalletPerformance } from '@narra/shared';
-import { computeWalletOpenPositions, computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
+import { computeWalletClosedSummary, computeWalletOpenPositions, computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
 
 const now = new Date('2026-10-26T12:00:00Z');
 function trade(side:'BUY'|'SELL',sol:string,qty:string,minute:number,cap:string|null='85000',token='a'):PerformanceTrade {
@@ -68,4 +68,31 @@ it('treats sells within 1e-9 relative float dust as full closes without false co
   const result=computeWalletPerformance(rows,now);
   expect(result).toMatchObject({unmatchedSells:0,invalidTrades:0});
   expect(result.bands.find(b=>b.band==='SMALL_CAP')).toMatchObject({closedPositions:2,openPositions:0,wins:2,realisedPnlSol:'1.5'});
+});
+it('classifies swap_implied entry caps and flags wiped open positions held over 24h as dead bags',()=>{
+  const oldAt=new Date(+now-30*3_600_000);
+  const rows=[
+    {id:'s1',tokenId:'bag',side:'BUY' as const,amountSol:'2',tokenAmount:'1000',marketCapUsd:'75000',at:oldAt,
+      evidence:{eventAt:oldAt.toISOString(),market:{at:oldAt.toISOString(),source:'swap_implied',marketCapIsFdv:false}}},
+    {id:'s2',tokenId:'alive',side:'BUY' as const,amountSol:'1',tokenAmount:'100',marketCapUsd:'200000',at:oldAt,
+      evidence:{eventAt:oldAt.toISOString(),market:{at:oldAt.toISOString(),source:'swap_implied',marketCapIsFdv:false}}},
+  ];
+  // SOL = $100: bag worth 1000 * $0.005 / $100 = 0.05 SOL (2.5% of 2 SOL => dead bag); alive worth 100 * $1.5 / $100 = 1.5 SOL (+0.5 SOL)
+  const mtm={solUsd:100,prices:new Map([['bag',{priceUsd:0.005,liquidityUsd:5000}],['alive',{priceUsd:1.5,liquidityUsd:50000}]])};
+  const result=computeWalletPerformance(rows,now,false,mtm);
+  const sc=result.bands.find(b=>b.band==='SMALL_CAP')!;
+  expect(sc).toMatchObject({positions:2,openPositions:2,entryCapKnownPositions:2,deadBagPositions:1,deadBagCostSol:'2'});
+  expect(Number(sc.openValueSol)).toBeCloseTo(1.55,4);
+  expect(Number(sc.unrealisedPnlSol)).toBeCloseTo(-1.45,4);
+});
+it('builds a chronological realised equity curve and top winners/losers summary',()=>{
+  const rows=[
+    trade('BUY','1','10',0,'80000','win1'),trade('SELL','3','10',10,'80000','win1'),
+    trade('BUY','2','10',20,'80000','loss1'),trade('SELL','0.5','10',30,'80000','loss1'),
+    trade('BUY','1','10',40,'80000','win2'),trade('SELL','2','10',50,'80000','win2'),
+  ];
+  const summary=computeWalletClosedSummary(rows,now);
+  expect(summary.equityCurve.map(p=>p.cumulativePnlSol)).toEqual([2,0.5,1.5]);
+  expect(summary.topWinners.map(p=>[p.tokenId,p.pnlSol])).toEqual([['win1',2],['win2',1]]);
+  expect(summary.topLosers.map(p=>[p.tokenId,p.pnlSol])).toEqual([['loss1',-1.5]]);
 });

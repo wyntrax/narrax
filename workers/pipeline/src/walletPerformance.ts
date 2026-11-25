@@ -16,10 +16,29 @@ const decimalMedian = (xs: Decimal[]) => {
 };
 const object = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
 
-/** Entry classification uses frozen pre-trade evidence only. FDV and later market caps never substitute. */
+export interface TokenSpotPrice {
+  priceUsd: number;
+  liquidityUsd: number | null;
+}
+
+export interface MarkToMarketContext {
+  solUsd: number;
+  prices: ReadonlyMap<string, TokenSpotPrice>;
+}
+
+/** Dead-bag survivorship thresholds: an open position held ≥ 24h that has lost ≥ 90% or sits in < $1K liquidity. */
+export const DEAD_BAG_RULES = {
+  minAgeMs: 24 * 3_600_000,
+  maxRemainingValueRatio: 0.1,
+  minLiquidityUsd: 1_000,
+} as const;
+
+const ENTRY_CAP_SOURCES = new Set(['dexscreener', 'swap_implied']);
+
+/** Entry classification uses frozen pre-trade or swap-implied evidence only. FDV and later market caps never substitute. */
 function entryBand(t: PerformanceTrade): WalletEntryBand {
   const evidence = object(t.evidence), market = object(evidence.market), at = typeof market.at === 'string' ? Date.parse(market.at) : NaN;
-  if (evidence.eventAt !== t.at.toISOString() || market.source !== 'dexscreener' || market.marketCapIsFdv !== false ||
+  if (evidence.eventAt !== t.at.toISOString() || typeof market.source !== 'string' || !ENTRY_CAP_SOURCES.has(market.source) || market.marketCapIsFdv !== false ||
       !Number.isFinite(at) || at > +t.at || +t.at - at > 900_000 || t.marketCapUsd == null) return 'UNKNOWN';
   const cap = new D(t.marketCapUsd.toString());
   if (!cap.isFinite() || cap.lte(0)) return 'UNKNOWN';
@@ -92,23 +111,87 @@ export function computeWalletOpenPositions(rows: PerformanceTrade[], now: Date, 
   };
 }
 
-export function computeWalletPerformance(rows: PerformanceTrade[], now: Date, capped = false): WalletPerformance {
+export interface ClosedTokenHighlight {
+  tokenId: string;
+  pnlSol: number;
+  investedSol: number;
+  roi: number;
+  holdSeconds: number;
+  band: WalletEntryBand;
+  closedAt: string;
+}
+
+export interface WalletClosedSummary {
+  equityCurve: { at: string; cumulativePnlSol: number }[];
+  topWinners: ClosedTokenHighlight[];
+  topLosers: ClosedTokenHighlight[];
+}
+
+/** Chronological realised equity curve (downsampled to <= 60 points) plus top 5 winners & losers from closed positions. */
+export function computeWalletClosedSummary(rows: PerformanceTrade[], now: Date): WalletClosedSummary {
+  const { valid } = accountPositions(rows, now);
+  const closed = valid.filter((p) => p.close !== null).sort((a, b) => a.close! - b.close! || a.entryTradeId.localeCompare(b.entryTradeId));
+  let cum = new D(0);
+  const rawCurve = closed.map((p) => {
+    cum = cum.plus(p.pnl);
+    return { at: new Date(p.close!).toISOString(), cumulativePnlSol: Math.round(cum.toNumber() * 1e6) / 1e6 };
+  });
+  let equityCurve = rawCurve;
+  if (rawCurve.length > 60) {
+    const step = (rawCurve.length - 1) / 59;
+    equityCurve = Array.from({ length: 60 }, (_, i) => rawCurve[Math.round(i * step)]!);
+  }
+  const toHighlight = (p: Position): ClosedTokenHighlight => ({
+    tokenId: p.token,
+    pnlSol: Math.round(p.pnl.toNumber() * 1e6) / 1e6,
+    investedSol: Math.round(p.invested.toNumber() * 1e6) / 1e6,
+    roi: p.invested.gt(0) ? Math.round(p.pnl.div(p.invested).toNumber() * 1e4) / 1e4 : 0,
+    holdSeconds: Math.max(0, Math.round((p.close! - p.start) / 1000)),
+    band: p.band,
+    closedAt: new Date(p.close!).toISOString(),
+  });
+  const topWinners = closed.filter((p) => p.pnl.gt(0)).sort((a, b) => b.pnl.cmp(a.pnl)).slice(0, 5).map(toHighlight);
+  const topLosers = closed.filter((p) => p.pnl.lt(0)).sort((a, b) => a.pnl.cmp(b.pnl)).slice(0, 5).map(toHighlight);
+  return { equityCurve, topWinners, topLosers };
+}
+
+export function computeWalletPerformance(rows: PerformanceTrade[], now: Date, capped = false, markToMarket?: MarkToMarketContext | null): WalletPerformance {
   const { valid, trades, invalidTrades, unmatchedSells } = accountPositions(rows,now);
+  const validMtm = markToMarket && Number.isFinite(markToMarket.solUsd) && markToMarket.solUsd > 0 ? markToMarket : null;
   const bands = WalletEntryBand.options.map(band => {
     const mine = valid.filter(p => band === 'ALL' || p.band === band || band === 'SMALL_CAP' && ['UNDER_100K','100K_500K','500K_1M'].includes(p.band));
-    const closed = mine.filter(p => p.close !== null), sold = mine.filter(p => p.sold);
+    const closed = mine.filter(p => p.close !== null), sold = mine.filter(p => p.sold), open = mine.filter(p => p.close === null);
     const wins = closed.filter(p => p.pnl.gt(0)), losses = closed.filter(p => p.pnl.lt(0)), n = closed.length, rate = n ? wins.length/n : null;
     const sum = (xs: Position[], f: (p: Position) => Decimal) => xs.reduce((a,p) => a.plus(f(p)),new D(0));
     const grossWin = sum(wins,p=>p.pnl), grossLoss = sum(losses,p=>p.pnl.abs());
     let equity = new D(0), peak = new D(0), drawdown = new D(0);
     for (const p of [...closed].sort((a,b)=>a.close!-b.close!)) { equity=equity.plus(p.pnl); peak=D.max(peak,equity); drawdown=D.max(drawdown,peak.minus(equity)); }
+    // Mark-to-market open positions when latest spot prices are supplied.
+    let pricedOpen = 0, openValue = new D(0), pricedCost = new D(0), deadBagPositions = 0, deadBagCost = new D(0);
+    if (validMtm && open.length) {
+      for (const p of open) {
+        const spot = validMtm.prices.get(p.token);
+        if (!spot || !Number.isFinite(spot.priceUsd) || spot.priceUsd < 0) continue;
+        const valueSol = p.qty.mul(spot.priceUsd).div(validMtm.solUsd);
+        pricedOpen++;
+        openValue = openValue.plus(valueSol);
+        pricedCost = pricedCost.plus(p.cost);
+        const ageMs = +now - p.start;
+        const illiquid = spot.liquidityUsd !== null && Number.isFinite(spot.liquidityUsd) && spot.liquidityUsd < DEAD_BAG_RULES.minLiquidityUsd;
+        const wiped = p.cost.gt(0) && valueSol.lte(p.cost.mul(DEAD_BAG_RULES.maxRemainingValueRatio));
+        if (ageMs >= DEAD_BAG_RULES.minAgeMs && (wiped || illiquid)) {
+          deadBagPositions++;
+          deadBagCost = deadBagCost.plus(p.cost);
+        }
+      }
+    }
     // 95% Wilson lower bound penalises tiny samples; this is descriptive, not a future-win probability.
     const z2 = 1.96 ** 2;
     const lower = rate === null ? null : (rate+z2/(2*n)-1.96*Math.sqrt(rate*(1-rate)/n+z2/(4*n*n)))/(1+z2/n);
     return { band, positions: mine.length, closedPositions: n, closedTokens: new Set(closed.map(p=>p.token)).size,
-      wins: wins.length, losses: losses.length, breakeven: n-wins.length-losses.length, openPositions: mine.length-n,
+      wins: wins.length, losses: losses.length, breakeven: n-wins.length-losses.length, openPositions: open.length,
       winRate: rate, winRateLowerBound: lower, realisedPnlSol: sold.length ? sum(sold,p=>p.pnl).toFixed() : null,
-      openCostSol: sum(mine.filter(p=>p.close===null),p=>p.cost).toFixed(), medianRoi: median(closed.map(p=>p.pnl.div(p.invested).toNumber())),
+      openCostSol: sum(open,p=>p.cost).toFixed(), medianRoi: median(closed.map(p=>p.pnl.div(p.invested).toNumber())),
       medianWinSol: decimalMedian(wins.map(p=>p.pnl)), medianLossSol: decimalMedian(losses.map(p=>p.pnl)),
       profitFactor: grossLoss.gt(0) ? grossWin.div(grossLoss).toNumber() : null,
       medianFirstSellSeconds: median(sold.map(p=>(p.firstSell!-p.start)/1000)), medianCloseSeconds: median(closed.map(p=>(p.close!-p.start)/1000)),
@@ -117,6 +200,8 @@ export function computeWalletPerformance(rows: PerformanceTrade[], now: Date, ca
       medianEntrySol: decimalMedian(mine.map(p=>p.entry)), deployedSol: sum(mine,p=>p.invested).toFixed(),
       medianClosedPositionSol: decimalMedian(closed.map(p=>p.invested)),
       entryCapKnownPositions: valid.filter(p=>p.band!=='UNKNOWN').length, entryCapTotalPositions: valid.length,
+      ...(pricedOpen > 0 ? { openValueSol: openValue.toFixed(), unrealisedPnlSol: openValue.minus(pricedCost).toFixed() } : {}),
+      ...(validMtm ? { deadBagPositions, deadBagCostSol: deadBagCost.toFixed() } : {}),
     } satisfies WalletBandPerformance;
   });
   return { version: 1, checkedAt: now.toISOString(), windowDays: 30, observedTrades: trades.length, invalidTrades, unmatchedSells, capped,

@@ -12,13 +12,13 @@ export async function reconcileWalletValuations(db: PrismaClient, now: Date, opt
   if (!Number.isInteger(limit)||limit<1||limit>500||!Number.isFinite(+now)) throw new Error('Invalid reconciliation bounds');
   const rows=await db.walletTrade.findMany({where:{at:{gte:new Date(+now-30*86400000),lte:now},
     ...(opts.after?{id:{gt:opts.after}}:{}),wallet:{active:true,researchReview:{not:'REJECTED'},...(opts.wallet?{address:opts.wallet}:{})},
-    OR:[{marketCapUsd:null},{amountUsd:null}]},orderBy:{id:'asc'},take:limit+1});
+    OR:[{marketCapUsd:null},{amountUsd:null}]},include:{token:{select:{mint:true}}},orderBy:{id:'asc'},take:limit+1});
   const page=rows.slice(0,limit);
   const out={asOf:now.toISOString(),apply:!!opts.apply,scanned:page.length,changed:0,applied:0,conflicts:0,legacySkipped:0,recoverableCaps:0,recoverableUsd:0,reasons:{} as Record<string,number>,nextCursor:rows.length>limit?page.at(-1)!.id:null};
   for (const row of page) {
     const old=object(row.evidence);
     if ((row.marketCapUsd!==null||row.amountUsd!==null)&&old.eventAt!==row.at.toISOString()) { out.legacySkipped++; continue; }
-    const candidate=await walletTradeEvidence(db,row.tokenId,row.at,Number(row.amountSol));
+    const candidate=await walletTradeEvidence(db,row.tokenId,row.at,Number(row.amountSol),{mint:row.token?.mint,tokenAmount:row.tokenAmount==null?null:Number(row.tokenAmount)});
     const missingCap=row.marketCapUsd===null,missingUsd=row.amountUsd===null;
     const reasons=[...(Array.isArray(old.reasons)?old.reasons.filter((r):r is string=>typeof r==='string'):[])
       .filter(r=>!(missingCap&&marketReasons.has(r))&&!(missingUsd&&r==='NO_CONTEMPORANEOUS_SOL')),

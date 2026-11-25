@@ -20,9 +20,10 @@ export function registerWalletResearchRoutes(app: FastifyInstance, deps: Pick<Ac
       status: z.enum(['ALL','REVIEW_READY','OBSERVING']).default('ALL'),
       minMedianPositionSol: z.coerce.number().finite().min(0).max(1000).default(0.01),
       flowOnly: z.enum(['true','false']).default('false'),
+      excludeAutomated: z.enum(['true','false']).default('false'),
     }).strict().safeParse(req.query);
     if (!query.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
-    return walletRanking(db,clock(),query.data.band,query.data.limit,query.data.status,query.data.minMedianPositionSol,query.data.flowOnly==='true');
+    return walletRanking(db,clock(),query.data.band,query.data.limit,query.data.status,query.data.minMedianPositionSol,query.data.flowOnly==='true',query.data.excludeAutomated==='true');
   });
 
   app.get('/v1/smart-money/flows', opts, async (req, reply) => {
@@ -33,7 +34,37 @@ export function registerWalletResearchRoutes(app: FastifyInstance, deps: Pick<Ac
     const rows = await db.walletResearchSignal.findMany({ where: { token: { blacklisted: false }, createdAt: { lte: now }, ...(q.data.side ? { side: q.data.side } : {}) }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: q.data.limit + 1, ...(q.data.cursor ? { cursor: { id: q.data.cursor }, skip: 1 } : {}), include: { token: { select: { mint: true, symbol: true, name: true, metrics: { orderBy: { at: 'desc' }, take: 1, select: { liquidityUsd: true, at: true } } } }, measurements: { orderBy: { horizonHours: 'asc' } } } });
     const page = rows.slice(0,q.data.limit);
     const images=await marketTokenImages(db,page.map(s=>({id:s.tokenId,mint:s.token.mint})));
-    return { asOf: now, nextCursor: rows.length > page.length ? page.at(-1)!.id : null, items: page.map(s => ({ id: s.id, token: { mint: s.token.mint, symbol: s.token.symbol, name: s.token.name, imageUrl: images.get(s.tokenId) ?? null }, side: s.side, createdAt: s.createdAt,
+    const flowAddresses = [...new Set(page.flatMap(s => {
+      const trades = (s.evidence as { trades?: { wallet?: unknown }[] } | null)?.trades;
+      return Array.isArray(trades) ? trades.map(t => typeof t.wallet === 'string' ? t.wallet : '').filter(Boolean) : [];
+    }))];
+    const [walletRows, measurementRows] = await Promise.all([
+      flowAddresses.length && typeof db.trackedWallet?.findMany === 'function'
+        ? db.trackedWallet.findMany({ where: { address: { in: flowAddresses } }, select: { address: true, label: true, profile: { select: { score: true, style: true } } } })
+        : Promise.resolve([]),
+      typeof db.walletResearchMeasurement?.findMany === 'function'
+        ? db.walletResearchMeasurement.findMany({ orderBy: { dueAt: 'desc' }, take: 500, select: { horizonHours: true, status: true, returnPct: true } })
+        : Promise.resolve([]),
+    ]);
+    const walletMeta: Record<string, { label: string | null; score: number | null; style: string | null }> = {};
+    for (const w of walletRows) walletMeta[w.address] = { label: w.label, score: w.profile?.score ?? null, style: w.profile?.style ?? null };
+    const byHorizon = new Map<number, { total: number; measured: number; unknown: number; pending: number; returns: number[] }>();
+    for (const m of measurementRows) {
+      const bucket = byHorizon.get(m.horizonHours) ?? { total: 0, measured: 0, unknown: 0, pending: 0, returns: [] };
+      bucket.total++;
+      if (m.status === 'MEASURED' && m.returnPct != null && Number.isFinite(m.returnPct)) { bucket.measured++; bucket.returns.push(m.returnPct); }
+      else if (m.status === 'UNKNOWN') bucket.unknown++;
+      else bucket.pending++;
+      byHorizon.set(m.horizonHours, bucket);
+    }
+    const trackRecord = [...byHorizon.entries()].sort((a, b) => a[0] - b[0]).map(([horizonHours, b]) => {
+      const sorted = [...b.returns].sort((x, y) => x - y);
+      const mid = Math.floor(sorted.length / 2);
+      const medianReturnPct = !sorted.length ? null : sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+      const hitRate = b.measured ? b.returns.filter(r => r > 0).length / b.measured : null;
+      return { horizonHours, total: b.total, measured: b.measured, unknown: b.unknown, pending: b.pending, hitRate, medianReturnPct };
+    });
+    return { asOf: now, nextCursor: rows.length > page.length ? page.at(-1)!.id : null, walletMeta, trackRecord, items: page.map(s => ({ id: s.id, token: { mint: s.token.mint, symbol: s.token.symbol, name: s.token.name, imageUrl: images.get(s.tokenId) ?? null }, side: s.side, createdAt: s.createdAt,
       stale: +now - +s.createdAt > 15 * 60_000, walletCount: s.walletCount, independentEntities: s.independentEntities, netFlowSol: Number(s.netFlowSol),
       entryPriceUsd: Number(s.entryPriceUsd), entryAt: s.entryAt, evidence: s.evidence,
       currentLiquidityUsd: s.token.metrics[0]?.liquidityUsd?.toString() ?? null, currentMarketAt: s.token.metrics[0]?.at ?? null,

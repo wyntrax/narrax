@@ -204,6 +204,45 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
     const safety=await radarSafetyViews(db,[t],at);
     const latestEvidence=await latestEvidenceViews(db,[t],at);
     const holderObservation=latestEvidence.get(t.id)?.holders;
+    let smartMoneyActivity: {
+      windowHours: number; activeWallets: number; netFlowSol: number;
+      wallets: { address: string; label: string | null; score: number | null; style: string | null; buys: number; sells: number; netSol: number; lastAt: Date }[];
+    } | null = null;
+    if (typeof db.walletTrade?.findMany === 'function') {
+      const recentTrades = await db.walletTrade.findMany({
+        where: { tokenId: t.id, at: { gte: new Date(+at - 24 * 3_600_000), lte: at }, wallet: { active: true, researchReview: { not: 'REJECTED' } } },
+        orderBy: [{ at: 'desc' }, { id: 'desc' }],
+        take: 250,
+        select: { walletId: true, side: true, amountSol: true, at: true, wallet: { select: { address: true, label: true, profile: { select: { score: true, style: true } } } } },
+      });
+      const wIds = [...new Set(recentTrades.map((r) => r.walletId))];
+      const intelSettings = wIds.length && typeof db.systemSetting?.findMany === 'function'
+        ? await db.systemSetting.findMany({ where: { key: { in: wIds.map((id) => `wallet.intelligence.${id}`) } }, select: { key: true, value: true } })
+        : [];
+      const automatedIds = new Set<string>();
+      for (const s of intelSettings) {
+        const v = s.value as { automation?: { automated?: unknown } } | null;
+        if (v?.automation?.automated === true) automatedIds.add(s.key.slice('wallet.intelligence.'.length));
+      }
+      const byWallet = new Map<string, { address: string; label: string | null; score: number | null; style: string | null; buys: number; sells: number; buySol: number; sellSol: number; lastAt: Date }>();
+      for (const tr of recentTrades) {
+        if (automatedIds.has(tr.walletId)) continue;
+        const cur = byWallet.get(tr.walletId) ?? { address: tr.wallet.address, label: tr.wallet.label, score: tr.wallet.profile?.score ?? null, style: tr.wallet.profile?.style ?? null, buys: 0, sells: 0, buySol: 0, sellSol: 0, lastAt: tr.at };
+        const sol = n(tr.amountSol) ?? 0;
+        if (tr.side === 'BUY') { cur.buys++; cur.buySol += sol; } else { cur.sells++; cur.sellSol += sol; }
+        if (tr.at > cur.lastAt) cur.lastAt = tr.at;
+        byWallet.set(tr.walletId, cur);
+      }
+      const wallets = [...byWallet.values()]
+        .map((w) => ({ address: w.address, label: w.label, score: w.score, style: w.style, buys: w.buys, sells: w.sells, netSol: Math.round((w.buySol - w.sellSol) * 1e6) / 1e6, lastAt: w.lastAt }))
+        .sort((a, b) => Math.abs(b.netSol) - Math.abs(a.netSol) || b.lastAt.getTime() - a.lastAt.getTime());
+      smartMoneyActivity = {
+        windowHours: 24,
+        activeWallets: wallets.length,
+        netFlowSol: Math.round(wallets.reduce((sum, w) => sum + w.netSol, 0) * 1e6) / 1e6,
+        wallets: wallets.slice(0, 10),
+      };
+    }
     return {
       mint: t.mint, symbol: t.symbol, name: t.name, blacklisted: t.blacklisted, createdOnChainAt: t.createdOnChainAt,
       marketStatus,lastMarketAt:latestMetricAt?.toISOString()??null,
@@ -212,6 +251,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
       latestEvidence:latestEvidence.get(t.id),
       observation:observation(evidence.get(t.id),m?.id,at),
       developerHolding:developerHolding?.value??null,
+      smartMoneyActivity,
       metrics: m ? { priceUsd: n(m.priceUsd), marketCapUsd: n(m.marketCapUsd), liquidityUsd: n(m.liquidityUsd), volume24hUsd: n(m.volume24hUsd), at: m.at } : null,
       holders: holderObservation?.data && holderObservation.at && ['FRESH','STALE'].includes(holderObservation.state)
         ? { ...holderObservation.data, at: holderObservation.at } : null, risk: t.risk[0] ?? null,

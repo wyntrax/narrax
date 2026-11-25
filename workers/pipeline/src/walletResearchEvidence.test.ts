@@ -30,3 +30,18 @@ it('never uses later or stale SOL observations for historical valuation',async()
   expect((await walletTradeEvidence(db as unknown as PrismaClient,'token',at,1)).amountUsd).toBeNull();
  }
 });
+it('derives swap-implied market cap for fixed-supply pump/bonk launches when DexScreener history is absent, while rejecting dust swaps',async()=>{
+ const observed=new Date(+at-60000).toISOString();
+ const db={tokenMetric:{findFirst:async()=>null},systemSetting:{findUnique:async()=>({value:{priceUsd:150,at:observed,source:'dexscreener'}}),findFirst:async()=>null}};
+ // 0.1 SOL ($15) for 100,000 tokens of a 1B pump launch => $0.00015/token => $150,000 mcap
+ const ok=await walletTradeEvidence(db as unknown as PrismaClient,'token',at,0.1,{mint:'SoMeMint1111111111111111111111111111111pump',tokenAmount:100_000});
+ expect(ok.marketCapUsd).toBeCloseTo(150_000,2);
+ expect(ok.evidence.market).toMatchObject({source:'swap_implied',marketCapIsFdv:false,supplyBasis:'FIXED_LAUNCHPAD_1B'});
+ expect(ok.evidence.reasons).toEqual([]);
+ // Dust swap (< 0.005 SOL) must NOT produce a fee-skewed swap-implied cap
+ const dust=await walletTradeEvidence(db as unknown as PrismaClient,'token',at,0.0001,{mint:'SoMeMint1111111111111111111111111111111pump',tokenAmount:1});
+ expect(dust.marketCapUsd).toBeNull();
+ // Non-launchpad mints stay unknown without DexScreener
+ const other=await walletTradeEvidence(db as unknown as PrismaClient,'token',at,1,{mint:'So11111111111111111111111111111111111111112',tokenAmount:100_000});
+ expect(other.marketCapUsd).toBeNull();
+});

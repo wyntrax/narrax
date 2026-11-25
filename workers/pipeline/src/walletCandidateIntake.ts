@@ -39,21 +39,38 @@ export async function intakeEmergingWallets(db: PrismaClient, now = new Date()) 
         holdRank(b) - holdRank(a) || spendSize(b) - spendSize(a) || b.scannedTokens - a.scannedTokens);
       if (out.capacity === 0 && pending.length > 0 && typeof tx.trackedWallet.updateMany === 'function') {
         const staleCutoff = new Date(+now - WALLET_INTAKE_LIMITS.staleProvisionalMs);
+        const canReadIntelligence = typeof tx.systemSetting.findMany === 'function';
         const stalePool = await tx.trackedWallet.findMany({
           where: {
             source: 'DISCOVERED',
             active: true,
             researchReview: 'PROVISIONAL',
             createdAt: { lte: staleCutoff },
-            OR: [{ profile: { is: null } }, { profile: { is: { score: { lt: WALLET_INTAKE_LIMITS.evictMaxScore } } } }],
+            ...(!canReadIntelligence
+              ? { OR: [{ profile: { is: null } }, { profile: { is: { score: { lt: WALLET_INTAKE_LIMITS.evictMaxScore } } } }] }
+              : {}),
           },
           select: { id: true, profile: { select: { score: true } } },
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-          take: WALLET_INTAKE_LIMITS.perCycle * 5,
+          take: canReadIntelligence ? WALLET_INTAKE_LIMITS.capacity : WALLET_INTAKE_LIMITS.perCycle * 5,
         });
-        const evictIds = stalePool
-          .filter((row): row is { id: string; profile: { score: number } | null } => typeof (row as { id?: unknown }).id === 'string')
-          .sort((a, b) => (a.profile?.score ?? -1) - (b.profile?.score ?? -1))
+        const validStale = stalePool.filter((row): row is { id: string; profile: { score: number } | null } =>
+          typeof (row as { id?: unknown }).id === 'string');
+        const automatedIds = new Set<string>();
+        if (canReadIntelligence && validStale.length) {
+          const intelRows = await tx.systemSetting.findMany({
+            where: { key: { in: validStale.map(w => `wallet.intelligence.${w.id}`) } },
+            select: { key: true, value: true },
+          });
+          for (const row of intelRows) {
+            const v = row.value as { automation?: { automated?: unknown } } | null;
+            if (v?.automation?.automated === true) automatedIds.add(row.key.slice('wallet.intelligence.'.length));
+          }
+        }
+        // Evict stale automated/spray wallets first (even if survivorship bias inflated their score), then lowest score.
+        const evictIds = validStale
+          .filter(w => automatedIds.has(w.id) || w.profile === null || w.profile.score < WALLET_INTAKE_LIMITS.evictMaxScore)
+          .sort((a, b) => Number(automatedIds.has(b.id)) - Number(automatedIds.has(a.id)) || (a.profile?.score ?? -1) - (b.profile?.score ?? -1))
           .slice(0, Math.min(WALLET_INTAKE_LIMITS.perCycle, pending.length))
           .map(w => w.id);
         if (evictIds.length) {

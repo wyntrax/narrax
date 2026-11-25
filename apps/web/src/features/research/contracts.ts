@@ -63,6 +63,7 @@ export const TokenSchema=TokenRef.extend({
   latestEvidence:LatestEvidenceSchema.optional(),
   radarSafety:RadarSafetyViewSchema.optional(),
   developerHolding:z.object({wallet:text,holdingPct:number.min(0).max(100),signature:text,source:z.literal('INITIAL_MINT_AUTHORITY'),at:date,relatedWalletsIncluded:z.boolean()}).nullish(),
+  smartMoneyActivity:z.object({windowHours:number,activeWallets:number,netFlowSol:number,wallets:z.array(z.object({address:text,label:text.nullable(),score:nullable,style:text.nullable(),buys:number,sells:number,netSol:number,lastAt:date}))}).nullish(),
  observation:MarketObservation.nullish(),
  blacklisted:z.boolean(),createdOnChainAt:date.nullable(),marketStatus:z.enum(['ACTIVE','NO_MARKET']).optional(),lastMarketAt:date.nullable().optional(),
  metrics:z.object({priceUsd:nullable,marketCapUsd:nullable,liquidityUsd:nullable,volume24hUsd:nullable,at:date}).nullable(),
@@ -79,7 +80,7 @@ export const TokenRefreshSchema=z.object({ok:z.literal(true),reused:z.boolean(),
 // ---- Smart money, alerts, analytics, settings and chat. Mirrors apps/api/src/{read,alerts,analytics,settings,chat}.ts. ----
 export const SmartWalletSchema=z.object({address:text,label:text.nullish(),score:nullable,source:text.optional(),profileAt:date.nullish(),metricsAt:date.nullish(),trackedSince:date.optional(),lastTradeAt:date.nullish(),observedTrades:z.number().int().nonnegative().optional(),evidenceStatus:z.literal('UNVERIFIED').optional(),leaderScore:nullable.optional(),style:text.nullish(),medianHoldSeconds:nullable.optional(),bestPattern:text.nullish(),weakPattern:text.nullish(),winRate:nullable.optional(),pnl30dSol:nullable.optional(),closedTrades:nullable.optional(),avgRoi:nullable.optional(),cluster:z.object({id:text,confidence:text.or(number)}).nullable().optional()});
 export type SmartWallet=z.infer<typeof SmartWalletSchema>;
-export const WalletIntelligenceSchema=z.object({checkedAt:date,windowDays:number,observedTrades:number,closedTrades:number,requiredClosedTrades:number,status:z.enum(['INSUFFICIENT_HISTORY','READY'])});
+export const WalletIntelligenceSchema=z.object({checkedAt:date,windowDays:number,observedTrades:number,closedTrades:number,requiredClosedTrades:number,status:z.enum(['INSUFFICIENT_HISTORY','READY']),automation:z.object({automated:z.boolean(),reasons:z.array(text),tradesPerDay:number,medianBuySol:nullable,openPositionCount:number}).nullish()});
 export const SmartWalletsSchema=pageOf(SmartWalletSchema.extend({intelligence:WalletIntelligenceSchema.nullish(),qualification:QualificationSchema.nullish(),researchReview:text.optional()}));
 const WalletTradeSchema=z.object({id:text,at:date,side:z.enum(['BUY','SELL']),amountSol:nullable,amountUsd:nullable.optional(),marketCapUsd:nullable,evidence:z.object({reasons:z.array(text),market:z.object({at:date,source:text,marketCapIsFdv:z.boolean().optional()}).nullable(),sol:z.object({at:date,source:text}).nullish()}).nullish(),signature:text,token:TokenLabel});
 export const WalletTradesSchema=pageOf(WalletTradeSchema);
@@ -93,6 +94,7 @@ export const WalletOpenPositionsSchema=z.object({
   capped:z.boolean(),invalidTrades:z.number().int().nonnegative(),unmatchedSells:z.number().int().nonnegative(),
   positions:z.array(WalletOpenPositionSchema),totalPositions:z.number().int().nonnegative().optional(),
 });
+const ClosedTokenHighlightSchema=z.object({tokenId:text,pnlSol:number,investedSol:number,roi:number,holdSeconds:number,band:text,closedAt:date,token:TokenRef.nullable()});
 export const WalletDetailSchema=z.object({
   qualification:QualificationSchema.nullish(),researchReview:text.optional(),
   intelligence:WalletIntelligenceSchema.extend({observedBuys:number.optional(),observedSells:number.optional(),unmatchedSells:number.optional()}).nullish(),
@@ -100,6 +102,7 @@ export const WalletDetailSchema=z.object({
  address:text,label:text.nullable(),source:text,trackedSince:date,
  profile:z.object({score:number,leaderScore:number,style:text,medianHoldSeconds:nullable,bestPattern:text.nullable(),weakPattern:text.nullable(),updatedAt:date}).nullable(),
  performance:z.record(z.object({winRate:nullable,pnlSol:nullable,closedTrades:number,avgRoi:nullable,computedAt:date})),
+ closedSummary:z.object({equityCurve:z.array(z.object({at:date,cumulativePnlSol:number})),topWinners:z.array(ClosedTokenHighlightSchema),topLosers:z.array(ClosedTokenHighlightSchema)}).nullish(),
  cluster:z.object({label:text.nullable(),confidence:text.or(number),size:number,members:z.array(z.object({address:text,label:text.nullable()}))}).nullable(),
  funding:z.object({status:text,funder:text.nullable(),fundedAt:date.nullable(),amountSol:nullable,checkedAt:date}).nullable(),
  openPositions:WalletOpenPositionsSchema.nullish(),

@@ -1,11 +1,11 @@
-import type { Prisma, PrismaClient } from '@narra/database';
+import { Prisma, type PrismaClient } from '@narra/database';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import {bulkSettings,bulkProfiles,PUBLICATION_BATCH_SIZE,type ProfilePublication} from './bulkPublication';
 import { streamIntelligenceInputs, type IntelligenceTradeRow } from './walletIntelligenceRead';
-import { computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
+import { computeWalletPerformance, type MarkToMarketContext, type PerformanceTrade, type TokenSpotPrice } from './walletPerformance';
 import {
-  classifyStyle, computeConsensus, computeLeaderStats, computeWalletStats, detectTimingClusters, holdingPatterns, rotationRate, walletScore, MIN_CLOSED_LEGS, researchSample,
-  type ConsensusEvent, type Entry, type TradeRow, type WalletInfo,
+  classifyStyle, computeConsensus, computeLeaderStats, computeWalletStats, detectAutomation, detectTimingClusters, holdingPatterns, rotationRate, walletScore, MIN_CLOSED_LEGS, researchSample,
+  type AutomationProfile, type ConsensusEvent, type Entry, type TradeRow, type WalletInfo, type WalletStats,
 } from '@narra/smart-money';
 
 export interface RecomputeOptions {
@@ -32,7 +32,7 @@ const toNum = (v: { toString(): string } | null) => (v == null ? 0 : Number(v.to
 const plainObject = (v: unknown): Record<string, unknown> | null =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 
-/** Keeps only the frozen pre-trade DexScreener marketCapUsd provenance needed by `computeWalletPerformance`,
+/** Keeps only the frozen pre-trade DexScreener or swap-implied marketCapUsd provenance needed by `computeWalletPerformance`,
  * converting Prisma Decimals to strings and dropping large raw webhook payloads from V8 heap. */
 export function slimPerformanceTrade(row: IntelligenceTradeRow): PerformanceTrade {
   let evidence: PerformanceTrade['evidence'] = null;
@@ -44,11 +44,11 @@ export function slimPerformanceTrade(row: IntelligenceTradeRow): PerformanceTrad
       ev &&
       market &&
       typeof ev.eventAt === 'string' &&
-      market.source === 'dexscreener' &&
+      (market.source === 'dexscreener' || market.source === 'swap_implied') &&
       market.marketCapIsFdv === false &&
       typeof market.at === 'string'
     ) {
-      evidence = { eventAt: ev.eventAt, market: { at: market.at, source: 'dexscreener', marketCapIsFdv: false } };
+      evidence = { eventAt: ev.eventAt, market: { at: market.at, source: market.source, marketCapIsFdv: false } };
       marketCapUsd = row.marketCapUsd == null ? null : row.marketCapUsd.toString();
     }
   }
@@ -138,17 +138,34 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   });
   const loaded = performance.now();
 
+  const statsByWallet = new Map<string, WalletStats>();
+  const automationByWallet = new Map<string, AutomationProfile>();
+  for (const w of wallets) {
+    const mine = byWallet.get(w.id) ?? [];
+    const stats = computeWalletStats(mine);
+    statsByWallet.set(w.id, stats);
+    automationByWallet.set(w.id, detectAutomation(mine, stats));
+  }
+
   const firstBuyEntries: Entry[] = [];
+  const leaderEntries: Entry[] = [];
   for (const [wallet, tokens] of firstBuyByWallet) {
-    for (const [token, at] of tokens) firstBuyEntries.push({ wallet, token, at });
+    const isAutomated = automationByWallet.get(wallet)?.automated ?? false;
+    for (const [token, at] of tokens) {
+      const entry = { wallet, token, at };
+      firstBuyEntries.push(entry);
+      // Exclude automated/sniper wallets from leader timing so bot swarms don't earn NARRATIVE_LEADER.
+      if (!isAutomated) leaderEntries.push(entry);
+    }
   }
   firstBuyByWallet.clear();
 
-  const leaders = computeLeaderStats(firstBuyEntries);
+  const leaders = computeLeaderStats(leaderEntries);
   await yieldToEventLoop();
   const { clusters, edges } = detectTimingClusters(firstBuyEntries);
   await yieldToEventLoop();
   firstBuyEntries.length = 0;
+  leaderEntries.length = 0;
 
   // Only wallets with no cluster, or a timing cluster, can be reassigned. Clusters from other evidence are left alone.
   const reassignable = new Set(wallets.filter((w) => !w.cluster || w.cluster.label === 'timing').map((w) => w.id));
@@ -164,24 +181,59 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   const unscored: string[] = [];
   let scored = 0;
 
+async function loadMarkToMarket(db: PrismaClient, performanceRows: Map<string, PerformanceTrade[]>): Promise<MarkToMarketContext | null> {
+  if (typeof db.$queryRaw !== 'function' || typeof db.systemSetting?.findUnique !== 'function') return null;
+  const solRow = await db.systemSetting.findUnique({ where: { key: 'market.solUsd' } });
+  const solVal = plainObject(solRow?.value);
+  const solUsd = typeof solVal?.priceUsd === 'number' && Number.isFinite(solVal.priceUsd) && solVal.priceUsd > 0 ? solVal.priceUsd : null;
+  if (!solUsd) return null;
+  const tokenIds = new Set<string>();
+  for (const rows of performanceRows.values()) {
+    for (const r of rows) if (r.side === 'BUY') tokenIds.add(r.tokenId);
+  }
+  const ids = [...tokenIds];
+  if (!ids.length) return { solUsd, prices: new Map() };
+  const prices = new Map<string, TokenSpotPrice>();
+  // Bounded batches so a large token set never exceeds Postgres parameter limits.
+  for (let i = 0; i < ids.length; i += 5000) {
+    const batch = ids.slice(i, i + 5000);
+    const rows = await db.$queryRaw<{ tokenId: string; priceUsd: { toString(): string } | null; liquidityUsd: { toString(): string } | null }[]>`
+      SELECT DISTINCT ON ("tokenId") "tokenId", "priceUsd", "liquidityUsd"
+      FROM "TokenMetric"
+      WHERE "tokenId" IN (${Prisma.join(batch)})
+      ORDER BY "tokenId", at DESC, id DESC
+    `;
+    for (const r of rows) {
+      if (r.priceUsd == null) continue;
+      const priceUsd = Number(r.priceUsd.toString());
+      if (!Number.isFinite(priceUsd) || priceUsd < 0) continue;
+      const liq = r.liquidityUsd == null ? null : Number(r.liquidityUsd.toString());
+      prices.set(r.tokenId, { priceUsd, liquidityUsd: liq != null && Number.isFinite(liq) ? liq : null });
+    }
+  }
+  return { solUsd, prices };
+}
+
+  const markToMarket = await loadMarkToMarket(db, performanceRows);
   for (const w of wallets) {
     // Prisma operations below are lazy: yield while preparing them so Redis
     // leases and other queues stay responsive, then publish atomically as before.
     await yieldToEventLoop();
     const performanceKey = `wallet.performance.${w.id}`, observed = performanceRows.get(w.id) ?? [];
-    const performance = computeWalletPerformance(observed, now, performanceCapped.has(w.id));
+    const performance = computeWalletPerformance(observed, now, performanceCapped.has(w.id), markToMarket);
     performanceRows.delete(w.id);
     settings.push({key:performanceKey,value:performance});
     const mine = byWallet.get(w.id) ?? [];
     let observedBuys = 0, observedSells = 0;
     for (const t of mine) { if (t.side === 'BUY') observedBuys++; else observedSells++; }
-    const stats = computeWalletStats(mine);
+    const stats = statsByWallet.get(w.id)!;
+    const automation = automationByWallet.get(w.id)!;
     const score = walletScore(stats);
     const sample = researchSample(mine, stats, score, now);
     const researchKey = `wallet.research.${w.id}`;
     settings.push({key:researchKey,value:{...sample}});
     const key = `wallet.intelligence.${w.id}`;
-    const value = { checkedAt: now.toISOString(), windowDays, observedTrades: mine.length, observedBuys, observedSells, unmatchedSells: stats.unmatchedSells, closedTrades: stats.legs.length, requiredClosedTrades: MIN_CLOSED_LEGS, status: score === null ? 'INSUFFICIENT_HISTORY' : 'READY' };
+    const value = { checkedAt: now.toISOString(), windowDays, observedTrades: mine.length, observedBuys, observedSells, unmatchedSells: stats.unmatchedSells, closedTrades: stats.legs.length, requiredClosedTrades: MIN_CLOSED_LEGS, status: score === null ? 'INSUFFICIENT_HISTORY' : 'READY', automation: { ...automation } };
     settings.push({key,value});
     if (score === null) { byWallet.delete(w.id); unscored.push(w.id); continue; }
     const leader = leaders.get(w.id);
@@ -189,8 +241,11 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
     byWallet.delete(w.id);
     const pat = holdingPatterns(stats.legs);
     const leaderScore = leader?.leaderScore ?? 0;
-    // A wallet in a non-timing cluster (for example a funding cluster) keeps it, so linked wallets count once in consensus.
-    info.set(w.id, { score, leaderScore, clusterId: clusterOf.get(w.id) ?? (reassignable.has(w.id) ? null : w.clusterId) });
+    // Exclude automated/bot wallets from consensus so bot swarms don't manufacture fake independent agreement.
+    if (!automation.automated) {
+      // A wallet in a non-timing cluster (for example a funding cluster) keeps it, so linked wallets count once in consensus.
+      info.set(w.id, { score, leaderScore, clusterId: clusterOf.get(w.id) ?? (reassignable.has(w.id) ? null : w.clusterId) });
+    }
     scored++;
 
     const profile = { score, leaderScore, style, medianHoldSeconds: stats.medianHoldSeconds == null ? null : Math.round(stats.medianHoldSeconds), bestPattern: pat.best, weakPattern: pat.weak };

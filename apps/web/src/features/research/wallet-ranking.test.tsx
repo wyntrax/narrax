@@ -55,3 +55,10 @@ it('renders Indonesian ranking and evidence labels',async()=>{
  await userEvent.selectOptions(screen.getByLabelText('Kelompok evaluasi'),'OBSERVING');
  await userEvent.click(screen.getByText('Bukti'));expect(screen.getByText('Riwayat tidak lengkap atau kedaluwarsa')).toBeVisible();
 });
+it('offers one-click jump to Observing when Ready for review is empty and toggles Hide automated',async()=>{
+ view();
+ await userEvent.click(screen.getByRole('button',{name:/Inspect Observing/}));
+ expect(state.paths.at(-1)).toContain('status=OBSERVING');
+ await userEvent.click(screen.getByRole('button',{name:'Hide automated'}));
+ expect(state.paths.at(-1)).toContain('excludeAutomated=true');
+});
