@@ -114,3 +114,14 @@ it('reports a provider account-set cap as oversized instead of an endpoint throt
  expect(await makeHolderRpcSource('https://rpc.example/secret',{fetch:fetcher as typeof fetch}).get(mint)).toEqual({ok:false,reason:'TOO_LARGE'});
  expect(fetcher).toHaveBeenCalledTimes(2);
 });
+it('computes live finalized top10Pct via getTokenLargestAccounts fallback for oversized mints',async()=>{
+ const f=fixture();
+ const largest={context:{slot:105},value:Array.from({length:12},(_,i)=>({address:bs58.encode(Buffer.alloc(32,i+40)),amount:'40'}))};
+ const responses=[f.responses[0],largest,Math.floor(+now/1000)-5];
+ const fetcher=vi.fn(async(_u:unknown,init?:RequestInit)=>{const req=JSON.parse(init!.body as string);return new Response(JSON.stringify({jsonrpc:'2.0',id:req.id,result:responses[req.id-1]}));});
+ const source=makeHolderRpcSource('https://rpc.example/secret',{fetch:fetcher as typeof fetch,now:()=>now,minIntervalMs:0});
+ // 10 * 40 = 400 / 1200 supply = 33.3334%
+ expect(await source.getLargestAccountsFallback!(mint,37678)).toMatchObject({ok:true,holders:37678,top10Pct:33.3334,slot:105,accounts:12});
+ // Refuses small or invalid holder counts
+ expect(await source.getLargestAccountsFallback!(mint,12)).toEqual({ok:false,reason:'INVALID_OR_INCOMPLETE'});
+});

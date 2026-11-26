@@ -4,6 +4,7 @@ import { MarketDataError, WSOL_MINT, tokenRisk, type MarketSnapshot, type TokenI
 import type { MarketDataDeps } from './marketData';
 import { storeMarketSnapshot } from './marketSnapshot';
 import { refreshHolderFallback } from './holderFallback';
+import { HOLDER_RPC_LIMITS } from './holderRpc';
 
 /** Separate progress key so on-demand Trade refreshes never collide with or pause radar/market holder fallback. */
 export const TRADE_HOLDER_FALLBACK_KEY = 'research.holderFallback.trade.progress';
@@ -255,6 +256,51 @@ export async function refreshTradeEvidence(
         if (freshHolder) {
           resolvedHolders = freshHolder.holders;
           resolvedTop10Pct = freshHolder.top10Pct;
+        }
+      } else if (deps.holderFallback.getLargestAccountsFallback) {
+        // Full getProgramAccounts enumeration cannot complete on large mints (>20K total/empty ATAs).
+        // Fall back to finalized getTokenLargestAccounts for live on-chain top10Pct without fabricating holder counts.
+        const knownHolders = info?.holders ?? (latestHolder ? latestHolder.holders : null);
+        const tooLarge = fb.holderFallbackReasons.TOO_LARGE > 0;
+        const canUseLargest = tooLarge || ((fb.holderFallbackReasons.INVALID_OR_INCOMPLETE > 0 || fb.holderFallbackAttempts === 0) && (knownHolders ?? 0) >= 50);
+        const observedHolders = tooLarge
+          ? Math.max(HOLDER_RPC_LIMITS.maxAccounts, knownHolders ?? 0)
+          : canUseLargest
+            ? knownHolders!
+            : null;
+        if (observedHolders != null) {
+          const largest = await deps.holderFallback
+            .getLargestAccountsFallback(mint, observedHolders)
+            .catch(() => ({ ok: false as const, reason: 'UNAVAILABLE' as const }));
+          if (largest.ok && largest.mint === mint && +largest.sourceAt <= +now && +now - +largest.sourceAt <= LATEST_EVIDENCE_MAX_AGE_MS.holders) {
+            await db.$transaction(async tx => {
+              const metric = await tx.tokenHolderMetric.create({
+                data: { tokenId: token.id, holders: largest.holders, top10Pct: largest.top10Pct, devHoldingPct: null, at: largest.sourceAt },
+              });
+              const value = {
+                mint,
+                metricId: metric.id,
+                source: 'solana-rpc-largest',
+                sourceAt: largest.sourceAt.toISOString(),
+                retrievedAt: now.toISOString(),
+                slot: largest.slot,
+                program: largest.program,
+                accounts: largest.accounts,
+                holders: largest.holders,
+                top10Pct: largest.top10Pct,
+                devHoldingPct: null,
+                basis: 'rpc-largest-accounts-fallback',
+                complete: false,
+              };
+              await tx.systemSetting.create({ data: { key: `research.holderMetric.${metric.id}`, value } });
+              await tx.systemSetting.upsert({ where: { key: `research.holders.${token.id}` }, create: { key: `research.holders.${token.id}`, value }, update: { value } });
+            }, { timeout: 30_000, maxWait: 10_000 });
+            out.holderFallbackUsed = true;
+            out.holdersWritten = true;
+            holdersNowFresh = true;
+            resolvedHolders = largest.holders;
+            resolvedTop10Pct = largest.top10Pct;
+          }
         }
       }
     }

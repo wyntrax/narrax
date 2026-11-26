@@ -72,27 +72,33 @@ export function makePooledHolderSource(
   all.flatMap((endpoint,index)=>endpoint.tier==='fallback'?[index]:[]),
  ];
  let cursor=0;
+ const runAcross=async(invoke:(source:HolderRpcSource)=>Promise<HolderRpcResult>):Promise<HolderRpcResult>=>{
+  let last:{result:HolderRpcResult;tier:'primary'|'fallback'}|undefined,failedOver=false;
+  for(const group of groups){
+   for(let offset=0;offset<group.length;offset++){
+    const index=group[(cursor+offset)%group.length]!,endpoint=all[index]!;
+    if(cooldownUntil[index]!>now())continue;
+    const result=await invoke(endpoint.source);
+    if(result.ok){cursor=(index+1)%all.length;return {...result,endpoint:endpoint.tier,failedOver};}
+    last={result,tier:endpoint.tier};
+    if(!providerFailure(result.reason))return {...result,endpoint:endpoint.tier,failedOver};
+    cooldownUntil[index]=now()+cooldownMs;failedOver=true;
+   }
+  }
+  return last?{...last.result,endpoint:last.tier,failedOver}:{ok:false,reason:'UNAVAILABLE'};
+ };
  return {
   primaryCooldownUntil:()=>{
    let earliest=Infinity;
    for(const index of groups[0]!)if(cooldownUntil[index]!>now())earliest=Math.min(earliest,cooldownUntil[index]!);
    return earliest===Infinity?null:new Date(earliest).toISOString();
   },
-  async get(mint){
-   let last:{result:HolderRpcResult;tier:'primary'|'fallback'}|undefined,failedOver=false;
-   for(const group of groups){
-    for(let offset=0;offset<group.length;offset++){
-     const index=group[(cursor+offset)%group.length]!,endpoint=all[index]!;
-     if(cooldownUntil[index]!>now())continue;
-     const result=await endpoint.source.get(mint);
-     if(result.ok){cursor=(index+1)%all.length;return {...result,endpoint:endpoint.tier,failedOver};}
-     last={result,tier:endpoint.tier};
-     if(!providerFailure(result.reason))return {...result,endpoint:endpoint.tier,failedOver};
-     cooldownUntil[index]=now()+cooldownMs;failedOver=true;
-    }
-   }
-   return last?{...last.result,endpoint:last.tier,failedOver}:{ok:false,reason:'UNAVAILABLE'};
-  },
+  get:(mint)=>runAcross(source=>source.get(mint)),
+  getLargestAccountsFallback:(mint,observedHolders)=>runAcross(source=>
+   source.getLargestAccountsFallback
+    ? source.getLargestAccountsFallback(mint,observedHolders)
+    : Promise.resolve({ok:false,reason:'UNAVAILABLE'}),
+  ),
  };
 }
 

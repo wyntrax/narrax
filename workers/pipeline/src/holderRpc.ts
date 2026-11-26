@@ -9,10 +9,13 @@ const Slot=z.number().int().nonnegative().safe();
 const Account=z.object({owner:z.string(),executable:z.literal(false),data:z.tuple([z.string(),z.literal('base64')])});
 const Mint=z.object({context:z.object({slot:Slot}),value:Account.nullable()});
 const Accounts=z.object({context:z.object({slot:Slot}),value:z.array(z.object({pubkey:z.string(),account:Account})).max(HOLDER_RPC_LIMITS.maxAccounts)});
+const LargestAccounts=z.object({context:z.object({slot:Slot}),value:z.array(z.object({address:z.string(),amount:z.string().regex(/^\d+$/)}))});
 export type HolderRpcEndpoint='primary'|'fallback';
 export type HolderRpcResult=({ok:true;mint:string;holders:number;top10Pct:number;sourceAt:Date;slot:number;accounts:number;program:string}|{ok:false;reason:'RATE_LIMITED'|'UNAVAILABLE'|'INVALID_OR_INCOMPLETE'|'STALE'|'TOO_LARGE'})&{endpoint?:HolderRpcEndpoint;failedOver?:boolean};
 export interface HolderRpcSource{
  get(mint:string):Promise<HolderRpcResult>;
+ /** Fast finalized top-20 fallback for oversized mints where full getProgramAccounts cannot complete. */
+ getLargestAccountsFallback?(mint:string,observedHolders:number):Promise<HolderRpcResult>;
  /** Present only on a failover source: the primary endpoint is skipped until this ISO time. */
  primaryCooldownUntil?():string|null;
 }
@@ -104,6 +107,50 @@ export function makeHolderRpcSource(url:string,opts:{fetch?:typeof fetch;now?:()
    if(!Number.isFinite(+sourceAt)||+sourceAt>+now||+now-+sourceAt>HOLDER_RPC_LIMITS.maxAgeMs)return {ok:false,reason:'STALE'};
    const top=[...owners.values()].sort((a,b)=>a>b?-1:a<b?1:0).slice(0,10).reduce((s,b)=>s+b,0n);
    return {ok:true,mint,holders:owners.size,top10Pct:Number((top*1_000_000n+supply-1n)/supply)/10_000,sourceAt,slot:scan.context.slot,accounts:scan.value.length,program};
+  }catch(error){return {ok:false,reason:error instanceof z.ZodError?'INVALID_OR_INCOMPLETE':reason};}
+  finally{clearTimeout(timer);}
+ },
+ async getLargestAccountsFallback(mint,observedHolders){
+  if(!isSolanaAddress(mint)||!Number.isInteger(observedHolders)||observedHolders<50)return {ok:false,reason:'INVALID_OR_INCOMPLETE'};
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),opts.timeoutMs??HOLDER_RPC_LIMITS.timeoutMs);
+  let id=0,reason:Extract<HolderRpcResult,{ok:false}>['reason']='UNAVAILABLE';
+  const invalid=()=>{reason='INVALID_OR_INCOMPLETE';throw Error('invalid largest-account evidence');};
+  const call=async(method:string,params:unknown[])=>{
+   const wait=Math.max(0,nextReadAt-Date.now());
+   if(wait)await new Promise<void>((resolve,reject)=>{
+    const abort=()=>{clearTimeout(delay);reject(Error('deadline'));};
+    const delay=setTimeout(()=>{controller.signal.removeEventListener('abort',abort);resolve();},wait);
+    controller.signal.addEventListener('abort',abort,{once:true});
+    if(controller.signal.aborted)abort();
+   });
+   controller.signal.throwIfAborted();nextReadAt=Date.now()+(opts.minIntervalMs??HOLDER_RPC_LIMITS.minIntervalMs);
+   const requestId=++id;
+   const res=await (opts.fetch??fetch)(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:requestId,method,params}),signal:controller.signal});
+   if(res.status===429){reason='RATE_LIMITED';await res.body?.cancel();throw Error('throttled');}
+   if(!res.ok||!res.body){await res.body?.cancel();throw Error('unavailable');}
+   const envelope=JSON.parse(await res.text());
+   if(envelope.error){
+    const code=envelope.error.code;
+    if([429,-32429].includes(code))reason='RATE_LIMITED';
+    throw Error('RPC unavailable');
+   }
+   if(envelope.id!==requestId||envelope.jsonrpc!=='2.0')invalid();
+   return envelope.result;
+  };
+  try{
+   const mintAcc=Mint.parse(await call('getAccountInfo',[mint,{encoding:'base64',commitment:'finalized'}]));
+   if(!mintAcc.value||!PROGRAMS.includes(mintAcc.value.owner))invalid();
+   const program=mintAcc.value!.owner,raw=Buffer.from(mintAcc.value!.data[0],'base64');
+   if(raw.length<82||raw[45]!==1)invalid();
+   const supply=raw.readBigUInt64LE(36);if(supply<=0n)invalid();
+   const largest=LargestAccounts.parse(await call('getTokenLargestAccounts',[mint,{commitment:'finalized'}]));
+   if(!largest.value.length)invalid();
+   const top=largest.value.slice(0,10).reduce((s,row)=>s+BigInt(row.amount),0n);
+   if(top>supply)invalid();
+   const seconds=z.number().int().nonnegative().safe().parse(await call('getBlockTime',[largest.context.slot]));
+   const sourceAt=new Date(seconds*1000),now=(opts.now??(()=>new Date()))();
+   if(!Number.isFinite(+sourceAt)||+sourceAt>+now||+now-+sourceAt>HOLDER_RPC_LIMITS.maxAgeMs)return {ok:false,reason:'STALE'};
+   return {ok:true,mint,holders:observedHolders,top10Pct:Number((top*1_000_000n+supply-1n)/supply)/10_000,sourceAt,slot:largest.context.slot,accounts:largest.value.length,program};
   }catch(error){return {ok:false,reason:error instanceof z.ZodError?'INVALID_OR_INCOMPLETE':reason};}
   finally{clearTimeout(timer);}
  }};

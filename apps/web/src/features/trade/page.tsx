@@ -17,7 +17,7 @@ import './trade.css';
 
 type Preview=z.infer<typeof TradePreview>;
 const REFRESHABLE_BLOCKERS=new Set(['NOT_INDEXED','MARKET_MISSING','HOLDERS_MISSING','RISK_MISSING']);
-const EVIDENCE_POLL_MS=2500,EVIDENCE_POLL_ATTEMPTS=6;
+const EVIDENCE_POLL_MS=2500,EVIDENCE_POLL_ATTEMPTS=12;
 const needsEvidenceRefresh=(r:TradeReviewData|null)=>!!r&&!r.buyBlockers.includes('BLACKLISTED')&&r.buyBlockers.some(b=>REFRESHABLE_BLOCKERS.has(b));
 const short=(v:string)=>`${v.slice(0,6)}…${v.slice(-5)}`;
 const decode=(v:string)=>Uint8Array.from(atob(v),c=>c.charCodeAt(0));
