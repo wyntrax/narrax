@@ -9,7 +9,7 @@ export interface PerformanceTrade {
   tokenAmount: { toString(): string } | null; marketCapUsd: { toString(): string } | null; evidence: unknown; at: Date;
 }
 type Position = { entryTradeId: string; token: string; band: WalletEntryBand; start: number; last: number; firstSell: number | null;
-  close: number | null; qty: Decimal; cost: Decimal; invested: Decimal; entry: Decimal; pnl: Decimal; sold: boolean };
+  close: number | null; qty: Decimal; boughtQty: Decimal; cost: Decimal; invested: Decimal; entry: Decimal; pnl: Decimal; sold: boolean };
 const decimalMedian = (xs: Decimal[]) => {
   const s = [...xs].sort((a,b) => a.cmp(b)), mid = Math.floor(s.length / 2);
   return !s.length ? null : s.length % 2 ? s[mid]!.toFixed() : s[mid-1]!.plus(s[mid]!).div(2).toFixed();
@@ -31,6 +31,13 @@ export const DEAD_BAG_RULES = {
   minAgeMs: 24 * 3_600_000,
   maxRemainingValueRatio: 0.1,
   minLiquidityUsd: 1_000,
+} as const;
+
+/** Dust-close thresholds: after replaying all swaps, a sold position with ≤ 1% tokens left (or ≤ 5% tokens AND ≤ 0.005 SOL remaining cost) is treated as closed. */
+export const DUST_CLOSE_RULES = {
+  maxRemainingQtyRatio: 0.01,
+  maxRemainingCostSol: '0.005',
+  maxRemainingCostQtyRatio: 0.05,
 } as const;
 
 const ENTRY_CAP_SOURCES = new Set(['dexscreener', 'swap_implied']);
@@ -60,8 +67,8 @@ function accountPositions(rows: PerformanceTrade[], now: Date) {
     let p = active.get(t.tokenId);
     if (t.side === 'BUY') {
       if (!p) { p = { entryTradeId: t.id, token: t.tokenId, band: entryBand(t), start: +t.at, last: +t.at, firstSell: null, close: null,
-        qty: new D(0), cost: new D(0), invested: new D(0), entry: sol, pnl: new D(0), sold: false }; positions.push(p); active.set(t.tokenId,p); }
-      p.qty = p.qty.plus(qty); p.cost = p.cost.plus(sol); p.invested = p.invested.plus(sol); p.last = +t.at;
+        qty: new D(0), boughtQty: new D(0), cost: new D(0), invested: new D(0), entry: sol, pnl: new D(0), sold: false }; positions.push(p); active.set(t.tokenId,p); }
+      p.qty = p.qty.plus(qty); p.boughtQty = p.boughtQty.plus(qty); p.cost = p.cost.plus(sol); p.invested = p.invested.plus(sol); p.last = +t.at;
     } else {
       const eps = p ? D.max(new D('1e-9'), p.qty.mul('1e-9')) : null;
       if (!p || qty.gt(p.qty.plus(eps!))) { unmatchedSells++; contaminated.add(t.tokenId); active.delete(t.tokenId); continue; }
@@ -75,6 +82,18 @@ function accountPositions(rows: PerformanceTrade[], now: Date) {
   }
   // Incomplete basis can distort even earlier positions for that token; exclude all of them.
   const valid = positions.filter(p => !contaminated.has(p.token));
+  // Post-replay dust-close: settles sold positions that only left negligible dust/moonbag
+  // without causing false unmatchedSells if the trader later sells that residual within the window.
+  for (const p of valid) {
+    if (p.close !== null || !p.sold || !p.boughtQty.gt(0)) continue;
+    const dustByQty = p.qty.lte(p.boughtQty.mul(DUST_CLOSE_RULES.maxRemainingQtyRatio));
+    const dustByCost = p.cost.lte(DUST_CLOSE_RULES.maxRemainingCostSol) && p.qty.lte(p.boughtQty.mul(DUST_CLOSE_RULES.maxRemainingCostQtyRatio));
+    if (dustByQty || dustByCost) {
+      p.close = p.last;
+      p.qty = new D(0);
+      p.cost = new D(0);
+    }
+  }
   return { valid, trades, invalidTrades, unmatchedSells };
 }
 

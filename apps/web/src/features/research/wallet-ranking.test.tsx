@@ -55,12 +55,14 @@ it('renders Indonesian ranking and evidence labels',async()=>{
  await userEvent.selectOptions(screen.getByLabelText('Kelompok evaluasi'),'OBSERVING');
  await userEvent.click(screen.getByText('Bukti'));expect(screen.getByText('Riwayat tidak lengkap atau kedaluwarsa')).toBeVisible();
 });
-it('offers one-click jump to Observing when Ready for review is empty and toggles Hide automated',async()=>{
+it('offers one-click jump to Observing when Ready for review is empty and defaults Hide automated to ON',async()=>{
  view();
+ expect(state.paths.at(-1)).toContain('excludeAutomated=true');
  await userEvent.click(screen.getByRole('button',{name:/Inspect Observing/}));
  expect(state.paths.at(-1)).toContain('status=OBSERVING');
- await userEvent.click(screen.getByRole('button',{name:'Hide automated'}));
  expect(state.paths.at(-1)).toContain('excludeAutomated=true');
+ await userEvent.click(screen.getByRole('button',{name:'Hide automated'}));
+ expect(state.paths.at(-1)).not.toContain('excludeAutomated=true');
  await userEvent.selectOptions(screen.getByLabelText('Sort by'),'pnl');
  expect(state.paths.at(-1)).toContain('sort=pnl');
 });

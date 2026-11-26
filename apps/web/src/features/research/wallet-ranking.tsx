@@ -48,7 +48,7 @@ const copy={
 
 export function WalletLeaderboard(){
  const locale=useLocale()==='id'?'id':'en',t=copy[locale],f=useFormat(),[band,setBand]=useState<WalletEntryBand>('SMALL_CAP');
- const [status,setStatus]=useState('REVIEW_READY'),[minimum,setMinimum]=useState('0.01'),[flowOnly,setFlowOnly]=useState(false),[hideAutomated,setHideAutomated]=useState(false),[sort,setSort]=useState<'default'|'pnl'|'profitFactor'|'size'>('default');
+ const [status,setStatus]=useState('REVIEW_READY'),[minimum,setMinimum]=useState('0.01'),[flowOnly,setFlowOnly]=useState(false),[hideAutomated,setHideAutomated]=useState(true),[sort,setSort]=useState<'default'|'pnl'|'profitFactor'|'size'>('default');
  const query=useResearchQuery(`smart-money/rankings?band=${band}&limit=50&status=${status}&minMedianPositionSol=${minimum}${flowOnly?'&flowOnly=true':''}${hideAutomated?'&excludeAutomated=true':''}${sort!=='default'?`&sort=${sort}`:''}`,WalletRankingPage,true,60000);
  const data=query.data,items=data?.items??[],pipeline=data?.pipeline;
  const hold=(s:number|null)=>s===null?t.unknown:s<60?`${f.number(s,0)}s`:s<3600?`${f.number(s/60,1)}m`:s<86400?`${f.number(s/3600,1)}h`:`${f.number(s/86400,1)}d`;
