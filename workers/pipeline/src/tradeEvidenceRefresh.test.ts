@@ -242,4 +242,48 @@ describe('refreshTradeEvidence', () => {
     expect(quotes.getSnapshots).not.toHaveBeenCalled();
     expect(info.getTokenInfo).not.toHaveBeenCalled();
   });
+
+  it('falls back to getLargestAccountsFallback when full enumeration returns TOO_LARGE or INVALID_OR_INCOMPLETE on established mints', async () => {
+    const { db, createdHolders, createdRisks } = makeMockDb(null);
+    const quotes = { name: 'dexscreener', getSnapshots: vi.fn(async () => new Map([[MINT, makeSnap()]])) };
+    const staleHolderDate = new Date(NOW.getTime() - 4 * 3_600_000);
+    const info = {
+      name: 'geckoterminal',
+      getTokenInfo: vi.fn(async (): Promise<TokenInfo> => ({
+        mint: MINT,
+        name: 'Aura',
+        symbol: 'aura',
+        websites: [],
+        twitterHandle: null,
+        holders: 37_678,
+        top10Pct: 19.7,
+        holdersUpdatedAt: staleHolderDate,
+        mintAuthorityActive: false,
+        freezeAuthorityActive: false,
+        isHoneypot: false,
+      })),
+    };
+    const holderFallback: HolderRpcSource = {
+      get: vi.fn(async () => ({ ok: false as const, reason: 'TOO_LARGE' as const })),
+      getLargestAccountsFallback: vi.fn(async (_mint, observedHolders) => ({
+        ok: true as const,
+        mint: MINT,
+        holders: observedHolders,
+        top10Pct: 19.5,
+        sourceAt: new Date(NOW.getTime() - 5_000),
+        slot: 999_999,
+        program: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+        accounts: 20,
+      })),
+    };
+
+    const res = await refreshTradeEvidence(db, { quotes, info, holderFallback }, MINT, NOW);
+    expect(res.status).toBe('refreshed');
+    expect(res.holdersWritten).toBe(true);
+    expect(res.riskWritten).toBe(true);
+    expect(holderFallback.getLargestAccountsFallback).toHaveBeenCalledWith(MINT, 37_678);
+    expect(createdHolders.at(-1)).toMatchObject({ holders: 37_678, top10Pct: 19.5 });
+    expect(createdRisks[0]!.flags).not.toContain('HOLDERS_UNKNOWN');
+    expect(createdRisks[0]!.flags).not.toContain('HOLDER_OBSERVATION_STALE_OR_UNKNOWN');
+  });
 });
