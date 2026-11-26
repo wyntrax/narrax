@@ -3,7 +3,8 @@ import {marketTokenImages} from './marketEvidence';
 import type {FastifyInstance,FastifyRequest,FastifyReply} from 'fastify';
 import {Prisma,type PrismaClient} from '@narra/database';
 import {z} from 'zod';
-import {AgentDecisionSchema,isSolanaAddress,type AgentDecision} from '@narra/shared';
+import {AgentDecisionSchema,isSolanaAddress,sanitizeUntrusted,tokenImageUrl,type AgentDecision} from '@narra/shared';
+import type {MarketQuoteSource} from '@narra/market-data';
 import {evaluateRisk} from '@narra/risk';
 import {isQuoteFresh,WSOL_MINT,type JupiterClient,type Quote} from '@narra/solana';
 import {MAX_DECISION_AGE_MS,PAPER_FEE_SOL,openPositionKey,paperBuyFill,paperSellFill,sellUnits} from '@narra/trading';
@@ -19,7 +20,7 @@ type Request=z.infer<typeof Request>;
 const Ticket=z.object({request:Request,sizeSol:z.number(),exitFraction:z.number(),decisionId:z.string().nullable(),minOut:z.string().regex(/^\d{1,40}$/),expiresAt:z.string().datetime(),position:z.object({id:Id,units:z.string(),cost:z.string()}).nullable()});
 const TTL_MS=60_000;
 // Manual-surface freshness windows. Conservative starting values, not validated strategy performance.
-const INPUT_MAX_AGE_MS=15*60_000,HOLDER_MAX_AGE_MS=6*3_600_000,MIN_HOLDERS=50;
+const INPUT_MAX_AGE_MS=15*60_000,MIN_HOLDERS=50,PRIORITY_WINDOW_MS=30*60_000;
 class PaperError extends Error{constructor(readonly code:string,readonly status=409){super(code);}}
 function fail(code:string,status=409):never{throw new PaperError(code,status);}
 const noChain={getSolBalance:async():Promise<never>=>fail('PAPER_ONLY'),getPortfolioValueSol:async():Promise<never>=>fail('PAPER_ONLY'),getTokenBaseUnits:async():Promise<never>=>fail('PAPER_ONLY')};
@@ -28,7 +29,7 @@ const num=(value:{toString():string})=>Number(value.toString());
 const positive=(value:number)=>Number.isFinite(value)&&value>0;
 
 /** Quote-only capabilities: no queue, wallet, signing, swap-build or transaction-send port. */
-export function registerPaperTradeRoutes(app:FastifyInstance,deps:Pick<AccountDeps,'db'|'verifier'|'now'>&{quotes?:Pick<JupiterClient,'getQuote'>}){
+export function registerPaperTradeRoutes(app:FastifyInstance,deps:Pick<AccountDeps,'db'|'verifier'|'now'>&{quotes?:Pick<JupiterClient,'getQuote'>;marketQuotes?:MarketQuoteSource}){
  const {db}=deps,now=deps.now??(()=>new Date());
  const opts={preHandler:makeAuthenticate(deps),config:{rateLimit:{max:20,timeWindow:'1 minute'}}};
  const handle=(work:(userId:string,body:unknown)=>Promise<unknown>)=>async(req:FastifyRequest,reply:FastifyReply)=>{
@@ -37,12 +38,38 @@ export function registerPaperTradeRoutes(app:FastifyInstance,deps:Pick<AccountDe
    req.log.error({err:error},'manual paper trade failed');return reply.code(503).send({error:'PAPER_UNAVAILABLE'});
   }
  };
- async function state(tx:PrismaClient,userId:string,request:Request,key:string,at:Date){
+  async function ensureFreshMarket(tx:PrismaClient,mint:string,at:Date){
+   if(!deps.marketQuotes||mint===WSOL_MINT)return;
+   const existing=await tx.token.findUnique({where:{mint},select:{id:true,symbol:true,blacklisted:true,createdOnChainAt:true}});
+   if(existing?.blacklisted)return;
+   if(existing){
+    const latest=await tx.tokenMetric.findFirst({where:{tokenId:existing.id},orderBy:{at:'desc'},select:{priceUsd:true,at:true}});
+    if(latest&&positive(num(latest.priceUsd))&&latest.at<=at&&+at-+latest.at<=INPUT_MAX_AGE_MS)return;
+   }
+   let snap;
+   try{snap=(await deps.marketQuotes.getSnapshots([mint])).get(mint);}catch{return;}
+   if(!snap||snap.mint!==mint||!positive(snap.priceUsd)||!snap.pairAddress)return;
+   const sym=sanitizeUntrusted(snap.symbol,32)||'UNKNOWN',name=sanitizeUntrusted(snap.name,64)||sym;
+   const priorityUntil=new Date(+at+PRIORITY_WINDOW_MS);
+   const token=existing
+    ? await tx.token.update({where:{id:existing.id},data:{marketPriorityUntil:priorityUntil,marketQuoteFailures:0,marketQuarantineUntil:null,...(existing.symbol==='UNKNOWN'&&sym!=='UNKNOWN'?{symbol:sym,name}:{}),...(!existing.createdOnChainAt&&snap.pairCreatedAt?{createdOnChainAt:snap.pairCreatedAt}:{})}})
+    : await tx.token.upsert({where:{mint},create:{mint,symbol:sym,name,createdOnChainAt:snap.pairCreatedAt??null,marketPriorityUntil:priorityUntil},update:{marketPriorityUntil:priorityUntil}});
+   const metric=await tx.tokenMetric.create({data:{tokenId:token.id,priceUsd:snap.priceUsd,marketCapUsd:snap.marketCapUsd,liquidityUsd:snap.liquidityUsd,volume24hUsd:snap.volume24hUsd,at}});
+   const value={metricId:metric.id,mint:snap.mint,imageUrl:tokenImageUrl(snap.imageUrl),...(snap.websiteUrl?{websiteUrl:snap.websiteUrl}:{}),...(snap.twitterUrl?{twitterUrl:snap.twitterUrl}:{}),at:at.toISOString(),source:deps.marketQuotes.name,marketCapIsFdv:snap.marketCapIsFdv,priceChange1hPct:snap.priceChange1hPct,pairAddress:snap.pairAddress,dexId:snap.dexId,pairCreatedAt:snap.pairCreatedAt?.toISOString()??null};
+   if(typeof tx.systemSetting?.upsert==='function'){
+    const key=`research.market.${token.id}`;
+    await tx.systemSetting.upsert({where:{key},create:{key,value},update:{value}});
+    await tx.systemSetting.create({data:{key:`research.marketMetric.${metric.id}`,value}});
+   }
+  }
+  async function state(tx:PrismaClient,userId:string,request:Request,key:string,at:Date){
   const user=await tx.user.findUnique({where:{id:userId}});if(user?.mode!=='PAPER')fail('PAPER_MODE_REQUIRED');
   const position=request.side==='SELL'?await tx.position.findFirst({where:{id:request.positionId,userId,status:'OPEN',simulated:true,mode:'PAPER'},include:{token:true}}):null;
   if(request.side==='SELL'&&!position)fail('NOT_FOUND',404);
   if(position?.baseUnits==null&&request.side==='SELL')fail('PAPER_AMOUNT_UNKNOWN');
-  const token=position?.token??await tx.token.findUnique({where:{mint:request.side==='BUY'?request.mint:''}});if(!token)fail('NOT_FOUND',404);
+  const targetMint=position?.token.mint??(request.side==='BUY'?request.mint:'');
+  if(targetMint)await ensureFreshMarket(tx,targetMint,at);
+  const token=position?.token??await tx.token.findUnique({where:{mint:targetMint}});if(!token)fail('NOT_FOUND',404);
   const evidence=request.side==='BUY'?await tx.agentDecision.findFirst({where:{analysis:{opportunity:{tokenId:token.id}},OR:[{userId:null},{userId}]},orderBy:[{createdAt:'desc'},{id:'desc'}]}):null;
   let decision:AgentDecision,decisionId:string|null=null;
   if(request.side==='BUY'){
@@ -71,8 +98,9 @@ export function registerPaperTradeRoutes(app:FastifyInstance,deps:Pick<AccountDe
     tx.tokenRiskMetric.findFirst({where:{tokenId:token.id},orderBy:{at:'desc'}}),
    ]);
    if(existing)fail('PAPER_POSITION_EXISTS');
-   if(!holders||holders.at>at||+at-+holders.at>HOLDER_MAX_AGE_MS)fail('PAPER_INPUTS_UNAVAILABLE');
-   if(holders.holders<MIN_HOLDERS)fail('HOLDERS_TOO_LOW');
+   // Paper trading uses simulated SOL: do not block simulation on missing/stale holder snapshots,
+   // but still fail closed when a recorded holder observation is below the minimum threshold.
+   if(holders&&holders.holders<MIN_HOLDERS)fail('HOLDERS_TOO_LOW');
    if(riskMetric?.flags.some(f=>f==='HONEYPOT'||f==='RUGGED'))fail('PAPER_TOKEN_UNSAFE');
    if(!positive(pre.context.portfolio.totalValueSol))fail('PAPER_INPUTS_UNAVAILABLE');
    decision.suggestedPositionSizePct=request.sizeSol/pre.context.portfolio.totalValueSol*100;

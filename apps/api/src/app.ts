@@ -87,7 +87,7 @@ export async function buildApp(opts: { manualSwaps?:ManualSwapEngine; requestTra
     registerAdminRoutes(app, { ...opts.account, connections: opts.connections });
     registerWalletAdminRoutes(app, { ...opts.account, requestSync: opts.requestWalletSync });
     registerConfirmationRoutes(app, { ...opts.account, enqueueExecution: opts.enqueueExecution });
-     registerPaperTradeRoutes(app,{...opts.account,quotes:opts.paperQuotes});
+     registerPaperTradeRoutes(app,{...opts.account,quotes:opts.paperQuotes,marketQuotes:opts.marketQuotes});
      registerManualTradeRoutes(app,{...opts.account,engine:opts.manualSwaps,requestTradeEvidenceRefresh:opts.requestTradeEvidenceRefresh});
     registerAlertRoutes(app, opts.account);
     registerSettingsRoutes(app, opts.account);
