@@ -20,6 +20,7 @@ export const TradeReview=z.object({
  narratives:z.object({access:z.boolean(),items:z.array(z.object({slug:z.string(),name:z.string(),relation:z.string(),confidence:z.number()}))}),
  smartMoney:z.object({access:z.boolean(),items:z.array(z.object({id:z.string(),at:z.string().datetime(),side:z.enum(['BUY','SELL']),wallets:z.number(),entities:z.number(),netSol:z.number(),fresh:z.boolean()}))}),
 });
+export const TradeResearchRefresh=z.object({queued:z.boolean(),fresh:z.boolean()});
 export type TradeReviewData=z.infer<typeof TradeReview>;
 export type TradeQuoteData=z.infer<typeof TradeQuote>;
 

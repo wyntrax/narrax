@@ -4,8 +4,10 @@ import { Redis } from 'ioredis';
 import { z } from 'zod';
 import { AgentDecisionSchema } from '@narra/shared';
 import { createTokenDiscoveryQueue } from './tokenDiscovery';
+import { createTradeEvidenceQueue } from './tradeEvidence';
 export { PERSONAL_RESEARCH_QUEUE, PersonalResearchJobSchema, createPersonalResearchQueue } from './personalResearch';
 export { TOKEN_DISCOVERY_QUEUE, TokenDiscoveryJobSchema, createTokenDiscoveryQueue } from './tokenDiscovery';
+export { TRADE_EVIDENCE_QUEUE, TradeEvidenceJobSchema, tradeEvidenceJobId, createTradeEvidenceQueue, type TradeEvidenceJob } from './tradeEvidence';
 
 export interface QueueCounts { waiting: number; active: number; failed: number; delayed: number; /** Workers connected to this queue right now. 0 with jobs waiting means nothing is consuming it. */ consumers?: number }
 /** Allowlisted run evidence. Raw error text and job payloads are never returned. */
@@ -47,6 +49,7 @@ export const QUEUE_NAMES = {
   realtimePublish: 'realtime-publish',
   telegramDelivery: 'telegram-delivery',
   tokenDiscovery: 'token-discovery',
+  tradeEvidence: 'trade-evidence-refresh',
   wyntraxHoldings: 'wyntrax-holdings',
   wyntraxMembership: 'wyntrax-membership',
 } as const;
@@ -156,11 +159,12 @@ export function createQueues(connection: Redis) {
   const realtimePublish = new Queue(QUEUE_NAMES.realtimePublish, { connection });
   const telegramDelivery = new Queue(QUEUE_NAMES.telegramDelivery, { connection });
   const tokenDiscovery = createTokenDiscoveryQueue(connection);
+  const tradeEvidence = createTradeEvidenceQueue(connection);
   const wyntraxHoldings = new Queue(QUEUE_NAMES.wyntraxHoldings, { connection });
   const wyntraxMembership = new Queue(QUEUE_NAMES.wyntraxMembership, { connection });
   // One list for counts, retained-run evidence and shutdown, so a new queue cannot be
   // counted but silently omitted from diagnostics.
-  const allQueues = [walletEvents, aiScreening, execution, walletIntelligence, narrativeIngestion, tokenResolution, aiAnalysis, marketData, holderRefresh, walletSync, walletFunding, walletDiscovery, positionMonitor, entryFanOut, exitFanOut, portfolioSnapshots, outcomeTracking, notificationDispatch, realtimePublish, telegramDelivery, tokenDiscovery.queue, wyntraxHoldings, wyntraxMembership];
+  const allQueues = [walletEvents, aiScreening, execution, walletIntelligence, narrativeIngestion, tokenResolution, aiAnalysis, marketData, holderRefresh, walletSync, walletFunding, walletDiscovery, positionMonitor, entryFanOut, exitFanOut, portfolioSnapshots, outcomeTracking, notificationDispatch, realtimePublish, telegramDelivery, tokenDiscovery.queue, tradeEvidence.queue, wyntraxHoldings, wyntraxMembership];
 
   return {
     walletEvents,
@@ -188,6 +192,9 @@ export function createQueues(connection: Redis) {
     tokenDiscovery: tokenDiscovery.queue,
     /** Bounded token-scoped wallet discovery. One scan per token per five-minute bucket. */
     enqueueTokenDiscovery: (mint: string) => tokenDiscovery.request(mint),
+    tradeEvidence: tradeEvidence.queue,
+    /** Fast-lane priority refresh of market, holder, and risk evidence for a token opened in Trade. */
+    enqueueTradeEvidenceRefresh: (mint: string) => tradeEvidence.request(mint),
     scheduleEntryFanOut: (everyMs = 60_000) =>
       entryFanOut.upsertJobScheduler('fan-out', { every: everyMs }, { name: 'fan-out', data: {}, opts: { attempts: 1, ...RETAIN } }),
     scheduleExitFanOut: (everyMs = 60_000) =>

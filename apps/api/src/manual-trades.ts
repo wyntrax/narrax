@@ -1,7 +1,7 @@
 import type {FastifyInstance,FastifyRequest,FastifyReply} from 'fastify';
 import {z} from 'zod';
 import {Prisma} from '@narra/database';
-import {TradeRequest,TradeAddress,TradeQuote,TradeReview,TradeRecord,TradePreview} from '@narra/shared';
+import {TradeRequest,TradeAddress,TradeQuote,TradeReview,TradeResearchRefresh,TradeRecord,TradePreview} from '@narra/shared';
 import {TRADING_PAUSE_KEY,parsePause} from '@narra/worker-pipeline';
 import {WSOL_MINT} from '@narra/solana';
 import {makeAuthenticate,type AccountDeps} from './account';
@@ -16,9 +16,10 @@ const Ticket=z.object({mint:TradeAddress,hash:z.string(),at:z.string().datetime(
 const fail=(code:string,status=409):never=>{throw new SwapError(code,status);};
 const serialize=(r:ManualSwap)=>TradeRecord.parse({...r,createdAt:r.createdAt.toISOString(),expiresAt:r.expiresAt.toISOString(),quote:r.quote});
 
-export function registerManualTradeRoutes(app:FastifyInstance,deps:Pick<AccountDeps,'db'|'verifier'|'now'>&{engine?:ManualSwapEngine}){
+export function registerManualTradeRoutes(app:FastifyInstance,deps:Pick<AccountDeps,'db'|'verifier'|'now'>&{engine?:ManualSwapEngine;requestTradeEvidenceRefresh?:(mint:string)=>Promise<unknown>}){
  const {db,engine}=deps,now=deps.now??(()=>new Date());
  const opts={preHandler:[makeAuthenticate(deps),requireFeature(db,'research.tokens',now)],config:{rateLimit:{max:20,timeWindow:'1 minute'}}};
+ const refreshOpts={preHandler:[makeAuthenticate(deps),requireFeature(db,'research.tokens',now)],config:{rateLimit:{max:6,timeWindow:'1 minute'}}};
  const ownOpts={...opts,preHandler:[makeAuthenticate(deps)]};
  const handle=(f:(req:FastifyRequest)=>Promise<unknown>)=>async(req:FastifyRequest,reply:FastifyReply)=>{
   reply.header('Cache-Control','private, no-store');
@@ -54,6 +55,21 @@ export function registerManualTradeRoutes(app:FastifyInstance,deps:Pick<AccountD
   const at=now(),expiresAt=new Date(+at+300000).toISOString(),research=await tradeResearch(db,req.userId!,mint,at);
   const row=await db.auditLog.create({data:{userId:req.userId!,action:'manual.research.review',detail:json({mint,hash:research.hash,at:at.toISOString(),expiresAt})}});
   return TradeReview.parse({...research.data,id:row.id,at:at.toISOString(),expiresAt});
+ }));
+ app.post('/v1/manual-trades/research/refresh',refreshOpts,handle(async req=>{
+  const {mint}=z.object({mint:TradeAddress}).strict().parse(req.body);if(mint===WSOL_MINT)fail('INVALID_INPUT',400);
+  const at=now(),research=await tradeResearch(db,req.userId!,mint,at);
+  if(research.data.buyBlockers.includes('BLACKLISTED'))return TradeResearchRefresh.parse({queued:false,fresh:false});
+  if(research.data.market?.fresh&&research.data.holders?.fresh&&research.data.risk?.fresh)return TradeResearchRefresh.parse({queued:false,fresh:true});
+  if(!deps.requestTradeEvidenceRefresh)return TradeResearchRefresh.parse({queued:false,fresh:false});
+  const priorityUntil=new Date(+at+30*60_000);
+  await db.token.upsert({
+   where:{mint},
+   create:{mint,symbol:'UNKNOWN',name:'UNKNOWN',marketPriorityUntil:priorityUntil},
+   update:{marketPriorityUntil:priorityUntil},
+  });
+  await deps.requestTradeEvidenceRefresh(mint);
+  return TradeResearchRefresh.parse({queued:true,fresh:false});
  }));
  app.get('/v1/manual-trades/balances',opts,handle(async req=>{
   const q=z.object({wallet:TradeAddress,mint:TradeAddress}).parse(req.query);await wallet(req.userId!,q.wallet);

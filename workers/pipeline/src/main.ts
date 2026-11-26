@@ -9,13 +9,13 @@ import { refreshResearchHistory } from './walletResearchHistory';
 import { intakeEmergingWallets, reactivateProvenWallets } from './walletCandidateIntake';
 import {combinedMetadataSource,jupiterMetadataSource} from './tokenMetadata';
 import { createPrisma } from '@narra/database';
-import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, TokenDiscoveryJobSchema, WyntraxHoldingsJobSchema, WyntraxMembershipEventSchema, createQueues, createRedis } from '@narra/queue';
+import { AiScreeningJobSchema, QUEUE_NAMES, SwapEventSchema, TokenDiscoveryJobSchema, TradeEvidenceJobSchema, WyntraxHoldingsJobSchema, WyntraxMembershipEventSchema, createQueues, createRedis } from '@narra/queue';
 import { HeliusWebhooks, JupiterClient } from '@narra/solana';
 import { runTregJob } from './tregJob';
 import { trackEarlyRadarOutcomes } from './earlyRadarTracking';
 import { DexScreenerSource, GeckoTerminalSource } from '@narra/market-data';
 import { aiProviderFromEnv } from '@narra/ai';
-import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhooks, webhookKeyHash, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, discoverTokenWallets, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, createHeliusRuntime, type ChainPorts, type WalletEventDeps } from './index';
+import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, refreshTradeEvidence, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhooks, webhookKeyHash, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, discoverTokenWallets, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, createHeliusRuntime, type ChainPorts, type WalletEventDeps } from './index';
 import { assertEnv } from '@narra/shared';
 import { makeDeveloperHoldingSource } from './developerHoldings';
 import { makeRadarSafetySource } from './radarSafetyEvidence';
@@ -211,6 +211,13 @@ async function main(): Promise<void> {
       if (summary.newWallets > 0) await queues.requestWalletSync();
       return JSON.stringify(summary);
     }, { connection, concurrency: 1 }),
+    // Fast-lane evidence refresh for tokens opened in Trade with stale or missing buy evidence.
+    new Worker(QUEUE_NAMES.tradeEvidence, async (job) => {
+      const { mint } = TradeEvidenceJobSchema.parse(job.data);
+      const deps = await marketDepsFor();
+      if (!deps) return 'disabled';
+      return JSON.stringify(await refreshTradeEvidence(db, deps, mint, new Date()));
+    }, { connection, concurrency: 3 }),
     new Worker(QUEUE_NAMES.narrativeIngestion, async (job) => {
       let integration: Awaited<ReturnType<typeof tregConfigFromSettings>>;
       try {

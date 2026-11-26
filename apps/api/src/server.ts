@@ -50,6 +50,7 @@ async function main() {
   if (!config.privyAppId.value || !config.privyVerificationKey.value) throw new Error('Configure Privy in SystemSetting or PRIVY_APP_ID and PRIVY_VERIFICATION_KEY.');
   const app = await buildApp({
     manualSwaps: process.env.JUPITER_API_KEY?makeManualSwapEngine(process.env.JUPITER_API_KEY,manualRpcUrl,process.env.MANUAL_TRADING_ENABLED==='true'):undefined,
+    requestTradeEvidenceRefresh: (mint) => queues.enqueueTradeEvidenceRefresh(mint),
     runtime,
     wyntrax: { db, secret: process.env.WYNTRAX_WEBHOOK_SECRET || undefined, previousSecret: process.env.WYNTRAX_WEBHOOK_SECRET_PREVIOUS || undefined },
     chatLlm,

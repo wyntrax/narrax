@@ -15,12 +15,13 @@ const engine:ManualSwapEngine={
  prepare:vi.fn(async(input:SwapInput)=>({transaction:Buffer.from(new VersionedTransaction(new TransactionMessage({payerKey:signer.publicKey,recentBlockhash:Keypair.generate().publicKey.toBase58(),instructions:[SystemProgram.transfer({fromPubkey:signer.publicKey,toPubkey:signer.publicKey,lamports:1})]}).compileToV0Message()).serialize()).toString('base64'),lastValidBlockHeight:500,quote:{inputMint:input.side==='BUY'?WSOL_MINT:mint,outputMint:input.side==='BUY'?mint:WSOL_MINT,inAmount:'1000000',outAmount:'1000000',minOut:'990000',inputDecimals:9,outputDecimals:6,slippageBps:100,priceImpactPct:0,networkFeeLamports:'5000',priorityFeeLamports:'0',maxOverheadLamports:'5000000'}})),
  recheck:vi.fn(async()=>{}),send:vi.fn(async()=>{throw Error('ambiguous RPC timeout');}),status:vi.fn(async()=>status),
 };
+const requestRefresh=vi.fn(async()=>({}));
 let app:Awaited<ReturnType<typeof buildApp>>;
 const request=(path:string,body?:object,who='owner')=>app.inject({method:body===undefined?'GET':'POST',url:`/v1/manual-trades${path}`,headers:{authorization:`Bearer ${who}`},remoteAddress:`192.0.2.${++seq%200+1}`,...(body?{payload:body}:{})});
 const review=async()=>{const r=await request('/research',{mint});expect(r.statusCode,r.body).toBe(200);return r.json();};
 const preview=async(side:'BUY'|'SELL'='BUY')=>{const r=await review();const p=await request('/preview',{reviewId:r.id,mint,wallet,side,amount:'0.001',slippageBps:100});expect(p.statusCode,p.body).toBe(200);return p.json();};
 function signed(p:{transaction:string}){const tx=VersionedTransaction.deserialize(Buffer.from(p.transaction,'base64'));tx.sign([signer]);return Buffer.from(tx.serialize()).toString('base64');}
-beforeAll(async()=>{app=await buildApp({account:{db,now:()=>at,verifier:{verify:async who=>({privyUserId:`${tag}:${who==='owner'?userId:otherId}`})}},manualSwaps:engine});});
+beforeAll(async()=>{app=await buildApp({account:{db,now:()=>at,verifier:{verify:async who=>({privyUserId:`${tag}:${who==='owner'?userId:otherId}`})}},manualSwaps:engine,requestTradeEvidenceRefresh:requestRefresh});});
 beforeEach(async()=>{
  at=new Date('2032-01-01T12:00:00Z');status='SUBMITTED';vi.clearAllMocks();
  userId=randomUUID();otherId=randomUUID();
@@ -97,4 +98,21 @@ it.each(['expire','risk','unlink','access'] as const)('rechecks %s between quote
 });
 it('redacts smart-money/narrative evidence when those features are unavailable and protects the review route',async()=>{
  await db.user.update({where:{id:userId},data:{isAdmin:false}});expect((await request('/research',{mint})).statusCode).toBe(403);expect((await request('')).statusCode).toBe(200);
+});
+it('skips trade evidence refresh when fresh, and queues + bumps priority when stale or unindexed',async()=>{
+ expect((await request('/research/refresh',{mint:WSOL_MINT})).statusCode).toBe(400);
+ const freshRes=await request('/research/refresh',{mint});
+ expect(freshRes.statusCode,freshRes.body).toBe(200);expect(freshRes.json()).toEqual({queued:false,fresh:true});expect(requestRefresh).not.toHaveBeenCalled();
+ at=new Date(+at+20*60_000);
+ const staleRes=await request('/research/refresh',{mint});
+ expect(staleRes.statusCode,staleRes.body).toBe(200);expect(staleRes.json()).toEqual({queued:true,fresh:false});expect(requestRefresh).toHaveBeenCalledWith(mint);
+ const updated=await db.token.findUniqueOrThrow({where:{id:tokenId},select:{marketPriorityUntil:true}});
+ expect(updated.marketPriorityUntil?.getTime()).toBe(+at+30*60_000);
+ const unindexedMint=Keypair.generate().publicKey.toBase58();
+ try{
+  const newRes=await request('/research/refresh',{mint:unindexedMint});
+  expect(newRes.statusCode,newRes.body).toBe(200);expect(newRes.json()).toEqual({queued:true,fresh:false});expect(requestRefresh).toHaveBeenCalledWith(unindexedMint);
+  const created=await db.token.findUnique({where:{mint:unindexedMint},select:{marketPriorityUntil:true}});
+  expect(created?.marketPriorityUntil?.getTime()).toBe(+at+30*60_000);
+ }finally{await db.token.deleteMany({where:{mint:unindexedMint}});}
 });
