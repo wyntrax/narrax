@@ -10,7 +10,7 @@ export const DiscoveryBuyer = z.object({
 });
 export const DiscoveryCheckpoint = z.object({
   tokenId: z.string().min(1), mint: z.string().min(1), startedAt: z.string().datetime(),
-  pagesRead: z.number().int().min(0).max(2), before: z.string().min(1).max(120).nullable(),
+  pagesRead: z.number().int().min(0).max(5), before: z.string().min(1).max(120).nullable(),
   // Only the oldest 40 successful signatures are needed, retained newest first.
   candidates: z.array(z.string().min(1).max(120)).max(40), historyComplete: z.boolean(),
   nextTransaction: z.number().int().min(0).max(40), buyers: z.array(DiscoveryBuyer).max(30),
