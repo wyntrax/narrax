@@ -31,6 +31,7 @@ async function mockApi(page:Page,research=review){
    writes.push({path:url.pathname,body:request.postDataJSON()});
    expect(request.headers().authorization).toBe('Bearer fixture-public-test-token');
    if(url.pathname==='/v1/manual-trades/research')return route.fulfill({headers,json:{...research,expiresAt:new Date(Date.now()+300000).toISOString()}});
+   if(url.pathname==='/v1/manual-trades/research/refresh')return route.fulfill({headers,json:{queued:false,fresh:false}});
    if(url.pathname==='/v1/manual-trades/preview')return route.fulfill({headers,json:{...record,status:'PREPARED',signature:null,expiresAt:new Date(Date.now()+60000).toISOString(),transaction:btoa('unsigned-fixture-transaction')}});
    if(url.pathname==='/v1/manual-trades/submit')return route.fulfill({headers,json:{...record,status:'SUBMITTED',signature:null}});
    return route.fulfill({headers,status:404,json:{error:'NOT_FOUND'}});
@@ -128,7 +129,7 @@ test('manual trade explains stale evidence and blocks the buy quote',async({page
  await expect(page.getByText('This observation is stale; old or unknown checks are not passes. A buy quote requires a risk observation within one hour.')).toBeVisible();
  const flows=page.locator('section.trade-panel').filter({has:page.getByRole('heading',{name:'Qualified-wallet flows'})});
  await expect(flows.getByText('No qualified-wallet flow is recorded. This does not mean wallets are absent or selling.')).toBeVisible();
- await expect(page.getByText('Reloads stored evidence. It does not request new provider data.')).toBeVisible();
+ await expect(page.getByText('Reloads evidence and requests a live update when market, holder, or risk checks are stale.')).toBeVisible();
  await page.getByRole('button',{name:'Continue to swap'}).click();
  await expect(page.getByRole('button',{name:'Get swap quote'})).toBeDisabled();
  await page.getByRole('button',{name:'Sell'}).click();

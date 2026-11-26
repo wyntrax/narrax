@@ -27,7 +27,7 @@ it('every literal HTTP registration is deliberately classified; generated accoun
   for (const route of ['GET /v1/admin/helius', 'PUT /v1/admin/helius', 'POST /v1/admin/helius/test']) newRoutes.add(route);
   // Manual user-signed swaps: own-data config/history/status are authentication-only; research, balances,
   // preview and submit require research.tokens and are still blocked by evidence and wallet checks.
-  for (const route of ['GET /v1/manual-trades/config', 'GET /v1/manual-trades/balances', 'POST /v1/manual-trades/research', 'POST /v1/manual-trades/preview', 'POST /v1/manual-trades/submit', 'GET /v1/manual-trades', 'GET /v1/manual-trades/:id']) newRoutes.add(route);
+  for (const route of ['GET /v1/manual-trades/config', 'GET /v1/manual-trades/balances', 'POST /v1/manual-trades/research', 'POST /v1/manual-trades/research/refresh', 'POST /v1/manual-trades/preview', 'POST /v1/manual-trades/submit', 'GET /v1/manual-trades', 'GET /v1/manual-trades/:id']) newRoutes.add(route);
   const files = ['apps/api/src', 'apps/api/src/entitlements'].flatMap(dir => readdirSync(dir).filter(f => f.endsWith('.ts') && !f.includes('.test')).map(f => `${dir}/${f}`));
   let count = 0;
   for (const file of files) for (const m of readFileSync(file, 'utf8').matchAll(/\b(?:app|scoped)\.(get|post|put|patch|delete)\('([^']+)'/g)) {

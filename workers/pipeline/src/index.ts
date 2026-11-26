@@ -10,6 +10,7 @@ export * from './tokenResolution';
 export * from './narrativeTokens';
 export * from './aiAnalysis';
 export * from './marketData';
+export * from './tradeEvidenceRefresh';
 export * from './walletSync';
 export * from './walletFunding';
 export * from './rpcFailover';

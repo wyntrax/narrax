@@ -3,7 +3,7 @@ import {useEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {useLocale} from 'next-intl';
 import {ArrowDownUp,ArrowRight,ArrowUpRight,BookOpen,Check,Clock3,Copy,Layers,Plus,Search,ShieldCheck,Wallet,Activity,RefreshCw} from 'lucide-react';
 import type {z} from 'zod';
-import {isSolanaAddress,TradeConfig,TradeReview,TradePreview,TradeRecord,TradeHistory,TradeBalances,tradeBaseUnits,tradeDisplayUnits,type TradeReviewData} from '@narra/shared';
+import {isSolanaAddress,TradeConfig,TradeReview,TradeResearchRefresh,TradePreview,TradeRecord,TradeHistory,TradeBalances,tradeBaseUnits,tradeDisplayUnits,type TradeReviewData} from '@narra/shared';
 import {Link} from '@/i18n/navigation';
 import {useAuth,type ResearchWallet} from '@/components/auth/context';
 import {ApiError,createApi} from '@/lib/api';
@@ -16,6 +16,9 @@ import {TokenAvatar,TokenIdentity} from '@/features/research/token-identity';
 import './trade.css';
 
 type Preview=z.infer<typeof TradePreview>;
+const REFRESHABLE_BLOCKERS=new Set(['NOT_INDEXED','MARKET_MISSING','HOLDERS_MISSING','RISK_MISSING']);
+const EVIDENCE_POLL_MS=2500,EVIDENCE_POLL_ATTEMPTS=6;
+const needsEvidenceRefresh=(r:TradeReviewData|null)=>!!r&&!r.buyBlockers.includes('BLACKLISTED')&&r.buyBlockers.some(b=>REFRESHABLE_BLOCKERS.has(b));
 const short=(v:string)=>`${v.slice(0,6)}…${v.slice(-5)}`;
 const decode=(v:string)=>Uint8Array.from(atob(v),c=>c.charCodeAt(0));
 const encode=(v:Uint8Array)=>btoa(Array.from(v,b=>String.fromCharCode(b)).join(''));
@@ -43,8 +46,8 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
  const c=useCopy(),f=useFormat(),locale=useLocale(),auth=useAuth(),{send,read}=useResearch();
  const [review,setReview]=useState<TradeReviewData|null>(null),[reviewed,setReviewed]=useState(false),[phase,setPhase]=useState<'research'|'quote'|'sign'|'send'|null>('research'),[error,setError]=useState<string|null>(null);
  const [side,setSide]=useState<'BUY'|'SELL'>('BUY'),[amount,setAmount]=useState(''),[slippage,setSlippage]=useState(100),[address,setAddress]=useState(''),[preview,setPreview]=useState<Preview|null>(null),[active,setActive]=useState<string|null>(null),[clock,setClock]=useState(Date.now());
- const [walletBusy,setWalletBusy]=useState<string|null>(null),[pendingWallet,setPendingWallet]=useState<string|null>(null),[copied,setCopied]=useState<string|null>(null);
- const mounted=useRef(true),operation=useRef(false),walletRef=useRef(address);walletRef.current=address;
+ const [walletBusy,setWalletBusy]=useState<string|null>(null),[pendingWallet,setPendingWallet]=useState<string|null>(null),[copied,setCopied]=useState<string|null>(null),[refreshingEvidence,setRefreshingEvidence]=useState(false);
+ const mounted=useRef(true),operation=useRef(false),walletRef=useRef(address),autoRefreshed=useRef(false),pollTimer=useRef<ReturnType<typeof setTimeout>|null>(null),pollRun=useRef(0);walletRef.current=address;
  const verified=auth.wallets.filter(w=>config.wallets.includes(w.address)),connected=verified.filter(w=>!!w.signTransaction),attention=auth.wallets.filter(w=>!config.wallets.includes(w.address)||!w.signTransaction),unsupported=verified.filter(w=>!w.signTransaction),hasPrivy=auth.wallets.some(w=>w.name.toLowerCase().includes('privy'));
  const connectedKey=connected.map(w=>w.address).join(','),wallet=connected.find(w=>w.address===address),currentWallet=useRef(wallet);currentWallet.current=wallet;
  const getAccessToken=auth.getAccessToken,api=useMemo(()=>createApi(process.env.NEXT_PUBLIC_API_URL??'',()=>getAccessToken()),[getAccessToken]);
@@ -83,12 +86,47 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
  useEffect(()=>{onBusy(busy||pending);return()=>onBusy(false);},[busy,pending,onBusy]);
  useEffect(()=>{const ids=connectedKey?connectedKey.split(','):[];let next=address;if(address&&!ids.includes(address))next=ids.length===1?ids[0]!:'';else if(!address&&ids.length===1)next=ids[0]!;if(next!==address)setAddress(next);},[address,connectedKey]);
  useEffect(()=>{if(pendingWallet&&connectedKey.split(',').includes(pendingWallet)){setAddress(pendingWallet);setPendingWallet(null);}},[pendingWallet,connectedKey]);
- useEffect(()=>{mounted.current=true;const t=setInterval(()=>setClock(Date.now()),1000);return()=>{mounted.current=false;clearInterval(t);};},[]);
+ useEffect(()=>{mounted.current=true;const t=setInterval(()=>setClock(Date.now()),1000);return()=>{mounted.current=false;clearInterval(t);if(pollTimer.current)clearTimeout(pollTimer.current);pollRun.current++;};},[]);
  useEffect(()=>{if(status.data?.status==='CONFIRMED')void balances.refetch();},[status.data?.status]); // eslint-disable-line react-hooks/exhaustive-deps
  const report=(e:unknown)=>setError(c.errors[e instanceof ApiError?e.code:e instanceof Error?e.message:'UNKNOWN']??c.errors.UNKNOWN!);
- async function research(){
-  if(operation.current)return;operation.current=true;setPhase('research');setError(null);setReview(null);setReviewed(false);setPreview(null);
-  try{const r=await send('manual-trades/research',TradeReview,'POST',{mint});if(mounted.current)setReview(r);}catch(e){if(mounted.current)report(e);}finally{operation.current=false;if(mounted.current)setPhase(null);}
+ function stopEvidencePoll(){if(pollTimer.current){clearTimeout(pollTimer.current);pollTimer.current=null;}pollRun.current++;setRefreshingEvidence(false);}
+ async function triggerEvidenceRefresh(){
+  const run=++pollRun.current;
+  if(pollTimer.current){clearTimeout(pollTimer.current);pollTimer.current=null;}
+  setRefreshingEvidence(true);
+  try{
+   const res=await send('manual-trades/research/refresh',TradeResearchRefresh,'POST',{mint});
+   if(!mounted.current||pollRun.current!==run)return;
+   if(!res.queued){setRefreshingEvidence(false);return;}
+   let remaining=EVIDENCE_POLL_ATTEMPTS;
+   const poll=()=>{
+    pollTimer.current=setTimeout(async()=>{
+     if(!mounted.current||pollRun.current!==run)return;
+     remaining--;
+     try{
+      const next=await send('manual-trades/research',TradeReview,'POST',{mint});
+      if(!mounted.current||pollRun.current!==run)return;
+      setReview(next);
+      if(!needsEvidenceRefresh(next)||remaining<=0){setRefreshingEvidence(false);return;}
+      poll();
+     }catch{
+      if(mounted.current&&pollRun.current===run)setRefreshingEvidence(false);
+     }
+    },EVIDENCE_POLL_MS);
+   };
+   poll();
+  }catch{
+   if(mounted.current&&pollRun.current===run)setRefreshingEvidence(false);
+  }
+ }
+ async function research(triggerLiveRefresh=false){
+  if(operation.current)return;operation.current=true;stopEvidencePoll();setPhase('research');setError(null);setReview(null);setReviewed(false);setPreview(null);
+  let loaded:TradeReviewData|null=null;
+  try{const r=await send('manual-trades/research',TradeReview,'POST',{mint});if(mounted.current){setReview(r);loaded=r;}}catch(e){if(mounted.current)report(e);}finally{operation.current=false;if(mounted.current)setPhase(null);}
+  if(mounted.current&&needsEvidenceRefresh(loaded)&&(triggerLiveRefresh||!autoRefreshed.current)){
+   autoRefreshed.current=true;
+   void triggerEvidenceRefresh();
+  }
  }
  useEffect(()=>{void research();},[]); // eslint-disable-line react-hooks/exhaustive-deps
  function change(work:()=>void){setPreview(null);setError(null);work();}
@@ -138,7 +176,7 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
     {error&&<div className="trade-error" role="alert">{error}{!review&&!busy&&<button className="research-control" onClick={()=>void research()}>{c.retry}</button>}</div>}
     {!review?<div className="trade-panel trade-loading" aria-busy={busy}><Activity size={24}/><h2>{c.research}</h2><p role="status">{busy?c.loading:c.unknown}</p></div>:<>
      <header className="trade-token"><TokenAvatar symbol={review.symbol} imageUrl={review.imageUrl}/><div><h2>{review.symbol}<span>{review.name}</span></h2><code>{mint}</code></div><Link href={`/app/tokens/${mint}`} aria-label={c.details} title={c.details}><ArrowUpRight size={20}/></Link></header>
-     <div className="trade-panel"><div className="trade-panel-title"><h3><BookOpen size={17}/>{c.research}</h3><span className="trade-tag">{review.buyBlockers.length?c.blocked:c.ready}</span></div><p>{c.reviewNote}</p><p className="trade-stamp">{c.generated}: {f.date(review.at)}</p>
+     <div className="trade-panel"><div className="trade-panel-title"><h3><BookOpen size={17}/>{c.research}</h3>{refreshingEvidence?<span className="trade-tag trade-tag-refreshing"><RefreshCw size={12} className="trade-spin"/>{c.refreshingTag}</span>:<span className="trade-tag">{review.buyBlockers.length?c.blocked:c.ready}</span>}</div>{refreshingEvidence&&<p className="trade-notice trade-refreshing" role="status"><RefreshCw size={15} className="trade-spin"/>{c.refreshingBanner}</p>}<p>{c.reviewNote}</p><p className="trade-stamp">{c.generated}: {f.date(review.at)}</p>
       <ul className="trade-review-status">
        <li><span>{c.market}</span><Fresh at={review.market}/></li>
        <li><span>{c.holders}</span><Fresh at={review.holders}/></li>
@@ -154,12 +192,12 @@ function TradeDesk({mint,config,onBusy,onConfigChanged}:{mint:string;config:z.in
      <section className="trade-panel"><div className="trade-panel-title"><h3><ShieldCheck size={17}/>{c.risk}</h3><Fresh at={review.risk}/></div>{!review.risk?<p>{c.unknown}</p>:<>{review.risk.flags.length?<ul className="trade-risk-flags">{review.risk.flags.map(flag=><li key={flag}>{c.riskFlags[flag]??flag}</li>)}</ul>:<p>{c.noFlags}</p>}{!review.risk.fresh?<p className="trade-warning">{c.riskStale}</p>:unknownRisk?<p className="trade-warning">{c.riskUnknown}</p>:null}<p className="trade-stamp">{observed(review.risk.at)}</p></>}</section>
      <section className="trade-panel"><div className="trade-panel-title"><h3><Wallet size={17}/>{c.smart}</h3>{review.smartMoney.access&&review.smartMoney.items.length>0&&<span className="trade-fresh" data-fresh={freshFlow}>{freshFlow?c.fresh:c.stale}</span>}</div>{!review.smartMoney.access?<p>{c.locked}</p>:<>{!review.smartMoney.items.length?<p>{c.noFlowRecorded}</p>:<>{!freshFlow&&<p>{c.noFlows}</p>}{latestFlow&&<p className="trade-stamp">{c.latestFlow}: {f.date(latestFlow.at)}{age(latestFlow.at)?` (${age(latestFlow.at)})`:''}</p>}{review.smartMoney.items.map(flow=><div className="trade-flow" key={flow.id}><span className="trade-tag">{flow.side==='BUY'?c.buy:c.sell} · {flow.fresh?c.fresh:c.stale}</span><strong>{f.number(flow.netSol)} SOL</strong><p>{flow.entities} {c.entities} · {flow.wallets} {c.wallets}</p><time className="trade-stamp">{f.date(flow.at)}</time></div>)}</>}<p className="trade-stamp">{c.flowNote}</p></>}</section>
      <section className="trade-panel"><h3><Layers size={17}/>{c.narratives}</h3>{!review.narratives.access?<p>{c.locked}</p>:review.narratives.items.length?<ul className="trade-narratives">{review.narratives.items.map(n=><li key={n.slug}><Link href={`/app/narratives/${n.slug}`}>{n.name}<ArrowUpRight size={14}/></Link><span>{n.relation}</span></li>)}</ul>:<p>{c.noNarrative}</p>}</section>
-     <div className="trade-research-actions"><button className="research-control" disabled={busy||pending} onClick={()=>void research()}><RefreshCw size={14}/>{c.refresh}</button><button className="trade-primary" disabled={busy||pending||reviewExpired||reviewed} onClick={()=>setReviewed(true)}>{reviewed?<Check size={16}/>:null}{c.continue}<ArrowRight size={16}/></button><p className="trade-stamp trade-refresh-note">{c.refreshNote}</p></div>
+     <div className="trade-research-actions"><button className="research-control" disabled={busy||pending||refreshingEvidence} onClick={()=>void research(true)}><RefreshCw size={14} className={refreshingEvidence?'trade-spin':undefined}/>{c.refresh}</button><button className="trade-primary" disabled={busy||pending||reviewExpired||reviewed} onClick={()=>setReviewed(true)}>{reviewed?<Check size={16}/>:null}{c.continue}<ArrowRight size={16}/></button><p className="trade-stamp trade-refresh-note">{c.refreshNote}</p></div>
     </>}
    </div>
    <aside className="trade-swap trade-panel" aria-label={c.swap}>
     <div className="trade-panel-title"><h2><ArrowDownUp size={19}/>{c.swap}</h2><span className="trade-tag">Mainnet</span></div>
-    {review&&side==='BUY'&&review.buyBlockers.length>0&&<p className="trade-notice trade-blocked" role="status"><ShieldCheck size={15}/>{c.buyBlocked}</p>}
+    {review&&side==='BUY'&&review.buyBlockers.length>0&&(refreshingEvidence?<p className="trade-notice trade-refreshing" role="status"><RefreshCw size={15} className="trade-spin"/>{c.refreshingBanner}</p>:<p className="trade-notice trade-blocked" role="status"><ShieldCheck size={15}/>{c.buyBlocked}</p>)}
     <div className="trade-side" role="group" aria-label={c.swap}>{(['BUY','SELL'] as const).map(s=><button key={s} disabled={busy||pending} aria-pressed={side===s} onClick={()=>change(()=>setSide(s))}>{s==='BUY'?c.buy:c.sell}</button>)}</div>
     <fieldset disabled={!reviewed||busy||pending||!!walletBusy||!config.enabled}>
      <label htmlFor="trade-wallet">{c.wallet}</label><select id="trade-wallet" value={address} onChange={e=>change(()=>setAddress(e.target.value))}><option value="">{c.chooseWallet}</option>{connected.map(w=><option key={w.address} value={w.address}>{w.name} · {short(w.address)}</option>)}</select>
