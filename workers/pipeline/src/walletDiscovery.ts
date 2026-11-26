@@ -10,17 +10,17 @@ import { DiscoveryScanProgress, DISCOVERY_PROGRESS_KEY, DISCOVERY_SCAN_HEALTH_KE
 export const DISCOVERY_LIMITS = {
   maxTokensPerRun: 5,
   pageSize: 1000,
-  /** Two pages: a token with more than about 2,000 transactions is no longer scanned, because its first buyers are out of reach. */
-  maxPages: 2,
+  /** Five pages: captures early buyers of busier launches (up to ~5,000 txs) before marking tooLong. */
+  maxPages: 5,
   maxTxsPerToken: 40,
   /** Only tokens created this recently are scanned, while their history is still short. */
   scanWindowMs: 6 * 3_600_000,
   /** A token is judged (winner or not) only after it has had this long. */
   minAgeMs: 3_600_000,
   lookbackMs: 48 * 3_600_000,
-  /** Latest price at least this multiple of the first recorded price. */
-  winnerGrowth: 3,
-  minLiquidityUsd: 20_000,
+  /** Peak liquid price (or latest liquid price) at least this multiple of the first recorded price. */
+  winnerGrowth: 2.5,
+  minLiquidityUsd: 15_000,
   /** Latest price row must be this fresh (12h inside the 48h lookback), or the token is left undecided. */
   maxMetricAgeMs: 12 * 3_600_000,
   minCandidateScore: 20,
@@ -204,17 +204,21 @@ export async function discoverCandidates(db: PrismaClient, now: Date = new Date(
       const observations = spend.get(b.wallet) ?? [];
       observations.push({ tokenId:r.token.id,signature:b.signature,at:b.at,spendEvidence:b.spendEvidence });spend.set(b.wallet,observations);
     }
-    const [first, last] = await Promise.all([
+    const [first, last, peak] = await Promise.all([
       db.tokenMetric.findFirst({ where: { tokenId: r.token.id }, orderBy: { at: 'asc' }, select: { id: true, at: true, priceUsd: true } }),
       db.tokenMetric.findFirst({ where: { tokenId: r.token.id }, orderBy: { at: 'desc' }, select: { priceUsd: true, liquidityUsd: true, at: true } }),
+      db.tokenMetric.findFirst({ where: { tokenId: r.token.id, at: { lte: now }, liquidityUsd: { gte: L.minLiquidityUsd } }, orderBy: { priceUsd: 'desc' }, select: { priceUsd: true, liquidityUsd: true, at: true } }),
     ]);
     if (!first || !last) { out.noPrice++; continue; }
     if (+last.at > +now || +first.at > +now || now.getTime() - last.at.getTime() > L.maxMetricAgeMs) { out.stalePrice++; continue; }
     if (+first.at >= +last.at) { out.insufficientObservations++; continue; }
     const p0 = Number(first.priceUsd.toString()), p1 = Number(last.priceUsd.toString());
     if (!(p0 > 0) || !(p1 > 0)) { out.invalidPrice++; continue; }
+    const peakPrice = peak && +peak.at > +first.at && +peak.at <= +now ? Number(peak.priceUsd.toString()) : 0;
+    const liquidLastWin = Number(last.liquidityUsd.toString()) >= L.minLiquidityUsd && p1 / p0 >= L.winnerGrowth;
+    const liquidPeakWin = peakPrice > 0 && peakPrice / p0 >= L.winnerGrowth;
     const honeypot = r.token.risk[0]?.flags.includes('HONEYPOT') ?? false;
-    const winner = !honeypot && p1 / p0 >= L.winnerGrowth && Number(last.liquidityUsd.toString()) >= L.minLiquidityUsd;
+    const winner = !honeypot && (liquidPeakWin || liquidLastWin);
     const buyers = Array.isArray(r.buyers) ? (r.buyers as unknown[]).filter((b): b is { wallet: string; rank: number } => typeof (b as { wallet?: unknown })?.wallet === 'string' && typeof (b as { rank?: unknown })?.rank === 'number') : [];
     scans.push({ tokenId: r.token.id, buyers, winner });
     mintOf.set(r.token.id, r.token.mint);
