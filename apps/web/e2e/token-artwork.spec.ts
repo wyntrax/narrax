@@ -65,6 +65,7 @@ for(const width of [1440,390])for(const imageUrl of [artwork,null,'https://cdn.d
   const req=route.request(),path=new URL(req.url()).pathname,headers={'access-control-allow-origin':req.headers().origin??'http://localhost:4010','access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,POST,OPTIONS'};
   if(req.method()==='OPTIONS')return route.fulfill({status:204,headers});
   if(req.method()==='POST'){
+   if(path==='/v1/manual-trades/research/refresh')return route.fulfill({headers,json:{queued:false,fresh:false}});
    expect(path).toBe('/v1/manual-trades/research');
    return route.fulfill({headers,json:{id:'review',mint,symbol:'ROBOT',name:'Robotics sample',imageUrl,at,expiresAt:new Date(Date.now()+300000).toISOString(),buyBlockers:['MARKET_MISSING'],notes:[],market:null,holders:null,risk:null,narratives:{access:true,items:[]},smartMoney:{access:true,items:[]}}});
   }
