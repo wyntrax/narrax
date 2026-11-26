@@ -64,7 +64,8 @@ function TrackedWalletsSection({api,queryKey,sort,readyOnly,flowOnly,review,quer
     <div key="address">
      {w.label&&<strong>{w.label} </strong>}
      <Link href={href}>{w.address}</Link>
-     {readyToApprove&&<span className="sm-chips"><span className="sm-chip">{t('readyBadge')}</span></span>}
+     {readyToApprove&&!w.automated&&<span className="sm-chips"><span className="sm-chip">{t('readyBadge')}</span></span>}
+     {w.automated&&<span className="sm-chips"><span className="sm-chip sm-chip-quiet" title={w.automationReasons?.join(', ')}>Automated</span></span>}
      <small>{w.source} · {w.researchReview}</small>
      <small><Link href={href}>{t('inspectWallet')} ↗</Link>{isSolanaAddress(w.address)&&<> · <a href={`https://solscan.io/account/${encodeURIComponent(w.address)}`} target="_blank" rel="noopener noreferrer">Solscan ↗</a></>}</small>
     </div>,

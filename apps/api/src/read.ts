@@ -303,18 +303,24 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
     if (q.data.cursor && !(await db.trackedWallet.count({ where: { id: q.data.cursor, active: true } }))) return reply.code(400).send(bad);
     const term=q.data.q?likeEscape(q.data.q):undefined;
     const scoreIds=q.data.sort==='score'?await walletScorePage(db,{...q.data,term}):null;
+    const walletWhere = { active: true,...(q.data.source?{source:q.data.source}:{}),...(term?{OR:[{address:{startsWith:term}},{label:{contains:term,mode:'insensitive' as const}}]}:{}) };
     const rows = await db.trackedWallet.findMany({
-      where: { active: true,...(scoreIds?{id:{in:scoreIds}}:{}),...(q.data.source?{source:q.data.source}:{}),...(term?{OR:[{address:{startsWith:term}},{label:{contains:term,mode:'insensitive' as const}}]}:{}) }, orderBy: [{createdAt:'desc'},{id:'asc'}], take: q.data.limit + 1,
+      where: { ...walletWhere,...(scoreIds?{id:{in:scoreIds}}:{}) }, orderBy: [{createdAt:'desc'},{id:'asc'}], take: q.data.limit + 1,
       ...(!scoreIds&&q.data.cursor ? { cursor: { id: q.data.cursor }, skip: 1 } : {}),
       include: { profile: true, metrics: { where: { window: '30D' }, orderBy: { computedAt: 'desc' }, take: 1 }, cluster: { select: { id: true, confidence: true } },trades:{orderBy:[{at:'desc'},{id:'desc'}],take:1,select:{at:true}},_count:{select:{trades:true}} },
     });
     if(scoreIds)rows.sort((a,b)=>scoreIds.indexOf(a.id)-scoreIds.indexOf(b.id));
     const page = rows.slice(0, q.data.limit);
-    const walletProgress = await db.systemSetting.findMany({where:{key:{in:page.map(w=>`wallet.intelligence.${w.id}`)}}});
+    const [walletProgress, qualifications, totalWallets, withProfileCount] = await Promise.all([
+      db.systemSetting.findMany({where:{key:{in:page.map(w=>`wallet.intelligence.${w.id}`)}}}),
+      walletQualifications(db,page,now()),
+      db.trackedWallet.count({ where: walletWhere }),
+      db.trackedWallet.count({ where: { ...walletWhere, profile: { isNot: null } } }),
+    ]);
     const progressByKey = new Map(walletProgress.map(row=>[row.key,row.value]));
-    const qualifications = await walletQualifications(db,page,now());
     return {
       nextCursor: rows.length > q.data.limit ? page[page.length - 1]!.id : null,
+      summary: { total: totalWallets, withProfile: withProfileCount, awaitingProfile: Math.max(0, totalWallets - withProfileCount) },
       items: page.map((w) => ({
         address: w.address, label: w.label, score: w.profile?.score??null, leaderScore: w.profile?.leaderScore??null, style: w.profile?.style??null,
         researchReview: w.researchReview, qualification: qualifications.get(w.id),

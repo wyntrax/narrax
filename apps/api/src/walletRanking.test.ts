@@ -68,3 +68,9 @@ it('accepts a 5+ live small-cap sample when the 30-day ALL band has 20+ closes a
  expect(rankingReasons(multi,allBand,history,now,false,false)).toEqual({historyComplete:true,reasons:[]});
  expect(rankingReasons(multi,{...liveSmall,fastCloseRate:0.54},history,now,false,false).reasons).toContain('FAST_EXITS');
 });
+it('accepts strong asymmetric profitability (PF >= 1.8, WR >= 35%, 0 dead bags) without LOW_WIN_CONFIDENCE',()=>{
+ const asymmetric={...band,winRate:0.42,winRateLowerBound:0.32,profitFactor:2.4,deadBagPositions:0} as WalletPerformance['bands'][number];
+ expect(rankingReasons(sample,asymmetric,history,now,false,false)).toEqual({historyComplete:true,reasons:[]});
+ expect(rankingReasons(sample,{...asymmetric,deadBagPositions:1},history,now,false,false).reasons).toContain('LOW_WIN_CONFIDENCE');
+ expect(rankingReasons(sample,{...asymmetric,profitFactor:1.4},history,now,false,false).reasons).toContain('LOW_WIN_CONFIDENCE');
+});

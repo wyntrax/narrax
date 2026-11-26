@@ -7,6 +7,14 @@ function parseAutomation(intelligenceValue: unknown): WalletAutomationSummary | 
   return parsed.success ? parsed.data : null;
 }
 
+export type WalletRankingSort = 'default' | 'pnl' | 'profitFactor' | 'size';
+
+/** Accepts either high Wilson win-rate confidence (>=50%) or strong asymmetric profitability (PF >= 1.8, WR >= 35%, zero dead bags). */
+function hasPerformanceConfidence(band: WalletPerformance['bands'][number]): boolean {
+  if ((band.winRateLowerBound ?? 0) >= 0.5) return true;
+  return (band.profitFactor ?? 0) >= 1.8 && (band.winRate ?? 0) >= 0.35 && (band.deadBagPositions ?? 0) === 0;
+}
+
 export function rankingReasons(performance: WalletPerformance, band: WalletPerformance['bands'][number], history: unknown, now: Date, linked: boolean, developer: boolean, minMedianPositionSol = 0.01, automated = false) {
   const reasons: string[] = [];
   const scope = performance.bands?.find((b) => b.band === 'ALL') ?? band;
@@ -23,10 +31,10 @@ export function rankingReasons(performance: WalletPerformance, band: WalletPerfo
   else if (new Prisma.Decimal(band.medianClosedPositionSol).lt(minMedianPositionSol)) reasons.push('SMALL_POSITIONS');
   if (band.realisedPnlSol===null || new Prisma.Decimal(band.realisedPnlSol).lte(0) || (band.medianRoi??0)<=0) reasons.push('POSITIVE_RESULTS_REQUIRED');
   if ((band.deadBagPositions??0)>0 && band.deadBagCostSol!=null && band.realisedPnlSol!=null && new Prisma.Decimal(band.realisedPnlSol).minus(band.deadBagCostSol).lte(0)) reasons.push('DEAD_BAG_OVERHANG');
-  if ((band.winRateLowerBound??0)<0.5) reasons.push('LOW_WIN_CONFIDENCE');
+  if (!hasPerformanceConfidence(band)) reasons.push('LOW_WIN_CONFIDENCE');
   const smallCap = performance.bands?.find((b) => b.band === 'SMALL_CAP');
   const smallCapProven = !!smallCap && smallCap.closedPositions >= 5 && smallCap.closedTokens >= 5 && smallCap.observedDays >= 7 &&
-    (smallCap.winRateLowerBound ?? 0) >= 0.5 && smallCap.realisedPnlSol !== null &&
+    hasPerformanceConfidence(smallCap) && smallCap.realisedPnlSol !== null &&
     new Prisma.Decimal(smallCap.realisedPnlSol).gt(0) && (smallCap.medianRoi ?? 0) > 0 && (smallCap.fastCloseRate ?? 0) <= 0.5;
   if (band.band==='UNKNOWN' || band.band==='OVER_1M' || (band.band==='ALL' && !smallCapProven)) reasons.push('SMALL_CAP_UNPROVEN');
   if ((band.fastCloseRate??0)>0.5) reasons.push('FAST_EXITS');
@@ -43,7 +51,7 @@ export function isLinkedCluster(wallet: { clusterId: string | null; cluster?: { 
 }
 
 /** Bounded cohort, deterministic rank within it. Never ranks by token growth or promotes operator review. */
-export async function walletRanking(db: PrismaClient, now: Date, band: WalletEntryBand, limit: number, status: 'ALL' | 'REVIEW_READY' | 'OBSERVING' = 'ALL', minMedianPositionSol = 0.01, flowOnly = false, excludeAutomated = false) {
+export async function walletRanking(db: PrismaClient, now: Date, band: WalletEntryBand, limit: number, status: 'ALL' | 'REVIEW_READY' | 'OBSERVING' = 'ALL', minMedianPositionSol = 0.01, flowOnly = false, excludeAutomated = false, sort: WalletRankingSort = 'default') {
   const wallets = await db.trackedWallet.findMany({ where: { active: true, researchReview: { not: 'REJECTED' } },
     orderBy: { id: 'asc' }, take: 501, select: { id: true, address: true, label: true, researchReview: true, clusterId: true, cluster: { select: { label: true, confidence: true } } } });
   const cohort = wallets.slice(0,500);
@@ -69,10 +77,16 @@ export async function walletRanking(db: PrismaClient, now: Date, band: WalletEnt
       reasons,historyComplete,linked,developer,checkedAt:parsed.data.checkedAt,performance,
       flowSuitable:flow.suitable,flowReasons:flow.reasons,flowMetrics:flow.metrics,automation }];
   });
+  const metricOrder = (a: typeof items[number], b: typeof items[number]) => {
+    if (sort === 'pnl') return new Prisma.Decimal(b.performance.realisedPnlSol??'-999999').cmp(a.performance.realisedPnlSol??'-999999');
+    if (sort === 'profitFactor') return (b.performance.profitFactor??-1)-(a.performance.profitFactor??-1);
+    if (sort === 'size') return new Prisma.Decimal(b.performance.medianClosedPositionSol??'-1').cmp(a.performance.medianClosedPositionSol??'-1');
+    return (b.performance.winRateLowerBound??-1)-(a.performance.winRateLowerBound??-1);
+  };
   items.sort((a,b)=>Number(b.status==='REVIEW_READY')-Number(a.status==='REVIEW_READY') ||
-    Number(b.historyComplete)-Number(a.historyComplete) ||
     Number(!(b.automation?.automated ?? false))-Number(!(a.automation?.automated ?? false)) ||
-    (b.performance.winRateLowerBound??-1)-(a.performance.winRateLowerBound??-1) ||
+    (sort === 'default' ? Number(b.historyComplete)-Number(a.historyComplete) : 0) ||
+    metricOrder(a,b) ||
     new Prisma.Decimal(b.performance.realisedPnlSol??'0').cmp(a.performance.realisedPnlSol??'0') || a.address.localeCompare(b.address));
   const pipeline = WalletRankingPage.shape.pipeline.safeParse(values.get('wallet.evaluation.pipeline'));
   const counts = { reviewReady: items.filter(w=>w.status==='REVIEW_READY').length, observing: items.filter(w=>w.status==='OBSERVING').length,
