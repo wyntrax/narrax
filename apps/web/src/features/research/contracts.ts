@@ -95,6 +95,7 @@ export const WalletOpenPositionsSchema=z.object({
   positions:z.array(WalletOpenPositionSchema),totalPositions:z.number().int().nonnegative().optional(),
 });
 const ClosedTokenHighlightSchema=z.object({tokenId:text,pnlSol:number,investedSol:number,roi:number,holdSeconds:number,band:text,closedAt:date,token:TokenRef.nullable()});
+const CopyTradeScenarioSchema=z.object({delaySeconds:number,feePct:number,eligiblePositions:number,skippedTooFast:number,winRate:nullable,netPnlPerSol:number,medianRoi:nullable});
 export const WalletDetailSchema=z.object({
   qualification:QualificationSchema.nullish(),researchReview:text.optional(),
   intelligence:WalletIntelligenceSchema.extend({observedBuys:number.optional(),observedSells:number.optional(),unmatchedSells:number.optional()}).nullish(),
@@ -103,6 +104,7 @@ export const WalletDetailSchema=z.object({
  profile:z.object({score:number,leaderScore:number,style:text,medianHoldSeconds:nullable,bestPattern:text.nullable(),weakPattern:text.nullable(),updatedAt:date}).nullable(),
  performance:z.record(z.object({winRate:nullable,pnlSol:nullable,closedTrades:number,avgRoi:nullable,computedAt:date})),
  closedSummary:z.object({equityCurve:z.array(z.object({at:date,cumulativePnlSol:number})),topWinners:z.array(ClosedTokenHighlightSchema),topLosers:z.array(ClosedTokenHighlightSchema)}).nullish(),
+ copySimulation:z.array(CopyTradeScenarioSchema).nullish(),
  cluster:z.object({label:text.nullable(),confidence:text.or(number),size:number,members:z.array(z.object({address:text,label:text.nullable()}))}).nullable(),
  funding:z.object({status:text,funder:text.nullable(),fundedAt:date.nullable(),amountSol:nullable,checkedAt:date}).nullable(),
  openPositions:WalletOpenPositionsSchema.nullish(),

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { WalletOpenPositions, WalletPerformance } from '@narra/shared';
-import { computeWalletClosedSummary, computeWalletOpenPositions, computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
+import { computeCopyTradeSimulation, computeWalletClosedSummary, computeWalletOpenPositions, computeWalletPerformance, type PerformanceTrade } from './walletPerformance';
 
 const now = new Date('2026-10-26T12:00:00Z');
 function trade(side:'BUY'|'SELL',sol:string,qty:string,minute:number,cap:string|null='85000',token='a'):PerformanceTrade {
@@ -95,4 +95,21 @@ it('builds a chronological realised equity curve and top winners/losers summary'
   expect(summary.equityCurve.map(p=>p.cumulativePnlSol)).toEqual([2,0.5,1.5]);
   expect(summary.topWinners.map(p=>[p.tokenId,p.pnlSol])).toEqual([['win1',2],['win2',1]]);
   expect(summary.topLosers.map(p=>[p.tokenId,p.pnlSol])).toEqual([['loss1',-1.5]]);
+});
+it('simulates fixed-size copy trading across entry delays, skipping un-copyable fast exits and deducting friction',()=>{
+  const fastAt=new Date(+now-3_600_000);
+  const rows=[
+    // Fast 30s exit: skipped by all presets (minHold 60s / 240s / 1200s)
+    {id:'f1',tokenId:'fast',side:'BUY' as const,amountSol:'1',tokenAmount:'10',marketCapUsd:null,evidence:null,at:fastAt},
+    {id:'f2',tokenId:'fast',side:'SELL' as const,amountSol:'2',tokenAmount:'10',marketCapUsd:null,evidence:null,at:new Date(+fastAt+30_000)},
+    // 10-minute winner (+100% raw ROI): eligible at 30s & 2m delays, skipped at 10m delay (minHold 20m)
+    trade('BUY','1','10',0,'80000','mid'),trade('SELL','2','10',10,'80000','mid'),
+    // 30-minute loser (-50% raw ROI): eligible at all delays
+    trade('BUY','2','10',20,'80000','slow'),trade('SELL','1','10',50,'80000','slow'),
+  ];
+  const sim=computeCopyTradeSimulation(rows,now);
+  expect(sim).toHaveLength(3);
+  expect(sim[0]).toMatchObject({delaySeconds:30,eligiblePositions:2,skippedTooFast:1,winRate:0.5});
+  expect(sim[0]!.netPnlPerSol).toBeCloseTo((1-0.015)+(-0.5-0.015),4);
+  expect(sim[2]).toMatchObject({delaySeconds:600,eligiblePositions:1,skippedTooFast:2,winRate:0});
 });
