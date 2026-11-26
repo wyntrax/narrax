@@ -1,6 +1,7 @@
 /* Analytics workspace: structured KPI hierarchy, semantic return polarity, compact notes, and responsive tables. */
-.analytics-page{--an-pos:#4ade80;--an-neg:#f87171;--an-warn:#fbbf24;min-width:0;display:grid;gap:20px}
-:root[data-theme=light] .analytics-page{--an-pos:#15803d;--an-neg:#b91c1c;--an-warn:#a16207}
+.analytics-page{--an-pos:#4ade80;--an-neg:#f87171;--an-warn:#fbbf24;min-width:0;max-width:100%;display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.analytics-page>*{min-width:0;max-width:100%}
+:root[data-theme=light] .analytics-page{--an-pos:#166534;--an-neg:#991b1b;--an-warn:#854d0e}
 .analytics-page .research-heading{margin-bottom:4px}
 .analytics-page .research-section{margin:0}
 .analytics-toolbar{align-items:end}
@@ -44,9 +45,9 @@
 .analytics-action{display:inline-flex;align-items:center;padding:3px 8px;border:1px solid var(--bd);border-radius:6px;background:var(--s2);font:500 10px/1.4 var(--font-workspace-mono),monospace;letter-spacing:.04em;color:var(--tx);white-space:nowrap}
 
 .analytics-pill{display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--bd);border-radius:99px;font:500 10px/1.4 var(--font-workspace-mono),monospace;letter-spacing:.03em;white-space:nowrap}
-.analytics-pill-pos{color:var(--an-pos);border-color:color-mix(in srgb,var(--an-pos) 38%,var(--bd));background:color-mix(in srgb,var(--an-pos) 10%,transparent)}
-.analytics-pill-neg{color:var(--an-neg);border-color:color-mix(in srgb,var(--an-neg) 38%,var(--bd));background:color-mix(in srgb,var(--an-neg) 10%,transparent)}
-.analytics-pill-warn{color:var(--an-warn);border-color:color-mix(in srgb,var(--an-warn) 38%,var(--bd));background:color-mix(in srgb,var(--an-warn) 10%,transparent)}
+.analytics-pill-pos{color:var(--an-pos);border-color:color-mix(in srgb,var(--an-pos) 38%,var(--bd));background:color-mix(in srgb,var(--an-pos) 8%,var(--bg))}
+.analytics-pill-neg{color:var(--an-neg);border-color:color-mix(in srgb,var(--an-neg) 38%,var(--bd));background:color-mix(in srgb,var(--an-neg) 8%,var(--bg))}
+.analytics-pill-warn{color:var(--an-warn);border-color:color-mix(in srgb,var(--an-warn) 38%,var(--bd));background:color-mix(in srgb,var(--an-warn) 8%,var(--bg))}
 .analytics-pill-flat{color:var(--tx);background:var(--s2)}
 .analytics-pill-muted{color:var(--tx2);background:transparent}
 
@@ -57,6 +58,7 @@
 .analytics-caveats-list li{position:relative;padding:12px 14px 12px 26px;border:1px solid var(--bd);border-radius:12px;background:var(--bg);font-size:12px;line-height:1.6;color:var(--tx2)}
 .analytics-caveats-list li::before{content:'';position:absolute;left:12px;top:19px;width:5px;height:5px;border-radius:50%;background:var(--tx2)}
 
+.analytics-outcomes{min-width:0;max-width:100%}
 /* Keep missing-price explanations readable inside the scrollable desktop table
    and give them the full card width on mobile. */
 @media (min-width:901px){
