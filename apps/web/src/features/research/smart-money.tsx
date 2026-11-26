@@ -29,9 +29,11 @@ function useHold(){const t=useTranslations('workspace');return (seconds:number|n
  if(seconds<3600)return t('smHoldMinutes',{value:Math.round(seconds/60)});
  return t('smHoldHours',{value:Math.round(seconds/3600)});};}
 
+const WALLET_STYLES=['NARRATIVE_LEADER','EARLY_MOMENTUM','SWING','ROTATION','SCALPER','FOLLOWER','LONG_HOLD'] as const;
+
 /** Tracked-wallet directory. Scores are labelled unverified model estimates, and a missing value never becomes zero. */
 export function SmartMoneyPage(){
-  const t=useTranslations('workspace'),[input,setInput]=useState(''),[search,setSearch]=useState(''),[source,setSource]=useState(''),[sort,setSort]=useState<Sort>('recent');
+  const t=useTranslations('workspace'),[input,setInput]=useState(''),[search,setSearch]=useState(''),[source,setSource]=useState(''),[style,setStyle]=useState(''),[hideAutomated,setHideAutomated]=useState(false),[sort,setSort]=useState<Sort>('recent');
   const {access}=useResearch(),rankingsAllowed=hasFeature(access,'research.smart_money_rankings');
  const id=useLocale()==='id',research=useTranslations('workspace.smartResearch');
  const labels={rankings:id?'Peringkat':'Rankings',directory:id?'Direktori wallet':'Wallet directory',flows:research('flows'),emerging:research('emerging')};
@@ -41,9 +43,9 @@ export function SmartMoneyPage(){
     <Tabs.Content className="sm-tab-panel" value="rankings">{rankingsAllowed?<WalletLeaderboard/>:<Locked tier={access.features['research.smart_money_rankings']?.requiredTier??'PRO'}/>}</Tabs.Content>
     <Tabs.Content className="sm-tab-panel" value="directory">
   <form className="research-search" onSubmit={e=>{e.preventDefault();setSearch(input.trim());}}><label htmlFor="wallet-search">{t('enhance.walletSearch')}</label><div><input id="wallet-search" type="search" maxLength={64} value={input} onChange={e=>setInput(e.target.value)}/><button className="research-control" type="submit">{t('searchButton')}</button>{search&&<button className="research-control" type="button" onClick={()=>{setInput('');setSearch('');}}>{t('clear')}</button>}</div></form>
-  <div className="research-filters"><label>{t('trench.source')}<select value={source} onChange={e=>setSource(e.target.value)}><option value="">{t('alAll')}</option>{['MANUAL','IMPORT','DISCOVERED'].map(s=><option key={s} value={s}>{t(`enhance.sources.${s}`)}</option>)}</select></label><label>{t('smSort')}<select value={sort} onChange={e=>setSort(e.target.value as Sort)}><option value="recent">{t('smSortRecent')}</option><option value="score">{t('smSortScore')}</option></select></label></div>
+  <div className="research-filters"><label>{t('trench.source')}<select value={source} onChange={e=>setSource(e.target.value)}><option value="">{t('alAll')}</option>{['MANUAL','IMPORT','DISCOVERED'].map(s=><option key={s} value={s}>{t(`enhance.sources.${s}`)}</option>)}</select></label><label>{t('smStyle')}<select value={style} onChange={e=>setStyle(e.target.value)}><option value="">{t('alAll')}</option>{WALLET_STYLES.map(s=><option key={s} value={s}>{s}</option>)}</select></label><label>{t('smSort')}<select value={sort} onChange={e=>setSort(e.target.value as Sort)}><option value="recent">{t('smSortRecent')}</option><option value="score">{t('smSortScore')}</option></select></label><button type="button" className="research-control" aria-pressed={hideAutomated} onClick={()=>setHideAutomated(!hideAutomated)}>{id?'Sembunyikan bot':'Hide automated'}</button></div>
   {sort==='score'&&<p className="research-note">{t('smSortNote')}</p>}
-     <WalletList key={`${search}:${source}:${sort}`} search={search} source={source} sort={sort}/></Tabs.Content>
+     <WalletList key={`${search}:${source}:${style}:${hideAutomated}:${sort}`} search={search} source={source} style={style} hideAutomated={hideAutomated} sort={sort}/></Tabs.Content>
     <Tabs.Content className="sm-tab-panel" value="flows"><Section title={labels.flows}><p className="research-note">{research('help')}</p><WalletFlows/></Section></Tabs.Content>
     <Tabs.Content className="sm-tab-panel" value="emerging"><Section title={labels.emerging}><EmergingWallets/></Section></Tabs.Content>
    </Tabs.Root></div>;
@@ -54,15 +56,15 @@ function ProfileEvidence({profileAt,score,style,intelligence}:{profileAt:string|
  if(intelligence)return <span className="sm-evidence sm-pending"><b>{t('enhance.insufficientHistory')}</b><small>{t('enhance.profileProgress',{closed:intelligence.closedTrades,required:intelligence.requiredClosedTrades,observed:intelligence.observedTrades,days:intelligence.windowDays,at:f.date(intelligence.checkedAt)})}</small></span>;
  return <span className="sm-evidence sm-waiting"><b>{t('enhance.awaitingProfile')}</b><small>{t('enhance.profileRequirement')}</small></span>;
 }
-function WalletList({search,source,sort}:{search:string;source:string;sort:Sort}){
- const t=useTranslations('workspace'),f=useFormat(),paging=usePagination(),[history,setHistory]=useState(false);
- const query=useResearchQuery(pagePath('smart-money/wallets',{sort,...(search?{q:search}:{}),...(source?{source}:{})},paging.cursor),SmartWalletsSchema,true,60000);
+function WalletList({search,source,style,hideAutomated,sort}:{search:string;source:string;style:string;hideAutomated:boolean;sort:Sort}){
+ const id=useLocale()==='id',t=useTranslations('workspace'),f=useFormat(),paging=usePagination(),[history,setHistory]=useState(false);
+ const query=useResearchQuery(pagePath('smart-money/wallets',{sort,...(search?{q:search}:{}),...(source?{source}:{}),...(style?{style}:{}),...(hideAutomated?{excludeAutomated:'true'}:{})},paging.cursor),SmartWalletsSchema,true,60000);
   const items=query.data?.items??[];
  const summary=query.data?.summary;
  return <><div className="market-results-bar"><p>{t('enhance.walletCoverage')}</p><button className="research-control" disabled={query.isFetching} onClick={()=>void query.refetch()}>{t('refresh')}</button></div>
  {query.isError?<ResourceError error={query.error} retry={()=>void query.refetch()}/>:query.isPending?<Loading/>:!items.length?<Empty body={t('enhance.noWallets')}/>:<>
  <Metrics items={[{label:t('enhance.walletsLoaded'),value:summary?.total??items.length},{label:t('enhance.withActivity'),value:items.filter(w=>(w.observedTrades??0)>0).length},{label:t('enhance.withProfile'),value:summary?.withProfile??items.filter(w=>w.profileAt).length},{label:t('enhance.awaitingProfile'),value:summary?.awaitingProfile??items.filter(w=>!w.profileAt).length}]}/>
-    <DataTable caption={t('smartMoney')} headers={[t('smWallet'),t('trench.source'),t('enhance.storedTrades'),t('enhance.lastActivity'),t('smProfileEvidence')]} rows={items.map(w=>({key:w.address,cells:[<span key="wallet"><WalletName address={w.address} label={w.label}/><small>{short(w.address)}</small>{validAddress(w.address)?<a href={`https://solscan.io/account/${encodeURIComponent(w.address)}`} target="_blank" rel="noopener noreferrer">Solscan ↗</a>:<small>{t('enhance.invalidAddress')}</small>}</span>,w.source?t(`enhance.sources.${w.source}`):t('unknown'),f.number(w.observedTrades,0),f.date(w.lastTradeAt),<div key="evidence"><QualificationBadge value={w.qualification}/><ProfileEvidence profileAt={w.profileAt} score={w.score} style={w.style} intelligence={w.intelligence}/></div>]}))}/>
+    <DataTable caption={t('smartMoney')} headers={[t('smWallet'),t('trench.source'),t('enhance.storedTrades'),t('enhance.lastActivity'),t('smProfileEvidence')]} rows={items.map(w=>({key:w.address,cells:[<span key="wallet"><WalletName address={w.address} label={w.label}/>{w.intelligence?.automation?.automated&&<span className="sm-chip sm-chip-quiet">{id?'Bot':'Automated'}</span>}<small>{short(w.address)}</small>{validAddress(w.address)?<a href={`https://solscan.io/account/${encodeURIComponent(w.address)}`} target="_blank" rel="noopener noreferrer">Solscan ↗</a>:<small>{t('enhance.invalidAddress')}</small>}</span>,w.source?t(`enhance.sources.${w.source}`):t('unknown'),f.number(w.observedTrades,0),f.date(w.lastTradeAt),<div key="evidence"><QualificationBadge value={w.qualification}/><ProfileEvidence profileAt={w.profileAt} score={w.score} style={w.style} intelligence={w.intelligence}/></div>]}))}/>
    <p className="research-note">{t('enhance.profileRequirement')}</p><p className="research-note">{t('enhance.walletEvidence')}</p><button className="research-control" aria-expanded={history} onClick={()=>setHistory(!history)}>{t('trench.historicalModels')}</button>
   {history&&<><p className="research-notice">{t('trench.walletEvidence')}</p><DataTable caption={t('trench.historicalModels')} headers={[t('smWallet'),t('score'),t('smStyle'),t('smWinRate'),t('smPnl'),t('smTrades'),t('smAvgRoi')]} rows={items.map(w=>({key:w.address,cells:[<WalletName key="wallet" address={w.address} label={w.label}/>,f.number(w.score),w.style??t('unknown'),f.percent(w.winRate),f.number(w.pnl30dSol,2),f.number(w.closedTrades,0),f.percent(w.avgRoi)]}))}/></>}
   </>}<Pager page={paging.page} previous={paging.previous} next={()=>paging.next(query.data?.nextCursor??null)} canNext={!query.isFetching&&!query.isError&&!!query.data?.nextCursor}/></>;
@@ -84,6 +86,16 @@ function EquityCurve({points}:{points:{at:string;cumulativePnlSol:number}[]}){
   <p className="research-note">{id?'P&L terealisasi kumulatif (30h)':'Cumulative realised P&L (30d)'}: <strong>{f.number(last,4)} SOL</strong> · {id?'Rentang':'Range'}: {f.number(min,4)} → {f.number(max,4)} SOL ({f.date(points[0]!.at)} – {f.date(points.at(-1)!.at)})</p>
  </div>;
 }
+function CopyTradeSimulator({scenarios}:{scenarios:{delaySeconds:number;feePct:number;eligiblePositions:number;skippedTooFast:number;winRate:number|null;netPnlPerSol:number;medianRoi:number|null}[]}){
+ const id=useLocale()==='id',f=useFormat(),[sizeSol,setSizeSol]=useState(0.5);
+ if(!scenarios.some(s=>s.eligiblePositions>0||s.skippedTooFast>0))return null;
+ const fmtDelay=(s:number)=>s<60?`${s}s`:`${Math.round(s/60)}m`;
+ return <Section title={id?'Simulasi copy-trade (30h)':'Copy-trade delay simulator (30d)'}>
+  <p className="research-note">{id?'Estimasi stres-uji ukuran tetap pada posisi tertutup yang bertahan minimal 2x jeda masuk, dikurangi estimasi biaya & slippage pulang-pergi. Bukan jaminan eksekusi live.':'Fixed-size stress test on closed positions held at least 2x the entry delay, minus estimated round-trip fees & slippage. Descriptive only, not a guaranteed live fill.'}</p>
+  <div className="research-filters"><label>{id?'Ukuran tetap per transaksi · SOL':'Fixed size per trade · SOL'}<select value={String(sizeSol)} onChange={e=>setSizeSol(Number(e.target.value))}>{[0.1,0.5,1,2].map(v=><option key={v} value={v}>{v} SOL</option>)}</select></label></div>
+  <DataTable caption={id?'Simulasi copy-trade':'Copy-trade delay simulator'} headers={[id?'Jeda masuk':'Entry delay',id?'Biaya/slippage':'Est. friction',id?'Dapat disalin':'Copyable',id?'Terlalu cepat':'Skipped (too fast)',id?'Win rate':'Win rate',id?'Median ROI':'Median ROI',id?`Estimasi P&L (${sizeSol} SOL)`:`Est. net P&L (${sizeSol} SOL)`]} rows={scenarios.map(s=>({key:String(s.delaySeconds),cells:[fmtDelay(s.delaySeconds),f.percent(s.feePct),f.number(s.eligiblePositions,0),f.number(s.skippedTooFast,0),f.percent(s.winRate),f.percent(s.medianRoi),<TradeAmount key="pnl" value={s.netPnlPerSol*sizeSol}/>]}))}/>
+ </Section>;
+}
 export function SmartWalletPage({address}:{address:string}){
  const id=useLocale()==='id',t=useTranslations('workspace'),f=useFormat(),hold=useHold(),[side,setSide]=useState(''),query=useResearchQuery(`wallets/${encodeURIComponent(address)}`,WalletDetailSchema,true,60000);
  const back=<Link className="research-back" href="/app/smart-money">← {t('smartMoney')}</Link>;
@@ -104,6 +116,7 @@ export function SmartWalletPage({address}:{address:string}){
      {w.closedSummary.topLosers.length>0&&<Section title={id?'Kerugian terbesar':'Top losers'}><DataTable caption={id?'Kerugian terbesar':'Top losers'} headers={[t('token'),'P&L · SOL','ROI',t('smMedianHold')]} rows={w.closedSummary.topLosers.map(p=>({key:`${p.tokenId}:${p.closedAt}`,cells:[p.token?<Link key="t" href={`/app/tokens/${encodeURIComponent(p.token.mint)}`}><TokenIdentity symbol={p.token.symbol==='UNKNOWN'?short(p.token.mint):p.token.symbol} name={p.token.name} imageUrl={p.token.imageUrl}/></Link>:<code key="t">{short(p.tokenId)}</code>,<TradeAmount key="pnl" value={p.pnlSol}/>,f.percent(p.roi),hold(p.holdSeconds)]}))}/></Section>}
     </div>
    </Section>}
+   {w.copySimulation&&w.copySimulation.length>0&&<CopyTradeSimulator scenarios={w.copySimulation}/>}
    <Section title={t('enhance.openPositions')}>
     <p className="research-note">{t('enhance.openPositionsScope')}</p>
     {w.openPositions&&<p className="research-note">{t('enhance.openPositionsTop')}</p>}

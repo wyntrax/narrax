@@ -155,6 +155,57 @@ export function computeWalletClosedSummary(rows: PerformanceTrade[], now: Date):
   return { equityCurve, topWinners, topLosers };
 }
 
+export interface CopyTradeScenario {
+  delaySeconds: number;
+  feePct: number;
+  eligiblePositions: number;
+  skippedTooFast: number;
+  winRate: number | null;
+  /** Net cumulative SOL return per 1 SOL fixed size per copied trade after round-trip friction. */
+  netPnlPerSol: number;
+  medianRoi: number | null;
+}
+
+const COPY_SIM_PRESETS = [
+  { delaySeconds: 30, minHoldSeconds: 60, feePct: 0.015 },
+  { delaySeconds: 120, minHoldSeconds: 240, feePct: 0.025 },
+  { delaySeconds: 600, minHoldSeconds: 1200, feePct: 0.04 },
+] as const;
+
+/**
+ * Fixed-size copy-trade friction simulation across 30s / 2m / 10m entry delays.
+ * Skips closed positions exited faster than 2x the delay (un-copyable) and deducts an explicit
+ * round-trip fee/slippage estimate. Descriptive stress-test only—not a guaranteed live fill.
+ */
+export function computeCopyTradeSimulation(rows: PerformanceTrade[], now: Date): CopyTradeScenario[] {
+  const { valid } = accountPositions(rows, now);
+  const closed = valid.filter((p) => p.close !== null && p.invested.gt(0));
+  return COPY_SIM_PRESETS.map(({ delaySeconds, minHoldSeconds, feePct }) => {
+    const eligible: number[] = [];
+    let skippedTooFast = 0;
+    for (const p of closed) {
+      const holdSeconds = (p.close! - p.start) / 1000;
+      if (holdSeconds < minHoldSeconds) { skippedTooFast++; continue; }
+      const rawRoi = p.pnl.div(p.invested).toNumber();
+      if (!Number.isFinite(rawRoi)) continue;
+      // Floor at -1 (-100% max loss on spot) after round-trip fee/slippage friction.
+      eligible.push(Math.max(-1, rawRoi - feePct));
+    }
+    const wins = eligible.filter((r) => r > 0).length;
+    const netPnlPerSol = Math.round(eligible.reduce((s, r) => s + r, 0) * 1e4) / 1e4;
+    const med = median(eligible);
+    return {
+      delaySeconds,
+      feePct,
+      eligiblePositions: eligible.length,
+      skippedTooFast,
+      winRate: eligible.length ? wins / eligible.length : null,
+      netPnlPerSol,
+      medianRoi: med != null ? Math.round(med * 1e4) / 1e4 : null,
+    };
+  });
+}
+
 export function computeWalletPerformance(rows: PerformanceTrade[], now: Date, capped = false, markToMarket?: MarkToMarketContext | null): WalletPerformance {
   const { valid, trades, invalidTrades, unmatchedSells } = accountPositions(rows,now);
   const validMtm = markToMarket && Number.isFinite(markToMarket.solUsd) && markToMarket.solUsd > 0 ? markToMarket : null;

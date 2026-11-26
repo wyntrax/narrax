@@ -5,7 +5,7 @@ import type { PrismaClient } from '@narra/database';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { IdCursor, Limit, likeEscape } from './paging';
 import { canReadFeature, requireFeature } from './entitlements/access';
-import { computeWalletClosedSummary, computeWalletOpenPositions, type PerformanceTrade } from '@narra/worker-pipeline';
+import { computeCopyTradeSimulation, computeWalletClosedSummary, computeWalletOpenPositions, type PerformanceTrade } from '@narra/worker-pipeline';
 
 const n = (v: { toString(): string } | null | undefined) => (v == null ? null : Number(v.toString()));
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
@@ -80,6 +80,7 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
     const slicedTrades = positionTrades.slice(0, 10_000) as PerformanceTrade[];
     const open = computeWalletOpenPositions(slicedTrades, observedAt, positionTrades.length > 10_000);
     const closedRaw = computeWalletClosedSummary(slicedTrades, observedAt);
+    const copySimulation = computeCopyTradeSimulation(slicedTrades, observedAt);
     // The detail page shows only the largest observed inventory lots. Remaining swap cost is the
     // recorded SOL exposure; missing/unsupported swaps are already excluded by the accounting.
     const rankedOpenPositions = [...open.positions]
@@ -128,6 +129,7 @@ export function registerIntelRoutes(app: FastifyInstance, deps: Pick<AccountDeps
       profile: w.profile ? { score: w.profile.score, leaderScore: w.profile.leaderScore, style: w.profile.style, medianHoldSeconds: w.profile.medianHoldSeconds, strongestNarrative: w.profile.strongestNarrative, bestPattern: w.profile.bestPattern, weakPattern: w.profile.weakPattern, typicalEntryMarketCapUsd: { min: n(w.profile.typicalEntryMcMin), max: n(w.profile.typicalEntryMcMax) }, updatedAt: w.profile.updatedAt } : null,
       performance,
       closedSummary,
+      copySimulation,
       // Cluster and relationship links are inferred from timing and funding, so confidence always comes with them.
       cluster: w.cluster ? { id: w.cluster.id, label: w.cluster.label, confidence: w.cluster.confidence, size: w.cluster._count.wallets, members: w.cluster.wallets.filter((m) => m.address !== w.address) } : null,
       relationships: [

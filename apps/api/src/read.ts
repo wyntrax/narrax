@@ -298,28 +298,43 @@ export function registerReadRoutes(app: FastifyInstance, deps: Pick<AccountDeps,
   });
 
   app.get('/v1/smart-money/wallets', opts, async (req, reply) => {
-    const q = Paging.extend({q:z.string().trim().min(1).max(64).optional(),source:z.enum(['MANUAL','IMPORT','DISCOVERED']).optional(),sort:z.enum(['recent','score']).default('recent')}).safeParse(req.query);
+    const q = Paging.extend({
+      q:z.string().trim().min(1).max(64).optional(),
+      source:z.enum(['MANUAL','IMPORT','DISCOVERED']).optional(),
+      style:z.enum(['EARLY_MOMENTUM','MEME_EARLY','SWING','SCALPER','ROTATION','LONG_HOLD','NARRATIVE_LEADER','FOLLOWER','UNKNOWN']).optional(),
+      excludeAutomated:z.enum(['true','false']).default('false'),
+      sort:z.enum(['recent','score']).default('recent'),
+    }).safeParse(req.query);
     if (!q.success) return reply.code(400).send(bad);
     if (q.data.cursor && !(await db.trackedWallet.count({ where: { id: q.data.cursor, active: true } }))) return reply.code(400).send(bad);
     const term=q.data.q?likeEscape(q.data.q):undefined;
     const scoreIds=q.data.sort==='score'?await walletScorePage(db,{...q.data,term}):null;
-    const walletWhere = { active: true,...(q.data.source?{source:q.data.source}:{}),...(term?{OR:[{address:{startsWith:term}},{label:{contains:term,mode:'insensitive' as const}}]}:{}) };
+    const walletWhere = {
+      active: true,
+      ...(q.data.source?{source:q.data.source}:{}),
+      ...(q.data.style?{profile:{is:{style:q.data.style}}}:{}),
+      ...(term?{OR:[{address:{startsWith:term}},{label:{contains:term,mode:'insensitive' as const}}]}:{}),
+    };
+    const scanTake = q.data.excludeAutomated === 'true' ? Math.min(200, q.data.limit * 4) : q.data.limit + 1;
     const rows = await db.trackedWallet.findMany({
-      where: { ...walletWhere,...(scoreIds?{id:{in:scoreIds}}:{}) }, orderBy: [{createdAt:'desc'},{id:'asc'}], take: q.data.limit + 1,
+      where: { ...walletWhere,...(scoreIds?{id:{in:scoreIds}}:{}) }, orderBy: [{createdAt:'desc'},{id:'asc'}], take: scanTake,
       ...(!scoreIds&&q.data.cursor ? { cursor: { id: q.data.cursor }, skip: 1 } : {}),
       include: { profile: true, metrics: { where: { window: '30D' }, orderBy: { computedAt: 'desc' }, take: 1 }, cluster: { select: { id: true, confidence: true } },trades:{orderBy:[{at:'desc'},{id:'desc'}],take:1,select:{at:true}},_count:{select:{trades:true}} },
     });
     if(scoreIds)rows.sort((a,b)=>scoreIds.indexOf(a.id)-scoreIds.indexOf(b.id));
-    const page = rows.slice(0, q.data.limit);
-    const [walletProgress, qualifications, totalWallets, withProfileCount] = await Promise.all([
-      db.systemSetting.findMany({where:{key:{in:page.map(w=>`wallet.intelligence.${w.id}`)}}}),
+    const allIntel = await db.systemSetting.findMany({where:{key:{in:rows.map(w=>`wallet.intelligence.${w.id}`)}}});
+    const progressByKey = new Map(allIntel.map(row=>[row.key,row.value]));
+    const filteredRows = q.data.excludeAutomated === 'true'
+      ? rows.filter(w => (progressByKey.get(`wallet.intelligence.${w.id}`) as { automation?: { automated?: unknown } } | null)?.automation?.automated !== true)
+      : rows;
+    const page = filteredRows.slice(0, q.data.limit);
+    const [qualifications, totalWallets, withProfileCount] = await Promise.all([
       walletQualifications(db,page,now()),
       db.trackedWallet.count({ where: walletWhere }),
       db.trackedWallet.count({ where: { ...walletWhere, profile: { isNot: null } } }),
     ]);
-    const progressByKey = new Map(walletProgress.map(row=>[row.key,row.value]));
     return {
-      nextCursor: rows.length > q.data.limit ? page[page.length - 1]!.id : null,
+      nextCursor: filteredRows.length > q.data.limit ? page[page.length - 1]!.id : null,
       summary: { total: totalWallets, withProfile: withProfileCount, awaitingProfile: Math.max(0, totalWallets - withProfileCount) },
       items: page.map((w) => ({
         address: w.address, label: w.label, score: w.profile?.score??null, leaderScore: w.profile?.leaderScore??null, style: w.profile?.style??null,
