@@ -113,3 +113,18 @@ it('simulates fixed-size copy trading across entry delays, skipping un-copyable 
   expect(sim[0]!.netPnlPerSol).toBeCloseTo((1-0.015)+(-0.5-0.015),4);
   expect(sim[2]).toMatchObject({delaySeconds:600,eligiblePositions:1,skippedTooFast:2,winRate:0});
 });
+it('closes sold positions leaving <=1% token dust (or <=5% with <=0.005 SOL cost) without breaking later dust sells',()=>{
+  const rows=[
+    // Sold 99.2% (0.8% dust left) -> dust-closed winner
+    trade('BUY','1','1000',0,'85000','dust99'),trade('SELL','1.5','992',10,'85000','dust99'),
+    // Sold 99.2%, then later sold the remaining 0.8% dust -> must NOT trigger unmatchedSells
+    trade('BUY','1','1000',15,'85000','dustLater'),trade('SELL','1.5','992',20,'85000','dustLater'),trade('SELL','0.01','8',30,'85000','dustLater'),
+    // Sold 96% of 0.1 SOL buy (0.004 SOL cost left <= 0.005 SOL) -> dust-closed
+    trade('BUY','0.1','1000',35,'85000','dustCost'),trade('SELL','0.2','960',45,'85000','dustCost'),
+    // Sold only 50% of a tiny 0.004 SOL buy -> must stay OPEN
+    trade('BUY','0.004','1000',50,'85000','partialTiny'),trade('SELL','0.003','500',55,'85000','partialTiny'),
+  ];
+  const result=computeWalletPerformance(rows,now);
+  expect(result).toMatchObject({unmatchedSells:0,invalidTrades:0});
+  expect(result.bands.find(b=>b.band==='SMALL_CAP')).toMatchObject({positions:4,closedPositions:3,openPositions:1,wins:3,winRate:1});
+});
