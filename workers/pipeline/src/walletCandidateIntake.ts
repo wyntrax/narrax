@@ -17,7 +17,7 @@ const hasProvenSmallCapSample = (perfValue: unknown): boolean => provenSmallCapM
 
 export const WALLET_INTAKE_KEY = 'wallet.evaluation.intake';
 /** `evictMaxScore` is a reversible capacity policy: stale provisional wallets below it can be released to make room for new candidates. History is kept and they can be reactivated. */
-export const WALLET_INTAKE_LIMITS = { capacity: 200, perCycle: 2, staleProvisionalMs: 7 * 86_400_000, evictMaxScore: 50, evictMaxHoldSeconds: 300, minMedianQuoteSol: 0.01 } as const;
+export const WALLET_INTAKE_LIMITS = { capacity: 200, perCycle: 2, staleProvisionalMs: 7 * 86_400_000, automatedEvictMs: 24 * 3_600_000, evictMaxScore: 50, evictMaxHoldSeconds: 300, minMedianQuoteSol: 0.01 } as const;
 const SpendSummary = z.object({ matchedTokens: z.number().int().nonnegative(),
   medianMatchedQuoteSol: z.union([z.number().finite(), z.string().regex(/^\d+(\.\d+)?$/)]).nullable() }).optional();
 const Hold = z.object({ checkedAt: z.string().datetime(), tokenId: z.string(), mint: z.string(), stillHolding: z.boolean(),
@@ -69,13 +69,14 @@ export async function intakeEmergingWallets(db: PrismaClient, now = new Date()) 
 async function evictStaleProvisional(tx: Prisma.TransactionClient, now: Date, needed: number): Promise<number> {
   if (needed <= 0 || typeof tx.trackedWallet.updateMany !== 'function') return 0;
   const staleCutoff = new Date(+now - WALLET_INTAKE_LIMITS.staleProvisionalMs);
+  const automatedCutoff = new Date(+now - WALLET_INTAKE_LIMITS.automatedEvictMs);
   const canReadSettings = typeof tx.systemSetting.findMany === 'function';
   const stalePool = await tx.trackedWallet.findMany({
     where: {
       source: 'DISCOVERED',
       active: true,
       researchReview: 'PROVISIONAL',
-      createdAt: { lte: staleCutoff },
+      createdAt: { lte: canReadSettings ? automatedCutoff : staleCutoff },
       ...(!canReadSettings
         ? {
             OR: [
@@ -86,7 +87,7 @@ async function evictStaleProvisional(tx: Prisma.TransactionClient, now: Date, ne
           }
         : {}),
     },
-    select: { id: true, profile: { select: { score: true, medianHoldSeconds: true } } },
+    select: { id: true, createdAt: true, profile: { select: { score: true, medianHoldSeconds: true } } },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     take: canReadSettings ? WALLET_INTAKE_LIMITS.capacity : WALLET_INTAKE_LIMITS.perCycle * 5,
   });
@@ -106,8 +107,10 @@ async function evictStaleProvisional(tx: Prisma.TransactionClient, now: Date, ne
   const evictIds = stalePool
     .filter(row => {
       if (hasProvenSmallCapSample(byKey.get(`wallet.performance.${row.id}`))) return false;
+      if (automatedIds.has(row.id)) return true;
+      // Non-automated provisional wallets keep the full 7-day evaluation window before stale eviction.
+      if (row.createdAt instanceof Date && row.createdAt > staleCutoff) return false;
       return (
-        automatedIds.has(row.id) ||
         row.profile === null ||
         row.profile.score < WALLET_INTAKE_LIMITS.evictMaxScore ||
         (row.profile.medianHoldSeconds != null && row.profile.medianHoldSeconds < WALLET_INTAKE_LIMITS.evictMaxHoldSeconds)
