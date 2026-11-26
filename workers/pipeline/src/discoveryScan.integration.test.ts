@@ -48,13 +48,12 @@ it('resumes the saved signature cursor after the fresh-token window, retaining t
 });
 
 it('counts retries against the original per-run ceiling and checkpoints the remaining transaction',async()=>{
- const t=await token();let first=true;const seen:string[]=[];
- const rpc:HistoryPort={getSignaturesForAddress:async()=>{if(first){first=false;throw new RpcHttpError('getSignaturesForAddress',429);}return Array.from({length:40},(_,i)=>sig(`s${i}`));},getParsedTransaction:async s=>{seen.push(s);return null;}};
- // Consume maxPages retry slots (1 on signatures + maxPages-1 across distinct txs) so one transaction must wait.
- const budget=DISCOVERY_LIMITS.maxPages+DISCOVERY_LIMITS.maxTxsPerToken,txRetries=DISCOVERY_LIMITS.maxPages-1;
- const retried=new Set<string>();const original=rpc.getParsedTransaction;
- rpc.getParsedTransaction=async s=>{if(retried.size<txRetries&&!retried.has(s)){retried.add(s);throw new RpcHttpError('getTransaction',429);}return original(s);};
- expect(await scanEarlyBuyers(db,rpc,NOW,{maxTokens:1,tokenIds:[t.id],clock:clock()})).toMatchObject({requests:budget,retries:DISCOVERY_LIMITS.maxPages,stopReason:'REQUEST_BUDGET',scanned:0});
+ const t=await token();let first=true,sigPages=0;const seen:string[]=[];
+ const fullPages=Math.max(0,DISCOVERY_LIMITS.maxPages-2),budget=DISCOVERY_LIMITS.maxPages+DISCOVERY_LIMITS.maxTxsPerToken;
+ const rpc:HistoryPort={getSignaturesForAddress:async()=>{if(first){first=false;throw new RpcHttpError('getSignaturesForAddress',429);}if(sigPages<fullPages){const p=sigPages++;return Array.from({length:DISCOVERY_LIMITS.pageSize},(_,i)=>sig(`p${p}-${i}`));}return Array.from({length:40},(_,i)=>sig(`s${i}`));},getParsedTransaction:async s=>{seen.push(s);return null;}};
+ // Two retries plus (maxPages - 1) signature pages fill the budget so one transaction must wait.
+ let once=true;const original=rpc.getParsedTransaction;rpc.getParsedTransaction=async s=>{if(once){once=false;throw new RpcHttpError('getTransaction',429);}return original(s);};
+ expect(await scanEarlyBuyers(db,rpc,NOW,{maxTokens:1,tokenIds:[t.id],clock:clock()})).toMatchObject({requests:budget,retries:2,stopReason:'REQUEST_BUDGET',scanned:0});
  expect(seen).toHaveLength(39);expect((await state()).pending[0]?.nextTransaction).toBe(39);
  const later=new Date(+NOW+60000);
  expect(await scanEarlyBuyers(db,rpc,later,{maxTokens:1,tokenIds:[t.id],clock:clock(+later)})).toMatchObject({requests:1,complete:1});
