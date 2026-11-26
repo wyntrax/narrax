@@ -17,6 +17,7 @@ const copy={
   wallet:'Wallet / evaluation',win:'Win rate / closed positions',pnl:'Realised P&L · SOL',hold:'Typical holding time',risk:'Losses / open exposure',evidence:'Evidence',ready:'Ready for review',observing:'Observing',
   flowOnly:'Flow-suitable only',flowSuitable:'Flow-suitable',flowBlocked:'Flow suitability gaps',flowNote:'Behavioural filter, not profitability or approval: full 30-day history, at least 20 closes over 5 tokens and 7 days, median first sell and median close at least 30 minutes, median closed-position spend at least 0.5 SOL, and fewer than half of closes under one minute. The flow publisher still applies its own market, holder, risk and independent-entity gates.',
   hideAutomated:'Hide automated',automated:'Automated',automatedSignals:'Automation signals',inspectObserving:'Inspect Observing ({count})',
+  sortLabel:'Sort by',sorts:{default:'Default (Wilson)',pnl:'Realised P&L',profitFactor:'Profit factor',size:'Median size'},
   first:'First sell',close:'Observed close',sample:'closed tokens',open:'open positions',cost:'remaining swap cost · SOL',drawdown:'closed-position drawdown · SOL',unrealised:'unrealised P&L · SOL',deadBags:'dead bags',
   medianWin:'Median win · SOL',medianLoss:'Median loss · SOL',factor:'Profit factor',lower:'95% lower bound',wins:'wins',losses:'losses',flat:'breakeven',
   unknown:'Unknown',empty:'No evaluated positions in this entry band yet. Check Unknown entry cap or All entry caps; historical market caps cannot be inferred from current prices.',
@@ -34,6 +35,7 @@ const copy={
   wallet:'Wallet / evaluasi',win:'Win rate / posisi ditutup',pnl:'P&L terealisasi · SOL',hold:'Durasi kepemilikan tipikal',risk:'Kerugian / eksposur terbuka',evidence:'Bukti',ready:'Siap ditinjau',observing:'Dalam pengamatan',
   flowOnly:'Hanya sesuai arus',flowSuitable:'Sesuai arus',flowBlocked:'Celah kesesuaian arus',flowNote:'Filter perilaku, bukan profitabilitas atau persetujuan: riwayat 30 hari lengkap, minimal 20 penutupan pada 5 token dan 7 hari, median penjualan pertama dan median penutupan minimal 30 menit, median belanja posisi tertutup minimal 0,5 SOL, dan kurang dari separuh penutupan di bawah satu menit. Penerbit arus tetap menerapkan gerbang pasar, pemegang, risiko, dan entitas independennya sendiri.',
   hideAutomated:'Sembunyikan bot',automated:'Otomatis / Bot',automatedSignals:'Sinyal otomatisasi',inspectObserving:'Periksa Dalam pengamatan ({count})',
+  sortLabel:'Urutkan',sorts:{default:'Default (Wilson)',pnl:'P&L terealisasi',profitFactor:'Faktor profit',size:'Ukuran median'},
   first:'Penjualan pertama',close:'Penutupan teramati',sample:'token ditutup',open:'posisi terbuka',cost:'sisa biaya swap · SOL',drawdown:'drawdown posisi ditutup · SOL',unrealised:'P&L belum terealisasi · SOL',deadBags:'dead bags',
   medianWin:'Median untung · SOL',medianLoss:'Median rugi · SOL',factor:'Faktor profit',lower:'Batas bawah 95%',wins:'menang',losses:'kalah',flat:'impas',
   unknown:'Tidak diketahui',empty:'Belum ada posisi yang dievaluasi pada kelompok ini. Periksa kapitalisasi masuk tidak diketahui atau semua kapitalisasi; kapitalisasi historis tidak dapat disimpulkan dari harga kini.',
@@ -46,8 +48,8 @@ const copy={
 
 export function WalletLeaderboard(){
  const locale=useLocale()==='id'?'id':'en',t=copy[locale],f=useFormat(),[band,setBand]=useState<WalletEntryBand>('SMALL_CAP');
- const [status,setStatus]=useState('REVIEW_READY'),[minimum,setMinimum]=useState('0.01'),[flowOnly,setFlowOnly]=useState(false),[hideAutomated,setHideAutomated]=useState(false);
- const query=useResearchQuery(`smart-money/rankings?band=${band}&limit=50&status=${status}&minMedianPositionSol=${minimum}${flowOnly?'&flowOnly=true':''}${hideAutomated?'&excludeAutomated=true':''}`,WalletRankingPage,true,60000);
+ const [status,setStatus]=useState('REVIEW_READY'),[minimum,setMinimum]=useState('0.01'),[flowOnly,setFlowOnly]=useState(false),[hideAutomated,setHideAutomated]=useState(false),[sort,setSort]=useState<'default'|'pnl'|'profitFactor'|'size'>('default');
+ const query=useResearchQuery(`smart-money/rankings?band=${band}&limit=50&status=${status}&minMedianPositionSol=${minimum}${flowOnly?'&flowOnly=true':''}${hideAutomated?'&excludeAutomated=true':''}${sort!=='default'?`&sort=${sort}`:''}`,WalletRankingPage,true,60000);
  const data=query.data,items=data?.items??[],pipeline=data?.pipeline;
  const hold=(s:number|null)=>s===null?t.unknown:s<60?`${f.number(s,0)}s`:s<3600?`${f.number(s/60,1)}m`:s<86400?`${f.number(s/3600,1)}h`:`${f.number(s/86400,1)}d`;
  const sol=(value:string|null|undefined)=>value==null?t.unknown:<TradeAmount value={Number(value)}/>;
@@ -55,6 +57,7 @@ export function WalletLeaderboard(){
  return <Section title={t.title}><p>{t.body}</p><div className="research-filters"><label>{t.band}<select value={band} onChange={e=>setBand(e.target.value as WalletEntryBand)}>{WalletEntryBand.options.map(b=><option key={b} value={b}>{t.bands[b]}</option>)}</select></label>
   <label>{t.status}<select value={status} onChange={e=>setStatus(e.target.value)}><option value="REVIEW_READY">{t.ready}</option><option value="OBSERVING">{t.observing}</option><option value="ALL">{t.all}</option></select></label>
   <label>{t.size}<select value={minimum} onChange={e=>setMinimum(e.target.value)}>{['0','0.001','0.01','0.1','1'].map(v=><option key={v} value={v}>{v}</option>)}</select></label>
+  <label>{t.sortLabel}<select value={sort} onChange={e=>setSort(e.target.value as typeof sort)}>{(['default','pnl','profitFactor','size'] as const).map(s=><option key={s} value={s}>{t.sorts[s]}</option>)}</select></label>
   <button type="button" className="research-control" aria-pressed={flowOnly} onClick={()=>{const next=!flowOnly;setFlowOnly(next);if(next)setStatus('ALL');}}>{t.flowOnly}</button>
   <button type="button" className="research-control" aria-pressed={hideAutomated} onClick={()=>setHideAutomated(!hideAutomated)}>{t.hideAutomated}</button></div><p className="research-note">{t.sizeNote}</p><p className="research-note">{t.flowNote}</p>
   {query.isError?<ResourceError error={query.error} retry={()=>void query.refetch()}/>:query.isPending?<Loading/>:<>

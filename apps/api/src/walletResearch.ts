@@ -37,9 +37,10 @@ export function registerWalletResearchRoutes(app: FastifyInstance, deps: Pick<Ac
       minMedianPositionSol: z.coerce.number().finite().min(0).max(1000).default(0.01),
       flowOnly: z.enum(['true','false']).default('false'),
       excludeAutomated: z.enum(['true','false']).default('false'),
+      sort: z.enum(['default','pnl','profitFactor','size']).default('default'),
     }).strict().safeParse(req.query);
     if (!query.success) return reply.code(400).send({ error: 'INVALID_INPUT' });
-    return walletRanking(db,clock(),query.data.band,query.data.limit,query.data.status,query.data.minMedianPositionSol,query.data.flowOnly==='true',query.data.excludeAutomated==='true');
+    return walletRanking(db,clock(),query.data.band,query.data.limit,query.data.status,query.data.minMedianPositionSol,query.data.flowOnly==='true',query.data.excludeAutomated==='true',query.data.sort);
   });
 
   app.get('/v1/smart-money/flows', opts, async (req, reply) => {

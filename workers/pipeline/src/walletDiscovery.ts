@@ -21,8 +21,8 @@ export const DISCOVERY_LIMITS = {
   /** Latest price at least this multiple of the first recorded price. */
   winnerGrowth: 3,
   minLiquidityUsd: 20_000,
-  /** Latest price row must be this fresh, or the token is left undecided. */
-  maxMetricAgeMs: 3 * 3_600_000,
+  /** Latest price row must be this fresh (12h inside the 48h lookback), or the token is left undecided. */
+  maxMetricAgeMs: 12 * 3_600_000,
   minCandidateScore: 20,
   maxCandidates: 50,
 } as const;

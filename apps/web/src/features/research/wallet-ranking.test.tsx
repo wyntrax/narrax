@@ -61,4 +61,6 @@ it('offers one-click jump to Observing when Ready for review is empty and toggle
  expect(state.paths.at(-1)).toContain('status=OBSERVING');
  await userEvent.click(screen.getByRole('button',{name:'Hide automated'}));
  expect(state.paths.at(-1)).toContain('excludeAutomated=true');
+ await userEvent.selectOptions(screen.getByLabelText('Sort by'),'pnl');
+ expect(state.paths.at(-1)).toContain('sort=pnl');
 });
