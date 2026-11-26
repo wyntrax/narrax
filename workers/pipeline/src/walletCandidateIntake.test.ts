@@ -200,3 +200,32 @@ it('reactivates proven small-cap wallets strongest-first and releases stale non-
  expect(updateMany).toHaveBeenNthCalledWith(2,{where:{id:{in:['proven-1','proven-2']}},data:{active:true}});
  expect(upsert).toHaveBeenCalledWith(expect.objectContaining({where:{key:'wallet.evaluation.reactivation'}}));
 });
+it('evicts confirmed automated bots after 24h while keeping non-automated provisional wallets for the full 7 days',async()=>{
+ const createMany=vi.fn(async(args:{data:unknown[]})=>({count:args.data.length}));
+ const updateMany=vi.fn(async(args:{where:{id:{in:string[]}}})=>({count:args.where.id.in.length}));
+ const upsert=vi.fn(async()=>({}));
+ let findCalls=0;
+ const age36h=new Date(+now-36*3_600_000);
+ const tx={
+  $executeRaw:vi.fn(async()=>0),
+  systemSetting:{
+   findUnique:async()=>({value:{checkedAt:now.toISOString(),items:addresses.map(address=>({address,scannedTokens:3}))}}),
+   findMany:async()=>[{key:'wallet.intelligence.recent-bot',value:{automation:{automated:true,reasons:['HIGH_FREQUENCY']}}}],
+   upsert,
+  },
+  trackedWallet:{
+   count:async()=>200,
+   findMany:async()=>{findCalls++;return findCalls===1?[]:[
+    {id:'recent-bot',createdAt:age36h,profile:{score:85,medianHoldSeconds:600}},
+    {id:'recent-human',createdAt:age36h,profile:{score:25,medianHoldSeconds:1200}},
+   ];},
+   updateMany,
+   createMany,
+  },
+  walletCandidate:{findMany:async()=>[]},
+ };
+ const db={$transaction:async(fn:(tx:unknown)=>unknown)=>fn(tx)} as unknown as PrismaClient;
+ const res=await intakeEmergingWallets(db,now);
+ expect(res).toMatchObject({evicted:1,capacity:1,added:1,reason:'EVALUATION_ONLY'});
+ expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['recent-bot']}},data:{active:false}});
+});
