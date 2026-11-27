@@ -14,15 +14,42 @@ async function evidenceFor(tx: Db, mint: string, narrativeSlug: string | null, r
   const empty: PersonalEvidence = { liquidity: null, buyers: null, narrative: null, risk: null, blocked: !!token?.blacklisted };
   if (!token || token.blacklisted) return empty;
   if (narrativeSlug && !await tx.narrativeTokenRelation.count({ where: { tokenId: token.id, narrative: { slug: narrativeSlug }, confidence: { gte: 0.5 }, relation: { notIn: ['UNRELATED', 'SUSPICIOUS'] } } })) return { ...empty, blocked: true };
-  const [market, risk, narrative, trades] = await Promise.all([
-    rules.minLiquidityUsd !== null ? walletMarketEvidence(tx, token.id, now) : null,
+  const needHolders = (rules.minHolders ?? null) !== null || (rules.maxTop10Pct ?? null) !== null;
+  const needTrades = rules.minIndependentBuyers !== null || (rules.minNetFlowSol ?? null) !== null;
+  const needMomentum = (rules.minPriceChange1hPct ?? null) !== null;
+  const [market, holder, risk, narrative, trades] = await Promise.all([
+    walletMarketEvidence(tx, token.id, now),
+    needHolders && typeof tx.tokenHolderMetric?.findFirst === 'function'
+      ? tx.tokenHolderMetric.findFirst({ where: { tokenId: token.id, at: { lte: now, gte: new Date(+now - L.holderAgeMs) } }, orderBy: [{ at: 'desc' }, { id: 'desc' }] })
+      : null,
     rules.maxRiskScore !== null ? tx.tokenRiskMetric.findFirst({ where: { tokenId: token.id, at: { lte: now } }, orderBy: [{ at: 'desc' }, { id: 'desc' }] }) : null,
     rules.minNarrativeVelocity !== null ? tx.narrativeMetric.findFirst({ where: { at: { lte: now, gte: new Date(+now - L.narrativeAgeMs) }, narrative: {
       ...(narrativeSlug ? { slug: narrativeSlug } : {}), tokens: { some: { tokenId: token.id, confidence: { gte: 0.5 }, relation: { notIn: ['UNRELATED', 'SUSPICIOUS'] } } },
     } }, orderBy: [{ at: 'desc' }, { id: 'desc' }] }) : null,
-    rules.minIndependentBuyers !== null ? tx.walletTrade.findMany({ where: { tokenId: token.id, wallet: { active: true, researchReview: 'APPROVED' }, at: { lte: now, gte: new Date(+now - rules.windowMinutes * 60_000) } }, include: { wallet: true }, orderBy: [{ at: 'desc' }, { id: 'desc' }], take: L.tradesPerToken + 1 }) : [],
+    needTrades ? tx.walletTrade.findMany({ where: { tokenId: token.id, wallet: { active: true, researchReview: 'APPROVED' }, at: { lte: now, gte: new Date(+now - rules.windowMinutes * 60_000) } }, include: { wallet: true }, orderBy: [{ at: 'desc' }, { id: 'desc' }], take: L.tradesPerToken + 1 }) : [],
   ]);
+
+  let momentum1h: PersonalEvidence['momentum1h'] = null;
+  if (needMomentum && market && market.priceUsd > 0 && typeof tx.tokenMetric?.findFirst === 'function') {
+    const marketAt = Date.parse(market.at);
+    const prior = await tx.tokenMetric.findFirst({
+      where: {
+        tokenId: token.id,
+        at: { lte: new Date(marketAt - 45 * 60_000), gte: new Date(marketAt - 120 * 60_000) },
+        priceUsd: { gt: 0 },
+      },
+      orderBy: [{ at: 'desc' }, { id: 'desc' }],
+    });
+    const priorPrice = prior ? Number(prior.priceUsd.toString()) : NaN;
+    if (prior && Number.isFinite(priorPrice) && priorPrice > 0) {
+      const pct = Math.round(((market.priceUsd / priorPrice) - 1) * 10_000) / 100;
+      momentum1h = { value: pct, at: market.at, source: market.source, refs: [market.metricId, prior.id] };
+    }
+  }
+
   let buyers: PersonalEvidence['buyers'] = null;
+  let netFlowSol: PersonalEvidence['netFlowSol'] = null;
+  let observedNetSol: number | null = null;
   if (trades.length && trades.length <= L.tradesPerToken) {
     const wallets = [...new Map(trades.map(t => [t.walletId, t.wallet])).values()];
     const qualified = await walletQualifications(tx, wallets, now);
@@ -32,14 +59,38 @@ async function evidenceFor(tx: Db, mint: string, narrativeSlug: string | null, r
       const key = t.wallet.clusterId ? `cluster:${t.wallet.clusterId}` : `wallet:${t.walletId}`;
       entities.set(key, (entities.get(key) ?? 0) + (t.side === 'BUY' ? 1 : -1) * Number(t.amountSol));
     }
-    if (observed.length && [...entities.values()].every(Number.isFinite)) buyers = {
-      value: [...entities.values()].filter(v => v >= L.minEntityNetSol).length, at: observed[0]!.at.toISOString(), source: 'qualified-wallet-trades', refs: observed.map(t => t.signature),
-    };
+    if (observed.length && [...entities.values()].every(Number.isFinite)) {
+      const refs = observed.map(t => t.signature);
+      const latestAt = observed[0]!.at.toISOString();
+      buyers = { value: [...entities.values()].filter(v => v >= L.minEntityNetSol).length, at: latestAt, source: 'qualified-wallet-trades', refs };
+      observedNetSol = Math.round([...entities.values()].reduce((s, v) => s + v, 0) * 1e6) / 1e6;
+      netFlowSol = { value: observedNetSol, at: latestAt, source: 'qualified-wallet-trades', refs };
+    }
   }
-  return { blocked: false, buyers,
+  const marketCapReading: PersonalEvidence['marketCap'] =
+    market && market.marketCapUsd != null && Number.isFinite(market.marketCapUsd) && market.marketCapUsd > 0
+      ? { value: market.marketCapUsd, at: market.at, source: market.source, refs: [market.metricId, market.pairAddress] }
+      : null;
+
+  return {
+    blocked: false,
+    buyers,
+    netFlowSol,
     liquidity: market ? { value: market.liquidityUsd, at: market.at, source: market.source, refs: [market.metricId, market.pairAddress] } : null,
+    marketCap: marketCapReading,
+    holders: holder ? { value: holder.holders, at: holder.at.toISOString(), source: 'token-holder-metric', refs: [holder.id] } : null,
+    top10Pct: holder ? { value: holder.top10Pct, at: holder.at.toISOString(), source: 'token-holder-metric', refs: [holder.id] } : null,
+    momentum1h,
     narrative: narrative ? { value: narrative.velocity, at: narrative.at.toISOString(), source: 'narrative-metric', refs: [narrative.id, narrative.narrativeId] } : null,
     risk: risk ? { value: risk.riskScore, at: risk.at.toISOString(), source: 'recorded-risk-score', refs: [risk.id, ...risk.flags] } : null,
+    snapshot: {
+      symbol: token.symbol !== 'UNKNOWN' ? token.symbol : null,
+      tokenName: token.name !== 'Unknown' ? token.name : null,
+      priceUsd: market?.priceUsd ?? null,
+      marketCapUsd: market?.marketCapUsd ?? null,
+      liquidityUsd: market?.liquidityUsd ?? null,
+      netFlowSol: observedNetSol,
+    },
   };
 }
 

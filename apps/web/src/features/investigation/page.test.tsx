@@ -106,3 +106,23 @@ it.each(['en', 'id'] as const)('explains empty token coverage and opens the avai
   expect(await screen.findByText(c.capped)).toBeVisible(); expect(screen.getByLabelText(c.window)).toHaveValue('7d');
   expect(screen.queryByText(c.noAmount)).toBeNull();
 });
+it('renders forensic flow desk, co-entry bursts, rapid flips, PRO bridges, and on-demand active leads', async () => {
+  const { investigationStrategyFixture } = await import('./fixture');
+  const rich = investigationStrategyFixture();
+  state.read.mockImplementation(async (path: string) => path === 'smart-money/investigations'
+    ? { asOf: rich.asOf, windowHours: 24, items: [{ mint: rich.token.mint, symbol: 'ALPHA', name: 'Alpha Lead', imageUrl: null, tradeCount24h: 12, buySol24h: '18.5', sellSol24h: '4.5', netSol24h: '14', participantCount24h: 5, qualifiedCount24h: 2, lastTradeAt: rich.asOf }] }
+    : rich);
+  const first = view('');
+  // Zero network calls on empty desk until the user explicitly requests active 24h leads
+  expect(state.read).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: investigationCopy.en.loadLeads }));
+  expect(await screen.findByText(/Alpha Lead/)).toBeVisible();
+  first.unmount();
+
+  view(rich.token.mint);
+  expect(await screen.findByRole('heading', { name: investigationCopy.en.forensicsTitle })).toBeVisible();
+  expect(screen.getByRole('img', { name: investigationCopy.en.flowChartLabel })).toBeVisible();
+  expect(screen.getByText(/Single-group dominated/)).toBeVisible();
+  expect(screen.getByRole('link', { name: investigationCopy.en.proBridgeThesis })).toHaveAttribute('href', expect.stringContaining(`/app/theses?mint=${rich.token.mint}`));
+  expect(screen.getByRole('link', { name: investigationCopy.en.proBridgeRadar })).toHaveAttribute('href', expect.stringContaining(`/app/personal-radar?mint=${rich.token.mint}`));
+});

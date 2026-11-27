@@ -32,6 +32,20 @@ const en = {
     TRANSFERS_AND_BALANCES_NOT_RECONCILED: 'Transfers and balances have not been reconciled.', CURRENT_CONTEXT_NOT_HISTORICAL: 'Qualification and grouping are current, not historical.', GROUPS_ARE_INFERRED_NOT_OWNERS: 'Groups are inferred links, not verified owners.',
     RELATIONSHIPS_BETWEEN_RETURNED_PARTICIPANTS_ONLY: 'Relationship edges cover only returned participants.', AS_OF_IS_EVENT_BOUND_NOT_SNAPSHOT: 'The event-time bound is not a frozen snapshot.', TRADE_QUERY_CAPPED: 'Trade query limit reached; totals describe a capped sample.', RELATIONSHIP_QUERY_CAPPED: 'Relationship query limit reached.', TOKEN_QUANTITIES_INCOMPLETE: 'Some token quantities are missing or invalid.', SOL_AMOUNTS_INVALID: 'Some SOL amounts are invalid.', HISTORY_COVERAGE_NOT_ESTABLISHED: 'Scan history does not establish coverage for every participant.',
   } as Record<string, string>,
+  proBridgeThesis: '+ Track thesis', proBridgeRadar: '+ Personal radar',
+  leadsTitle: 'Active 24h smart-money leads', leadsBody: 'Jump straight into tokens with the highest recorded tracked-wallet activity in the last 24 hours.',
+  loadLeads: 'Load active 24h leads', loadingLeads: 'Loading leads…', noLeads: 'No non-stablecoin tracked-wallet swaps recorded in the last 24 hours.',
+  forensicsTitle: 'Forensic flow & concentration desk', forensicsNote: 'Computed strictly from the observed sample above: entity posture regimes, flow concentration (HHI), 5-minute multi-wallet bursts, and intra-window round-trip flips.',
+  accumulating: 'Accumulating', distributing: 'Distributing', rotating: 'Two-way rotating', unpriced: 'Unpriced',
+  postureFilterAll: 'All postures', timelineAll: 'All swaps',
+  top1Share: 'Top-1 group volume share', top3Share: 'Top-3 group volume share', groupHhi: 'Entity HHI (0–10,000)', qualifiedShare: 'Qualified share of buy SOL', automatedCount: 'Automated bots in sample',
+  hhiBroad: 'Broad multi-entity', hhiModerate: 'Moderately concentrated', hhiHigh: 'Single-group dominated',
+  flowChartTitle: 'Chronological buy vs. sell SOL profile (12 buckets)', flowChartLabel: '12-bucket chronological buy and sell SOL flow chart',
+  peakActiveGroups: 'Peak active groups / bucket',
+  burstsTitle: 'Coordinated 5-minute co-entry bursts', burstsEmpty: 'No multi-wallet 5-minute buy bursts detected in this sample.',
+  burstGroups: 'Independent groups / wallets', burstSol: 'Combined buy · SOL', burstSpan: 'Burst span',
+  flipsTitle: 'Intra-window round-trip & rapid-flip wallets', flipsEmpty: 'No wallets recorded both buys and sells within this window.',
+  netExtracted: 'Net SOL extracted (sell − buy)', flipSpan: 'Round-trip span', automatedBadge: 'Automated',
 };
 const id: typeof en = {
   lookupScope: 'Masukkan mint token Solana yang sudah terindeks. Halaman ini membaca swap wallet pantauan yang tersimpan; tidak mengambil seluruh aktivitas on-chain alamat tersebut.',
@@ -55,6 +69,20 @@ const id: typeof en = {
   reasons: {
     SUPPORTED_SWAPS_ONLY: 'Hanya swap terurai yang didukung yang disertakan.', ACTIVE_TRACKED_POPULATION_ONLY: 'Hanya wallet pantauan yang aktif saat ini yang disertakan.', TRANSFERS_AND_BALANCES_NOT_RECONCILED: 'Transfer dan saldo belum direkonsiliasi.', CURRENT_CONTEXT_NOT_HISTORICAL: 'Kualifikasi dan pengelompokan adalah kondisi saat ini.', GROUPS_ARE_INFERRED_NOT_OWNERS: 'Kelompok adalah dugaan hubungan, bukan pemilik terverifikasi.', RELATIONSHIPS_BETWEEN_RETURNED_PARTICIPANTS_ONLY: 'Hubungan hanya mencakup partisipan yang dikembalikan.', AS_OF_IS_EVENT_BOUND_NOT_SNAPSHOT: 'Batas waktu kejadian bukan snapshot data tetap.', TRADE_QUERY_CAPPED: 'Batas kueri transaksi tercapai; total berasal dari sampel terbatas.', RELATIONSHIP_QUERY_CAPPED: 'Batas kueri hubungan tercapai.', TOKEN_QUANTITIES_INCOMPLETE: 'Sebagian kuantitas token hilang atau tidak valid.', SOL_AMOUNTS_INVALID: 'Sebagian jumlah SOL tidak valid.', HISTORY_COVERAGE_NOT_ESTABLISHED: 'Riwayat pemindaian belum memastikan cakupan setiap partisipan.',
   },
+  proBridgeThesis: '+ Lacak tesis', proBridgeRadar: '+ Radar pribadi',
+  leadsTitle: 'Prospek smart-money aktif 24 jam', leadsBody: 'Langsung selidiki token dengan aktivitas swap wallet pantauan tertinggi dalam 24 jam terakhir.',
+  loadLeads: 'Muat prospek aktif 24j', loadingLeads: 'Memuat prospek…', noLeads: 'Belum ada swap wallet pantauan non-stablecoin dalam 24 jam terakhir.',
+  forensicsTitle: 'Meja forensik arus & konsentrasi', forensicsNote: 'Dihitung ketat dari sampel teramati di atas: rezim postur entitas, konsentrasi arus (HHI), lonjakan beli 5 menit lintas-wallet, dan putaran cepat dalam jendela.',
+  accumulating: 'Akumulasi', distributing: 'Distribusi', rotating: 'Rotasi dua arah', unpriced: 'Belum ternilai',
+  postureFilterAll: 'Semua postur', timelineAll: 'Semua swap',
+  top1Share: 'Pangsa volume grup Top-1', top3Share: 'Pangsa volume grup Top-3', groupHhi: 'HHI entitas (0–10.000)', qualifiedShare: 'Pangsa beli terkualifikasi', automatedCount: 'Bot otomatis dalam sampel',
+  hhiBroad: 'Tersebar lintas entitas', hhiModerate: 'Konsentrasi sedang', hhiHigh: 'Didominasi satu grup',
+  flowChartTitle: 'Profil kronologis beli vs jual SOL (12 segmen)', flowChartLabel: 'Grafik arus beli dan jual SOL kronologis 12 segmen',
+  peakActiveGroups: 'Puncak grup aktif / segmen',
+  burstsTitle: 'Lonjakan beli serentak 5 menit', burstsEmpty: 'Tidak ada lonjakan beli multi-wallet 5 menit dalam sampel ini.',
+  burstGroups: 'Grup independen / wallet', burstSol: 'Total beli · SOL', burstSpan: 'Durasi lonjakan',
+  flipsTitle: 'Wallet putaran cepat (beli & jual dalam jendela)', flipsEmpty: 'Tidak ada wallet yang mencatat beli sekaligus jual dalam rentang ini.',
+  netExtracted: 'SOL bersih ditarik (jual − beli)', flipSpan: 'Rentang putaran', automatedBadge: 'Otomatis',
 };
 export const investigationCopy = { en, id };
 export type InvestigationCopy = typeof en;
