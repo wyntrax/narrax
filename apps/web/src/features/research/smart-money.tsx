@@ -87,13 +87,12 @@ function EquityCurve({points}:{points:{at:string;cumulativePnlSol:number}[]}){
  </div>;
 }
 function CopyTradeSimulator({scenarios}:{scenarios:{delaySeconds:number;feePct:number;eligiblePositions:number;skippedTooFast:number;winRate:number|null;netPnlPerSol:number;medianRoi:number|null}[]}){
- const id=useLocale()==='id',f=useFormat(),[sizeSol,setSizeSol]=useState(0.5);
+ const id=useLocale()==='id',f=useFormat();
  if(!scenarios.some(s=>s.eligiblePositions>0||s.skippedTooFast>0))return null;
- const fmtDelay=(s:number)=>s<60?`${s}s`:`${Math.round(s/60)}m`;
- return <Section title={id?'Simulasi copy-trade (30h)':'Copy-trade delay simulator (30d)'}>
-  <p className="research-note">{id?'Estimasi stres-uji ukuran tetap pada posisi tertutup yang bertahan minimal 2x jeda masuk, dikurangi estimasi biaya & slippage pulang-pergi. Bukan jaminan eksekusi live.':'Fixed-size stress test on closed positions held at least 2x the entry delay, minus estimated round-trip fees & slippage. Descriptive only, not a guaranteed live fill.'}</p>
-  <div className="research-filters"><label>{id?'Ukuran tetap per transaksi · SOL':'Fixed size per trade · SOL'}<select value={String(sizeSol)} onChange={e=>setSizeSol(Number(e.target.value))}>{[0.1,0.5,1,2].map(v=><option key={v} value={v}>{v} SOL</option>)}</select></label></div>
-  <DataTable caption={id?'Simulasi copy-trade':'Copy-trade delay simulator'} headers={[id?'Jeda masuk':'Entry delay',id?'Biaya/slippage':'Est. friction',id?'Dapat disalin':'Copyable',id?'Terlalu cepat':'Skipped (too fast)',id?'Win rate':'Win rate',id?'Median ROI':'Median ROI',id?`Estimasi P&L (${sizeSol} SOL)`:`Est. net P&L (${sizeSol} SOL)`]} rows={scenarios.map(s=>({key:String(s.delaySeconds),cells:[fmtDelay(s.delaySeconds),f.percent(s.feePct),f.number(s.eligiblePositions,0),f.number(s.skippedTooFast,0),f.percent(s.winRate),f.percent(s.medianRoi),<TradeAmount key="pnl" value={s.netPnlPerSol*sizeSol}/>]}))}/>
+ const fmtSpan=(s:number)=>s<60?`${s}s`:`${Math.round(s/60)}m`;
+ return <Section title={id?'Uji ketahanan durasi & friksi (30h)':'Hold-duration & friction stress test (30d)'}>
+  <p className="research-note">{id?'Mengukur berapa banyak posisi tertutup yang bertahan minimal 2x jeda masuk setelah dikurangi estimasi friksi pulang-pergi. Pergeseran harga saat jeda masuk belum dimodelkan, sehingga estimasi profit SOL tidak ditampilkan.':'Measures how many closed positions were held at least 2x the entry delay after subtracting round-trip friction. Entry-price drift during the delay is not modelled, so projected SOL profit is intentionally omitted.'}</p>
+  <DataTable caption={id?'Uji ketahanan durasi & friksi':'Hold-duration & friction stress test'} headers={[id?'Jeda masuk':'Entry delay',id?'Durasi tahan min.':'Min. hold (2x)',id?'Friksi pulang-pergi':'Round-trip friction',id?'Bertahan':'Surviving closes',id?'Terlalu cepat':'Skipped (<2x)',id?'Win rate':'Adj. win rate',id?'Median ROI':'Adj. median ROI']} rows={scenarios.map(s=>({key:String(s.delaySeconds),cells:[fmtSpan(s.delaySeconds),fmtSpan(s.delaySeconds*2),f.percent(s.feePct),f.number(s.eligiblePositions,0),f.number(s.skippedTooFast,0),f.percent(s.winRate),f.percent(s.medianRoi)]}))}/>
  </Section>;
 }
 export function SmartWalletPage({address}:{address:string}){

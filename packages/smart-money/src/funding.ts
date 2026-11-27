@@ -13,13 +13,33 @@ export interface FundingCluster { walletIds: string[]; confidence: Confidence }
 
 /** A shared outside funder that first-funded more tracked wallets than this is treated as a service (an exchange, a faucet), not a person. Starting value. */
 export const MAX_SHARED_FUNDER_FANOUT = 8;
+
+/** Known Solana centralized-exchange hot wallets and cross-chain relayers that must never link unrelated retail wallets as a shared funder. */
+export const KNOWN_SERVICE_FUNDERS: ReadonlySet<string> = new Set([
+  '5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9', // Binance 2
+  '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM', // Binance 3
+  '2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S', // Binance 1
+  'H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS', // Coinbase 1
+  'GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE', // Coinbase 2
+  '2AQdpHJ2JpcEgPiATUXjQxA8QmafFegfQwSLWSprPicm', // Coinbase Prime / Hot
+  'FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiouN5', // Kraken
+  '5VCwKtCXgCJ6kit5FybXjvriW3xELsFDhYrPSqtJNmcD', // OKX
+  'AC5RDfQFmDS1deWZos921JfqscXdByf8BKHs5ACWjtW2', // Bybit
+  'u6PJ8DtQuPFnfmwHbGFULQ4u4EgjDiyYKjVEsynXq2w',  // Gate.io
+  'BmFdpraQhkiDQE6SnfG5omcA1VwzqfXrwtNYBwWTymy6', // KuCoin
+  'ASTyfSima4LLAdDgoFGkgqoKowG1LZFDr9fAQrg7iaJZ', // MEXC
+  'AobVSwdW9BbpMdJvTqeCN4hPAmh4rHm7vwLnQ5ATSyrS', // Crypto.com
+  'A77HErqtfN1hLLpvZ9pCtu66FEtM8BveoaKbbMoZ4RiR', // Bitget
+  '43DbAvKxhXh1oSxkJSqGosNw3HpBnmsWiak6tB5wpecN', // Backpack
+]);
+
 const RANK: Record<Confidence, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 };
 
 /**
  * Links tracked wallets by who first funded them.
  * - A tracked wallet that first-funded another tracked wallet is a HIGH link.
  * - Two wallets first-funded by the same outside address are a MEDIUM link, unless that address funded more than
- *   `maxFanout` tracked wallets or is in `ignoredFunders`, in which case it is skipped as a probable service.
+ *   `maxFanout` tracked wallets or is in `ignoredFunders` / `KNOWN_SERVICE_FUNDERS`, in which case it is skipped as a probable service.
  * A cluster is only as strong as its weakest link. These are inferred relationships, never claims about ownership.
  */
 export function buildFundingGraph(
@@ -27,7 +47,7 @@ export function buildFundingGraph(
   opts: { ignoredFunders?: Set<string>; maxFanout?: number } = {},
 ): { edges: FundingEdge[]; clusters: FundingCluster[]; skippedFunders: { funder: string; wallets: number }[] } {
   const maxFanout = opts.maxFanout ?? MAX_SHARED_FUNDER_FANOUT;
-  const ignored = opts.ignoredFunders ?? new Set<string>();
+  const ignored = opts.ignoredFunders ? new Set([...KNOWN_SERVICE_FUNDERS, ...opts.ignoredFunders]) : KNOWN_SERVICE_FUNDERS;
   const edges: FundingEdge[] = [];
   const skipped: { funder: string; wallets: number }[] = [];
   const outside = new Map<string, string[]>();

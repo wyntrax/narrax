@@ -122,4 +122,34 @@ describe('synthesizeSignalOpportunities', () => {
     expect(res.skippedDuplicate).toBe(1);
     expect(db.opportunity.create).not.toHaveBeenCalled();
   });
+
+  it('ignores stale ConsensusSignal rows older than 30 minutes instead of inflating smartMoneyScore', async () => {
+    const created: Record<string, unknown>[] = [];
+    const db = {
+      walletResearchSignal: { findMany: vi.fn(async () => []) },
+      earlyRadarOutcome: { findMany: vi.fn(async () => [{ tokenId: 'tok-radar', score: 75 }]) },
+      token: {
+        findMany: vi.fn(async () => [{
+          id: 'tok-radar',
+          mint: 'RadarMint1111111111111111111111111111111111',
+          symbol: 'RADAR',
+          createdOnChainAt: new Date(NOW.getTime() - 2 * 3_600_000),
+          metrics: [{ priceUsd: '0.004', liquidityUsd: '60000', marketCapUsd: '250000', at: new Date(NOW.getTime() - 2 * 60_000) }],
+          holders: [{ holders: 300, top10Pct: 25, devHoldingPct: 2 }],
+          consensus: [{ score: 95, at: new Date(NOW.getTime() - 3 * 86_400_000) }],
+          narratives: [],
+        }]),
+      },
+      tokenMetric: { findFirst: vi.fn(async () => ({ priceUsd: '0.0035' })), aggregate: vi.fn(async () => ({ _max: { priceUsd: '0.0042' } })) },
+      systemSetting: { findMany: vi.fn(async () => []) },
+      opportunity: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { created.push(data); return { id: 'opp-1', ...data }; }),
+      },
+    } as unknown as PrismaClient;
+
+    await synthesizeSignalOpportunities(db, NOW);
+    expect(created).toHaveLength(1);
+    expect(created[0]!.smartMoneyScore).toBe(0);
+  });
 });

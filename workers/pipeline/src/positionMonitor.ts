@@ -63,10 +63,27 @@ async function loadFacts(db: PrismaClient, pos: PositionRow, entry: EntryContext
     db.tokenRiskMetric.findFirst({ where: { tokenId: pos.tokenId }, orderBy: { at: 'desc' } }),
     entry?.narrative ? db.narrative.findUnique({ where: { id: entry.narrative.id }, select: { name: true, stage: true, score: true, velocity: true } }) : Promise.resolve(null),
     db.walletTrade.findMany({
-      where: { tokenId: pos.tokenId, at: { gte: new Date(now.getTime() - MONITOR_RULES.smartMoney.lookbackMs), lte: now }, wallet: { active: true, profile: { score: { gte: MONITOR_RULES.smartMoney.minWalletScore } } } },
+      where: {
+        tokenId: pos.tokenId,
+        at: { gte: new Date(now.getTime() - MONITOR_RULES.smartMoney.lookbackMs), lte: now },
+        wallet: { active: true, researchReview: { not: 'REJECTED' }, profile: { score: { gte: MONITOR_RULES.smartMoney.minWalletScore } } },
+      },
       select: { walletId: true, side: true, tokenAmount: true, at: true, wallet: { select: { clusterId: true, profile: { select: { leaderScore: true } } } } },
     }),
   ]);
+  const tradeWalletIds = [...new Set(trades.map((t) => t.walletId))];
+  const automatedWalletIds = new Set<string>();
+  if (tradeWalletIds.length && typeof db.systemSetting?.findMany === 'function') {
+    const intelRows = await db.systemSetting.findMany({
+      where: { key: { in: tradeWalletIds.map((id) => `wallet.intelligence.${id}`) } },
+      select: { key: true, value: true },
+    });
+    for (const row of intelRows) {
+      const val = row.value as { automation?: { automated?: unknown } } | null;
+      if (val?.automation?.automated === true) automatedWalletIds.add(row.key.slice('wallet.intelligence.'.length));
+    }
+  }
+  const cleanTrades = trades.filter((t) => !automatedWalletIds.has(t.walletId));
   const facts: PositionFacts = {
     now, entryPriceUsd: num(pos.entryPriceUsd)!, entry,
     market: latest ? { at: latest.at, priceUsd: num(latest.priceUsd)!, liquidityUsd: num(latest.liquidityUsd)!, volume24hUsd: num(latest.volume24hUsd)!, price1hAgoUsd: num(hourly?.priceUsd) } : null,
@@ -74,7 +91,7 @@ async function loadFacts(db: PrismaClient, pos: PositionRow, entry: EntryContext
     holders: holder && now.getTime() - holder.at.getTime() <= MONITOR_LIMITS.holderMaxAgeMs ? { top10Pct: holder.top10Pct } : null,
     riskFlags: risk ? risk.flags : null,
     narrative: narrative ? { stage: narrative.stage, score: narrative.score, velocity: narrative.velocity } : null,
-    smartMoneyExits: computeSmartMoneyExits(trades.map((t) => ({ walletId: t.walletId, clusterId: t.wallet.clusterId, leaderScore: t.wallet.profile?.leaderScore ?? 0, side: t.side, tokenAmount: num(t.tokenAmount), at: t.at })), pos.openedAt),
+    smartMoneyExits: computeSmartMoneyExits(cleanTrades.map((t) => ({ walletId: t.walletId, clusterId: t.wallet.clusterId, leaderScore: t.wallet.profile?.leaderScore ?? 0, side: t.side, tokenAmount: num(t.tokenAmount), at: t.at })), pos.openedAt),
   };
   return { facts, narrativeName: narrative?.name ?? null };
 }

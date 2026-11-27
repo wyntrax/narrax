@@ -22,6 +22,8 @@ describe('buildFundingGraph', () => {
     expect(g.edges).toEqual([]);
     expect(g.skippedFunders).toEqual([{ funder: 'exchange', wallets: 4 }]);
     expect(buildFundingGraph([{ walletId: 'A', funder: 'svc' }, { walletId: 'B', funder: 'svc' }], ids, { ignoredFunders: new Set(['svc']) }).edges).toEqual([]);
+    // Known CEX hot wallets (e.g. Binance 2) are skipped even without custom ignoredFunders.
+    expect(buildFundingGraph([{ walletId: 'A', funder: '5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9' }, { walletId: 'B', funder: '5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9' }], ids).edges).toEqual([]);
   });
 
   it('merges links into one cluster and takes the weakest link as its confidence', () => {

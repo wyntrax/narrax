@@ -35,8 +35,8 @@ describe.skipIf(!up)('prisma stores on a real Postgres', () => {
     const token = await db.token.create({
       data: {
         mint: MINT, symbol: 'T', name: 'T',
-        metrics: { create: { priceUsd: 0.01, marketCapUsd: 2_000_000, liquidityUsd: 600_000, volume24hUsd: 1_000_000 } },
-        consensus: { create: { score: 84, walletCount: 3, independentEntities: 3, leaderCount: 1, netFlowUsd: 1000 } },
+        metrics: { create: { priceUsd: 0.01, marketCapUsd: 2_000_000, liquidityUsd: 600_000, volume24hUsd: 1_000_000, at: new Date(NOW.getTime() - 60_000) } },
+        consensus: { create: { score: 84, walletCount: 3, independentEntities: 3, leaderCount: 1, netFlowUsd: 1000, at: new Date(NOW.getTime() - 60_000) } },
       },
     });
     const opp = await db.opportunity.create({ data: { tokenId: token.id, score: 91, narrativeScore: 90, smartMoneyScore: 90, liquidityScore: 80, momentumScore: 70, ogScore: 80, riskScore: 30 } });

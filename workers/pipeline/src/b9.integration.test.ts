@@ -49,7 +49,7 @@ describe.skipIf(!up)('B9: system limits, the global pause and the blacklist reac
   const mkToken = async (key: string) => {
     const token = await db.token.create({ data: { mint: addr(key), symbol: key.slice(0, 8), name: key } });
     await db.tokenMetric.create({ data: { tokenId: token.id, priceUsd: 1, marketCapUsd: 1e6, liquidityUsd: 600_000, volume24hUsd: 900_000, at: new Date(at(-1).getTime() + ++tick) } });
-    await db.consensusSignal.create({ data: { tokenId: token.id, score: 80, walletCount: 5, independentEntities: 4, leaderCount: 2 } });
+    await db.consensusSignal.create({ data: { tokenId: token.id, score: 80, walletCount: 5, independentEntities: 4, leaderCount: 2, at: at(-1) } });
     const opp = await db.opportunity.create({ data: { tokenId: token.id, score: 90, narrativeScore: 80, smartMoneyScore: 80, liquidityScore: 80, momentumScore: 80, ogScore: 80, riskScore: 20 } });
     const analysis = await db.agentAnalysis.create({ data: { opportunityId: opp.id, model: 'test' } });
     return { token, analysisId: analysis.id };

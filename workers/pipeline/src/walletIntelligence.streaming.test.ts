@@ -117,7 +117,11 @@ describe('recomputeWalletIntelligence streaming cap', () => {
     const summary = await recomputeWalletIntelligence(db as unknown as PrismaClient, now);
     expect(summary.readPages).toBe(3);
     expect(summary.tradesUsed).toBe(10_005);
-    expect(settings.get('wallet.performance.w1')).toMatchObject({ capped: true, observedTrades: 10_000 });
+    expect(settings.get('wallet.performance.w1')).toMatchObject({
+      capped: true,
+      observedTrades: 10_000,
+      lastTradeAt: allRows.at(-1)!.at.toISOString(),
+    });
     expect(settings.get('wallet.intelligence.w1')).toMatchObject({ observedTrades: 10_005, observedBuys: 10_005, observedSells: 0 });
   });
 });
