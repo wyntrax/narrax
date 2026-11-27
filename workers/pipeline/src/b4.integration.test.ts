@@ -61,7 +61,7 @@ describe.skipIf(!up)('B4: fan-out, paper trading and confirmations on a real Pos
   const mkToken = async (key: string, o: { price?: number; metricMins?: number } = {}) => {
     const token = await db.token.create({ data: { mint: addr(key), symbol: `S${key}`.slice(0, 12), name: `${key} token` } });
     await metric(token.id, o.price ?? 1, o.metricMins ?? -1);
-    await db.consensusSignal.create({ data: { tokenId: token.id, score: 80, walletCount: 5, independentEntities: 4, leaderCount: 2 } });
+    await db.consensusSignal.create({ data: { tokenId: token.id, score: 80, walletCount: 5, independentEntities: 4, leaderCount: 2, at: at(-1) } });
     const opp = await db.opportunity.create({ data: { tokenId: token.id, score: 90, narrativeScore: 80, smartMoneyScore: 80, liquidityScore: 80, momentumScore: 80, ogScore: 80, riskScore: 20 } });
     const analysis = await db.agentAnalysis.create({ data: { opportunityId: opp.id, model: 'test' } });
     return { token, analysisId: analysis.id };
