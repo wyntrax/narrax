@@ -89,11 +89,11 @@ export function makeExecutionStore(db: Db, ports: ChainPorts, now: () => Date = 
       const metric = token?.metrics[0];
       const opportunity = token?.opportunities[0];
       const consensus = token?.consensus[0];
-      const requireSignals = opts?.requireSignals ?? true;
+      const isBuy = job.decision.action === 'BUY';
+      const requireSignals = (opts?.requireSignals ?? true) && isBuy;
       if (!token || !metric || (requireSignals && (!opportunity || !consensus))) throw new MissingInputError('Token metrics or signals are missing');
 
       const controls = await loadSystemControls(db);
-      const isBuy = job.decision.action === 'BUY';
       const tokenPosition = await db.position.findFirst({ where: { userId: user.id, tokenId: token.id, status: 'OPEN' }, select: { id: true, simulated: true, baseUnits: true } });
 
       // PAPER and SHADOW users have no wallet: their balance comes from the paper ledger and their rows are marked simulated.
