@@ -57,6 +57,11 @@ export async function refreshTradeEvidence(
   mint: string,
   now: Date = new Date(),
 ): Promise<TradeEvidenceRefreshSummary> {
+  // Advance from `now` by real elapsed wall time so RPC block timestamps acquired seconds
+  // into the job never appear to be "in the future" relative to job start, while keeping
+  // deterministic unit tests (elapsed ~0ms) anchored to `now`.
+  const startedAtMs = Date.now();
+  const currentClock = () => new Date(+now + Math.max(0, Date.now() - startedAtMs));
   const out: TradeEvidenceRefreshSummary = {
     mint,
     tokenId: null,
@@ -237,32 +242,39 @@ export async function refreshTradeEvidence(
     // Complete on-chain holder enumeration if token-info holders were missing or stale.
     // Run before writing TokenRiskMetric so risk reflects the fresh holder counts.
     if (!holdersNowFresh && deps.holderFallback) {
-      const fb = await refreshHolderFallback(
-        db,
-        deps.holderFallback,
-        [{ id: token.id, mint }],
-        () => now,
-        { perRun: 1, deadlineMs: TRADE_EVIDENCE_LIMITS.holderFallbackDeadlineMs, stateKey: TRADE_HOLDER_FALLBACK_KEY },
-      );
-      out.holderFallbackUsed = fb.holderFallbackAttempts > 0;
-      if (fb.holderFallbackWritten > 0) {
-        out.holdersWritten = true;
-        holdersNowFresh = true;
-        const freshHolder = await db.tokenHolderMetric.findFirst({
-          where: { tokenId: token.id },
-          orderBy: { at: 'desc' },
-          select: { holders: true, top10Pct: true },
-        });
-        if (freshHolder) {
-          resolvedHolders = freshHolder.holders;
-          resolvedTop10Pct = freshHolder.top10Pct;
+      const knownHolders = info?.holders ?? (latestHolder ? latestHolder.holders : null);
+      // Fast-path: mints already known to exceed the 20K-account full-enumeration cap will always
+      // hit TOO_LARGE after 15-25s of getProgramAccounts. Skip straight to getTokenLargestAccounts (~300ms).
+      const skipFullEnum = (knownHolders ?? 0) > HOLDER_RPC_LIMITS.maxAccounts && !!deps.holderFallback.getLargestAccountsFallback;
+      let fb: Awaited<ReturnType<typeof refreshHolderFallback>> | null = null;
+      if (!skipFullEnum) {
+        fb = await refreshHolderFallback(
+          db,
+          deps.holderFallback,
+          [{ id: token.id, mint }],
+          () => now,
+          { perRun: 1, deadlineMs: TRADE_EVIDENCE_LIMITS.holderFallbackDeadlineMs, stateKey: TRADE_HOLDER_FALLBACK_KEY, retrievedAt: currentClock },
+        );
+        out.holderFallbackUsed = fb.holderFallbackAttempts > 0;
+        if (fb.holderFallbackWritten > 0) {
+          out.holdersWritten = true;
+          holdersNowFresh = true;
+          const freshHolder = await db.tokenHolderMetric.findFirst({
+            where: { tokenId: token.id },
+            orderBy: { at: 'desc' },
+            select: { holders: true, top10Pct: true },
+          });
+          if (freshHolder) {
+            resolvedHolders = freshHolder.holders;
+            resolvedTop10Pct = freshHolder.top10Pct;
+          }
         }
-      } else if (deps.holderFallback.getLargestAccountsFallback) {
+      }
+      if (!holdersNowFresh && deps.holderFallback.getLargestAccountsFallback) {
         // Full getProgramAccounts enumeration cannot complete on large mints (>20K total/empty ATAs).
         // Fall back to finalized getTokenLargestAccounts for live on-chain top10Pct without fabricating holder counts.
-        const knownHolders = info?.holders ?? (latestHolder ? latestHolder.holders : null);
-        const tooLarge = fb.holderFallbackReasons.TOO_LARGE > 0;
-        const canUseLargest = tooLarge || ((fb.holderFallbackReasons.INVALID_OR_INCOMPLETE > 0 || fb.holderFallbackAttempts === 0) && (knownHolders ?? 0) >= 50);
+        const tooLarge = skipFullEnum || (fb?.holderFallbackReasons.TOO_LARGE ?? 0) > 0;
+        const canUseLargest = tooLarge || (((fb?.holderFallbackReasons.INVALID_OR_INCOMPLETE ?? 0) > 0 || (fb?.holderFallbackAttempts ?? 0) === 0) && (knownHolders ?? 0) >= 50);
         const observedHolders = tooLarge
           ? Math.max(HOLDER_RPC_LIMITS.maxAccounts, knownHolders ?? 0)
           : canUseLargest
@@ -272,7 +284,8 @@ export async function refreshTradeEvidence(
           const largest = await deps.holderFallback
             .getLargestAccountsFallback(mint, observedHolders)
             .catch(() => ({ ok: false as const, reason: 'UNAVAILABLE' as const }));
-          if (largest.ok && largest.mint === mint && +largest.sourceAt <= +now && +now - +largest.sourceAt <= LATEST_EVIDENCE_MAX_AGE_MS.holders) {
+          const checkedAt = currentClock();
+          if (largest.ok && largest.mint === mint && +largest.sourceAt <= +checkedAt && +checkedAt - +largest.sourceAt <= LATEST_EVIDENCE_MAX_AGE_MS.holders) {
             await db.$transaction(async tx => {
               const metric = await tx.tokenHolderMetric.create({
                 data: { tokenId: token.id, holders: largest.holders, top10Pct: largest.top10Pct, devHoldingPct: null, at: largest.sourceAt },
@@ -282,7 +295,7 @@ export async function refreshTradeEvidence(
                 metricId: metric.id,
                 source: 'solana-rpc-largest',
                 sourceAt: largest.sourceAt.toISOString(),
-                retrievedAt: now.toISOString(),
+                retrievedAt: checkedAt.toISOString(),
                 slot: largest.slot,
                 program: largest.program,
                 accounts: largest.accounts,
@@ -306,7 +319,8 @@ export async function refreshTradeEvidence(
     }
 
     if (!riskFresh && activeLiquidityUsd != null && infoFetched) {
-      const pairAgeMinutes = pairCreatedAt ? (+now - +pairCreatedAt) / 60_000 : null;
+      const riskAt = currentClock();
+      const pairAgeMinutes = pairCreatedAt ? (+riskAt - +pairCreatedAt) / 60_000 : null;
       const risk = tokenRisk({
         liquidityUsd: activeLiquidityUsd,
         holders: holdersNowFresh ? resolvedHolders : null,
@@ -319,7 +333,7 @@ export async function refreshTradeEvidence(
       });
       if (!info) risk.flags.push('INFO_UNAVAILABLE');
       if (info && !holdersNowFresh) risk.flags.push('HOLDER_OBSERVATION_STALE_OR_UNKNOWN');
-      await db.tokenRiskMetric.create({ data: { tokenId: token.id, riskScore: risk.riskScore, flags: risk.flags, at: now } });
+      await db.tokenRiskMetric.create({ data: { tokenId: token.id, riskScore: risk.riskScore, flags: risk.flags, at: riskAt } });
       out.riskWritten = true;
     }
   }
