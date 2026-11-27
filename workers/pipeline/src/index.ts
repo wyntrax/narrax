@@ -7,6 +7,7 @@ export { computeCopyTradeSimulation, computeWalletClosedSummary, computeWalletOp
 export { WALLET_INTAKE_LIMITS } from './walletCandidateIntake';
 export * from './narrativeIngestion';
 export * from './tokenResolution';
+export * from './signalOpportunities';
 export * from './narrativeTokens';
 export * from './aiAnalysis';
 export * from './marketData';

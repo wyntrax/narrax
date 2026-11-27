@@ -8,6 +8,20 @@ import { readCachedTokenEvidence } from './tokenEvidenceCache';
 const num = (v: { toString(): string } | null | undefined) => (v == null ? null : Number(v.toString()));
 const startOfUtcDay = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 
+export const AI_ANALYSIS_LIMITS = {
+  /** Skip mega-caps and stablecoins in scheduled Opportunity AI so Analytics focuses on actionable alpha. */
+  maxMarketCapUsd: 100_000_000,
+  /** Repeat cooldown for tokens whose latest decision was WATCH or IGNORE (6h), unless Opportunity score jumps >= 10 pts. */
+  repeatWatchCooldownMs: 6 * 3_600_000,
+  repeatScoreJumpBypass: 10,
+} as const;
+
+export const EXCLUDED_ANALYSIS_MINTS = new Set([
+  'So11111111111111111111111111111111111111112',  // WSOL
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+  'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+]);
+
 // ---------- Settings ----------
 
 /** The saved admin settings merged over the defaults. Anything invalid falls back to the defaults, never to a looser setting. */
@@ -148,7 +162,7 @@ export async function runAiAnalysis(db: PrismaClient, deps: { llm: LlmProvider |
       score: { gte: opts.minScore ?? 50 }, analyses: { none: {} },
     },
     orderBy: [{ score: 'desc' }, { createdAt: 'desc' }], take: limit * 4,
-    select: { id: true, tokenId: true, token: { select: { metrics: { orderBy: { at: 'desc' }, take: 1, select: { at: true } } } } },
+    select: { id: true, tokenId: true, score: true, token: { select: { mint: true, metrics: { orderBy: { at: 'desc' }, take: 1, select: { at: true, marketCapUsd: true } } } } },
   });
   // Prioritize opportunities backed by a live (<15m) price metric so outcome tracking has a valid entry price without starving legacy/test fixtures.
   const rows = opts.opportunityIds
@@ -165,7 +179,11 @@ export async function runAiAnalysis(db: PrismaClient, deps: { llm: LlmProvider |
     if (seen.has(row.tokenId)) continue; // several rows for one token: take the best
     seen.add(row.tokenId);
     if (!opts.opportunityIds) {
-      const latestAt = row.token.metrics[0]?.at;
+      if (row.token.mint && EXCLUDED_ANALYSIS_MINTS.has(row.token.mint)) continue;
+      const latestMetric = row.token.metrics[0];
+      const mcap = num(latestMetric?.marketCapUsd);
+      if (mcap != null && mcap > AI_ANALYSIS_LIMITS.maxMarketCapUsd) continue;
+      const latestAt = latestMetric?.at;
       if (latestAt) {
         const ageMs = now.getTime() - latestAt.getTime();
         // Defer scheduled analysis when a quote is merely 15m-6h stale so outcome tracking won't write NO_ENTRY_PRICE; mark it for immediate priority refresh.
@@ -181,6 +199,18 @@ export async function runAiAnalysis(db: PrismaClient, deps: { llm: LlmProvider |
       }
     }
     if (cooldown > 0 && (await db.agentAnalysis.count({ where: { opportunity: { tokenId: row.tokenId }, createdAt: { gte: new Date(now.getTime() - cooldown) } } })) > 0) continue;
+    // Avoid flooding Analytics with repeated WATCH/IGNORE decisions for the same token every hour.
+    if (!opts.opportunityIds && typeof db.agentAnalysis?.findFirst === 'function') {
+      const prev = await db.agentAnalysis.findFirst({
+        where: { opportunity: { tokenId: row.tokenId }, createdAt: { gte: new Date(now.getTime() - AI_ANALYSIS_LIMITS.repeatWatchCooldownMs) } },
+        orderBy: { createdAt: 'desc' },
+        select: { opportunity: { select: { score: true } }, decisions: { take: 1, select: { action: true } } },
+      });
+      const prevAction = prev?.decisions[0]?.action;
+      if (prev && (prevAction === 'WATCH' || prevAction === 'IGNORE') && row.score < prev.opportunity.score + AI_ANALYSIS_LIMITS.repeatScoreJumpBypass) {
+        continue;
+      }
+    }
     if (used >= cfg.tokenBudget) { out.skipped = 'budget'; break; }
 
     const collected = await collectFacts(db, row.id);
