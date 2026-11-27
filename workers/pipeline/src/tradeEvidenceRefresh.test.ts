@@ -281,9 +281,40 @@ describe('refreshTradeEvidence', () => {
     expect(res.status).toBe('refreshed');
     expect(res.holdersWritten).toBe(true);
     expect(res.riskWritten).toBe(true);
+    // Because 37,678 > 20,000 maxAccounts, full getProgramAccounts enumeration is skipped directly to fast largest-accounts fallback.
+    expect(holderFallback.get).not.toHaveBeenCalled();
     expect(holderFallback.getLargestAccountsFallback).toHaveBeenCalledWith(MINT, 37_678);
     expect(createdHolders.at(-1)).toMatchObject({ holders: 37_678, top10Pct: 19.5 });
     expect(createdRisks[0]!.flags).not.toContain('HOLDERS_UNKNOWN');
     expect(createdRisks[0]!.flags).not.toContain('HOLDER_OBSERVATION_STALE_OR_UNKNOWN');
+  });
+
+  it('accepts a live largest-accounts block timestamp captured after job start', async () => {
+    const { db, createdHolders } = makeMockDb(null);
+    const quotes = { name: 'dexscreener', getSnapshots: vi.fn(async () => new Map([[MINT, makeSnap()]])) };
+    const info = {
+      name: 'geckoterminal',
+      getTokenInfo: vi.fn(async (): Promise<TokenInfo> => ({
+        mint: MINT, name: 'Honey', symbol: 'HONEY', websites: [], twitterHandle: null,
+        holders: 91_372, top10Pct: 61.3, holdersUpdatedAt: new Date(NOW.getTime() - 23 * 3_600_000),
+        mintAuthorityActive: false, freezeAuthorityActive: false, isHoneypot: false,
+      })),
+    };
+    const holderFallback: HolderRpcSource = {
+      get: vi.fn(),
+      getLargestAccountsFallback: vi.fn(async (_mint, observedHolders) => {
+        // Simulate 15ms of RPC latency where block time lands 5ms after job-start `NOW`.
+        await new Promise(r => setTimeout(r, 15));
+        return {
+          ok: true as const, mint: MINT, holders: observedHolders, top10Pct: 58.2,
+          sourceAt: new Date(NOW.getTime() + 5), slot: 1_000_000,
+          program: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', accounts: 20,
+        };
+      }),
+    };
+
+    const res = await refreshTradeEvidence(db, { quotes, info, holderFallback }, MINT, NOW);
+    expect(res.holdersWritten).toBe(true);
+    expect(createdHolders.at(-1)).toMatchObject({ holders: 91_372, top10Pct: 58.2 });
   });
 });

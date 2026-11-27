@@ -94,13 +94,15 @@ export function makeExecutionStore(db: Db, ports: ChainPorts, now: () => Date = 
       });
       const metric = token?.metrics[0];
       const opportunity = token?.opportunities[0];
+      const isBuy = job.decision.action === 'BUY';
+      const requireSignals = (opts?.requireSignals ?? true) && isBuy;
       const rawConsensus = token?.consensus[0];
       const freshConsensus =
         rawConsensus && (!(rawConsensus.at instanceof Date) || (+rawConsensus.at >= +consensusCutoff && +rawConsensus.at <= +at))
           ? rawConsensus
           : undefined;
       let consensusScore: number | null = freshConsensus ? freshConsensus.score : null;
-      if (consensusScore === null && token && typeof db.walletResearchSignal?.findFirst === 'function') {
+      if (consensusScore === null && isBuy && token && typeof db.walletResearchSignal?.findFirst === 'function') {
         const flow = await db.walletResearchSignal.findFirst({
           where: {
             tokenId: token.id,
@@ -117,13 +119,11 @@ export function makeExecutionStore(db: Db, ports: ChainPorts, now: () => Date = 
           });
         }
       }
-      const requireSignals = opts?.requireSignals ?? true;
       if (!token || !metric || (requireSignals && (!opportunity || consensusScore === null))) {
         throw new MissingInputError('Token metrics or signals are missing');
       }
 
       const controls = await loadSystemControls(db);
-      const isBuy = job.decision.action === 'BUY';
       const tokenPosition = await db.position.findFirst({ where: { userId: user.id, tokenId: token.id, status: 'OPEN' }, select: { id: true, simulated: true, baseUnits: true } });
 
       // PAPER and SHADOW users have no wallet: their balance comes from the paper ledger and their rows are marked simulated.
