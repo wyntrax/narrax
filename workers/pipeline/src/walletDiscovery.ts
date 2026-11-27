@@ -181,9 +181,9 @@ export async function discoveryPriceCandidates(db: PrismaClient, now: Date, limi
 }
 
 /**
- * Turns scanned tokens into wallet suggestions. A token is a winner when its latest price is at least 3x its first
- * recorded price, it still has real liquidity, and it was not flagged a honeypot. Tokens too young or without fresh
- * prices are left out, not counted as losers. A flagged honeypot is judged as a non-winner, so a wallet that bought one is marked down. Suggestions are stored PENDING for an admin. Nothing is tracked here.
+ * Turns scanned tokens into wallet suggestions. A token is a winner when its peak or latest liquid price is at least 2.5x
+ * its first recorded price, it has real liquidity, and it was not flagged a honeypot. Tokens too young or without fresh
+ * prices are left out, not counted as losers. A flagged honeypot is judged as a non-winner, so a wallet that bought one is marked down. Suggestions are stored PENDING for review or provisional intake.
  */
 export async function discoverCandidates(db: PrismaClient, now: Date = new Date(), opts: { holdings?: HoldingEvidenceSource } = {}): Promise<DiscoverySummary> {
   const L = DISCOVERY_LIMITS;

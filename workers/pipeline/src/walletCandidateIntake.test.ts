@@ -229,3 +229,61 @@ it('evicts confirmed automated bots after 24h while keeping non-automated provis
  expect(res).toMatchObject({evicted:1,capacity:1,added:1,reason:'EVALUATION_ONLY'});
  expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['recent-bot']}},data:{active:false}});
 });
+it('evicts survivorship-biased automated bots even when they hold a small-cap win streak, and refuses to reactivate bots while rescuing non-automated scored wallets',async()=>{
+ const createMany=vi.fn(async(args:{data:{address:string}[]})=>({count:args.data.length}));
+ const updateMany=vi.fn(async(args:{where:{id:{in:string[]}}})=>({count:args.where.id.in.length}));
+ const upsert=vi.fn(async()=>({}));
+ const provenPerf={
+  version:1,checkedAt:now.toISOString(),windowDays:30,observedTrades:400,invalidTrades:0,unmatchedSells:0,capped:false,lastTradeAt:now.toISOString(),
+  bands:[{band:'SMALL_CAP',positions:12,closedPositions:12,closedTokens:12,wins:10,losses:2,breakeven:0,openPositions:0,winRate:0.83,winRateLowerBound:0.55,realisedPnlSol:'3.2',openCostSol:'0',medianRoi:0.15,medianWinSol:'0.4',medianLossSol:'-0.2',profitFactor:8,medianFirstSellSeconds:90,medianCloseSeconds:140,realisedDrawdownSol:'0.4',observedDays:20,fastCloseRate:0.1}],
+ };
+ let findCalls=0;
+ const winnerAddr='FayUGHaYbHF6v1VuATTmVjYis7baXM8Re2XFVRVHQaes';
+ const tx={
+  $executeRaw:vi.fn(async()=>0),
+  systemSetting:{
+   findUnique:async()=>({value:{checkedAt:now.toISOString(),items:[{address:addresses[0],scannedTokens:3}]}}),
+   findMany:async()=>[
+    {key:'wallet.performance.survivor-bot',value:provenPerf},
+    {key:'wallet.intelligence.survivor-bot',value:{automation:{automated:true,reasons:['HIGH_FREQUENCY']}}},
+   ],
+   upsert,
+  },
+  trackedWallet:{
+   count:async()=>200,
+   findMany:async()=>{findCalls++;return findCalls===1?[]:[{id:'survivor-bot',profile:{score:92,medianHoldSeconds:600}}];},
+   updateMany,
+   createMany,
+  },
+  walletCandidate:{findMany:async()=>[{address:winnerAddr,status:'PENDING',score:50.2,winnerTokens:4}]},
+ };
+ const db={$transaction:async(fn:(tx:unknown)=>unknown)=>fn(tx)} as unknown as PrismaClient;
+ const intake=await intakeEmergingWallets(db,now);
+ expect(intake).toMatchObject({evicted:1,added:1});
+ expect(updateMany).toHaveBeenCalledWith({where:{id:{in:['survivor-bot']}},data:{active:false}});
+ expect(createMany.mock.calls[0]?.[0].data.map(w=>w.address)).toEqual([winnerAddr]);
+
+ const reactivateUpdates=vi.fn(async(args:{where:{id:{in:string[]}};data:{active:boolean}})=>({count:args.where.id.in.length}));
+ const rTx={
+  $executeRaw:vi.fn(async()=>0),
+  systemSetting:{
+   findMany:async()=>[
+    {key:'wallet.performance.inactive-bot',value:provenPerf},
+    {key:'wallet.intelligence.inactive-bot',value:{automation:{automated:true,reasons:['HIGH_FREQUENCY']}}},
+    {key:'wallet.intelligence.inactive-human',value:{automation:{automated:false,reasons:[]}}},
+   ],
+   upsert,
+  },
+  trackedWallet:{
+   count:async()=>198,
+   findMany:async()=>[
+    {id:'inactive-bot',address:addresses[0],profile:{score:95,medianHoldSeconds:600}},
+    {id:'inactive-human',address:addresses[1],profile:{score:72,medianHoldSeconds:1800}},
+   ],
+   updateMany:reactivateUpdates,
+  },
+ };
+ const rDb={$transaction:async(fn:(tx:unknown)=>unknown)=>fn(rTx)} as unknown as PrismaClient;
+ expect(await reactivateProvenWallets(rDb,now)).toMatchObject({reactivated:1,candidates:1});
+ expect(reactivateUpdates).toHaveBeenCalledWith({where:{id:{in:['inactive-human']}},data:{active:true}});
+});

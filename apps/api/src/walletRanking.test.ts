@@ -74,3 +74,9 @@ it('accepts strong asymmetric profitability (PF >= 1.8, WR >= 35%, 0 dead bags) 
  expect(rankingReasons(sample,{...asymmetric,deadBagPositions:1},history,now,false,false).reasons).toContain('LOW_WIN_CONFIDENCE');
  expect(rankingReasons(sample,{...asymmetric,profitFactor:1.4},history,now,false,false).reasons).toContain('LOW_WIN_CONFIDENCE');
 });
+it('allows ALL-band readiness on backfilled histories lacking known entry caps while blocking ALL when >=5 known caps only won in OVER_1M',()=>{
+ const backfilledAll={...band,band:'ALL',entryCapKnownPositions:0,entryCapTotalPositions:25} as WalletPerformance['bands'][number];
+ expect(rankingReasons({...sample,bands:[backfilledAll]},backfilledAll,history,now,false,false)).toEqual({historyComplete:true,reasons:[]});
+ const megaOnlyAll={...band,band:'ALL',entryCapKnownPositions:10,entryCapTotalPositions:25} as WalletPerformance['bands'][number];
+ expect(rankingReasons({...sample,bands:[megaOnlyAll]},megaOnlyAll,history,now,false,false).reasons).toContain('SMALL_CAP_UNPROVEN');
+});

@@ -11,9 +11,33 @@ const provenSmallCapMetrics = (perfValue: unknown) => {
   if (!smallCap || smallCap.closedPositions < 5 || smallCap.closedTokens < 5 || smallCap.observedDays < 7) return null;
   if ((smallCap.winRateLowerBound ?? 0) < 0.5 || smallCap.realisedPnlSol === null || Number(smallCap.realisedPnlSol) <= 0 ||
     (smallCap.medianRoi ?? 0) <= 0 || (smallCap.fastCloseRate ?? 0) > 0.5) return null;
-  return { winRateLowerBound: smallCap.winRateLowerBound ?? 0, realisedPnlSol: Number(smallCap.realisedPnlSol) };
+  return { tier: 2 as const, winRateLowerBound: smallCap.winRateLowerBound ?? 0, realisedPnlSol: Number(smallCap.realisedPnlSol) };
 };
 const hasProvenSmallCapSample = (perfValue: unknown): boolean => provenSmallCapMetrics(perfValue) !== null;
+
+/** Proven overall 30-day swap record for wallets whose historical swaps predated live DexScreener entry-cap snapshots. */
+const provenOverallMetrics = (perfValue: unknown, profile?: { score: number; medianHoldSeconds: number | null } | null) => {
+  const parsed = WalletPerformance.safeParse(perfValue);
+  if (parsed.success) {
+    const all = parsed.data.bands.find(b => b.band === 'ALL');
+    const confident = all && (
+      (all.winRateLowerBound ?? 0) >= 0.5 ||
+      ((all.profitFactor ?? 0) >= 1.8 && (all.winRate ?? 0) >= 0.35 && (all.deadBagPositions ?? 0) === 0)
+    );
+    if (
+      all && confident &&
+      all.closedPositions >= 20 && all.closedTokens >= 5 && all.observedDays >= 7 &&
+      all.realisedPnlSol !== null && Number(all.realisedPnlSol) > 0 &&
+      (all.medianRoi ?? 0) > 0 && (all.fastCloseRate ?? 0) <= 0.5
+    ) {
+      return { tier: 1 as const, winRateLowerBound: all.winRateLowerBound ?? 0, realisedPnlSol: Number(all.realisedPnlSol) };
+    }
+  }
+  if (profile && profile.score >= 60 && (profile.medianHoldSeconds == null || profile.medianHoldSeconds >= WALLET_INTAKE_LIMITS.evictMaxHoldSeconds)) {
+    return { tier: 1 as const, winRateLowerBound: profile.score / 100, realisedPnlSol: 0 };
+  }
+  return null;
+};
 
 export const WALLET_INTAKE_KEY = 'wallet.evaluation.intake';
 /** `evictMaxScore` is a reversible capacity policy: stale provisional wallets below it can be released to make room for new candidates. History is kept and they can be reactivated. */
@@ -31,11 +55,28 @@ export async function intakeEmergingWallets(db: PrismaClient, now = new Date()) 
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('wallet-evaluation-intake'))`;
     const snapshot = Snapshot.safeParse((await tx.systemSetting.findUnique({ where: { key: 'wallet.discovery.emerging' } }))?.value);
     const out = { checkedAt: now.toISOString(), added: 0, evicted: 0, considered: 0, capacity: 0, reason: 'NO_FRESH_DISCOVERY' };
-    if (snapshot.success && +now >= Date.parse(snapshot.data.checkedAt) && +now - Date.parse(snapshot.data.checkedAt) <= 3_600_000) {
+    const freshSnapshot = snapshot.success && +now >= Date.parse(snapshot.data.checkedAt) && +now - Date.parse(snapshot.data.checkedAt) <= 3_600_000;
+    const candidateRows = (await tx.walletCandidate.findMany({
+      where: { status: { in: ['REJECTED', 'PENDING'] } },
+      select: { address: true, status: true, score: true, winnerTokens: true },
+    })) as { address: string; status?: string; score?: number; winnerTokens?: number }[];
+    const rejected = new Set(candidateRows.filter(w => w.status !== 'PENDING').map(w => w.address));
+    const winnerLeads = candidateRows
+      .filter(w => w.status === 'PENDING' && isSolanaAddress(w.address) && (w.winnerTokens ?? 0) >= 2 && (w.score ?? 0) >= 20)
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.address.localeCompare(b.address))
+      .map(w => ({ address: w.address, scannedTokens: w.winnerTokens ?? 2, spend: undefined, hold: undefined, winnerScore: w.score ?? 0 }));
+    if (freshSnapshot || winnerLeads.length > 0) {
       const count = await tx.trackedWallet.count({ where: { source: 'DISCOVERED', active: true, researchReview: { not: 'REJECTED' } } });
       out.capacity = Math.max(0, WALLET_INTAKE_LIMITS.capacity - count);
-      const rejected = new Set((await tx.walletCandidate.findMany({ where: { status: 'REJECTED' }, select: { address: true } })).map(w => w.address));
-      const candidates = snapshot.data.items.filter(w =>
+      const emergingItems = freshSnapshot ? snapshot.data.items : [];
+      const seenCandidate = new Set(winnerLeads.map(w => w.address));
+      const merged = [
+        ...winnerLeads,
+        ...emergingItems
+          .filter(w => !seenCandidate.has(w.address))
+          .map(w => ({ ...w, winnerScore: 0 })),
+      ];
+      const candidates = merged.filter(w =>
         isSolanaAddress(w.address) &&
         !rejected.has(w.address) &&
         !(w.spend && w.spend.matchedTokens >= 2 && w.spend.medianMatchedQuoteSol !== null && Number(w.spend.medianMatchedQuoteSol) < WALLET_INTAKE_LIMITS.minMedianQuoteSol),
@@ -47,9 +88,9 @@ export async function intakeEmergingWallets(db: PrismaClient, now = new Date()) 
         const value = w.spend?.medianMatchedQuoteSol;
         return w.spend && w.spend.matchedTokens >= 2 && value != null && Number.isFinite(Number(value)) ? Number(value) : -1;
       };
-      // Prefer observed holders first, then unprobed candidates, then confirmed dumpers; break ties by known size and repeat participation.
+      // Prefer observed holders and multi-winner candidates first, then unprobed candidates, then confirmed dumpers.
       const pending = candidates.filter(w => !existing.has(w.address)).sort((a,b) =>
-        holdRank(b) - holdRank(a) || spendSize(b) - spendSize(a) || b.scannedTokens - a.scannedTokens);
+        holdRank(b) - holdRank(a) || b.winnerScore - a.winnerScore || spendSize(b) - spendSize(a) || b.scannedTokens - a.scannedTokens);
       if (out.capacity === 0 && pending.length > 0) {
         out.evicted = await evictStaleProvisional(tx, now, Math.min(WALLET_INTAKE_LIMITS.perCycle, pending.length));
         out.capacity += out.evicted;
@@ -106,8 +147,9 @@ async function evictStaleProvisional(tx: Prisma.TransactionClient, now: Date, ne
   }
   const evictIds = stalePool
     .filter(row => {
-      if (hasProvenSmallCapSample(byKey.get(`wallet.performance.${row.id}`))) return false;
+      // Confirmed automated/spray bots are always evictable after 24h, even if survivorship bias produced a small-cap streak.
       if (automatedIds.has(row.id)) return true;
+      if (hasProvenSmallCapSample(byKey.get(`wallet.performance.${row.id}`))) return false;
       // Non-automated provisional wallets keep the full 7-day evaluation window before stale eviction.
       if (row.createdAt instanceof Date && row.createdAt > staleCutoff) return false;
       return (
@@ -140,18 +182,27 @@ export async function reactivateProvenWallets(db: PrismaClient, now = new Date()
     if (typeof tx.trackedWallet.updateMany !== 'function' || typeof tx.systemSetting.findMany !== 'function') return out;
     const inactive = await tx.trackedWallet.findMany({
       where: { source: 'DISCOVERED', active: false, researchReview: { not: 'REJECTED' } },
-      select: { id: true, address: true },
+      select: { id: true, address: true, profile: { select: { score: true, medianHoldSeconds: true } } },
       orderBy: { id: 'asc' },
-      take: WALLET_INTAKE_LIMITS.capacity,
-    });
+      take: WALLET_INTAKE_LIMITS.capacity * 3,
+    }) as { id: string; address: string; profile?: { score: number; medianHoldSeconds: number | null } | null }[];
     if (!inactive.length) return out;
-    const perfRows = await tx.systemSetting.findMany({ where: { key: { in: inactive.map(w => `wallet.performance.${w.id}`) } }, select: { key: true, value: true } });
-    const byKey = new Map(perfRows.map(s => [s.key, s.value]));
+    const settingRows = await tx.systemSetting.findMany({
+      where: { key: { in: inactive.flatMap(w => [`wallet.performance.${w.id}`, `wallet.intelligence.${w.id}`]) } },
+      select: { key: true, value: true },
+    });
+    const byKey = new Map(settingRows.map(s => [s.key, s.value]));
     const proven = inactive.flatMap(w => {
-      const metrics = provenSmallCapMetrics(byKey.get(`wallet.performance.${w.id}`));
+      const intel = byKey.get(`wallet.intelligence.${w.id}`) as { automation?: { automated?: unknown } } | undefined;
+      if (intel?.automation?.automated === true) return [];
+      const perf = byKey.get(`wallet.performance.${w.id}`);
+      const metrics = provenSmallCapMetrics(perf) ?? provenOverallMetrics(perf, w.profile);
       return metrics ? [{ ...w, metrics }] : [];
-    }).sort((a, b) => b.metrics.winRateLowerBound - a.metrics.winRateLowerBound ||
-      b.metrics.realisedPnlSol - a.metrics.realisedPnlSol || a.id.localeCompare(b.id));
+    }).sort((a, b) =>
+      b.metrics.tier - a.metrics.tier ||
+      b.metrics.winRateLowerBound - a.metrics.winRateLowerBound ||
+      b.metrics.realisedPnlSol - a.metrics.realisedPnlSol ||
+      a.id.localeCompare(b.id));
     out.candidates = proven.length;
     if (!proven.length) return out;
     const wanted = Math.min(WALLET_INTAKE_LIMITS.perCycle, proven.length);

@@ -6,6 +6,7 @@ import type { WalletEventDeps } from './walletEvent';
 import { makePaperPorts, type PaperPorts } from './paperLedger';
 import { loadSystemControls } from './systemConfig';
 import { walletTradeEvidence } from './walletResearchEvidence';
+import { SIGNAL_OPPORTUNITY_LIMITS, deriveFlowConsensusScore } from './signalOpportunities';
 
 type Db = PrismaClient;
 
@@ -82,15 +83,44 @@ export function makeExecutionStore(db: Db, ports: ChainPorts, now: () => Date = 
       });
       if (!user) throw new MissingInputError('User not found');
 
+      const consensusCutoff = new Date(at.getTime() - SIGNAL_OPPORTUNITY_LIMITS.consensusMaxAgeMs);
       const token = await db.token.findUnique({
         where: { mint: job.mint },
-        include: { metrics: { orderBy: { at: 'desc' }, take: 1 }, opportunities: { orderBy: { createdAt: 'desc' }, take: 1 }, consensus: { orderBy: { at: 'desc' }, take: 1 } },
+        include: {
+          metrics: { orderBy: { at: 'desc' }, take: 1 },
+          opportunities: { orderBy: { createdAt: 'desc' }, take: 1 },
+          consensus: { where: { at: { gte: consensusCutoff, lte: at } }, orderBy: { at: 'desc' }, take: 1 },
+        },
       });
       const metric = token?.metrics[0];
       const opportunity = token?.opportunities[0];
-      const consensus = token?.consensus[0];
+      const rawConsensus = token?.consensus[0];
+      const freshConsensus =
+        rawConsensus && (!(rawConsensus.at instanceof Date) || (+rawConsensus.at >= +consensusCutoff && +rawConsensus.at <= +at))
+          ? rawConsensus
+          : undefined;
+      let consensusScore: number | null = freshConsensus ? freshConsensus.score : null;
+      if (consensusScore === null && token && typeof db.walletResearchSignal?.findFirst === 'function') {
+        const flow = await db.walletResearchSignal.findFirst({
+          where: {
+            tokenId: token.id,
+            side: 'BUY',
+            createdAt: { gte: new Date(at.getTime() - SIGNAL_OPPORTUNITY_LIMITS.lookbackMs), lte: at },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { independentEntities: true, netFlowSol: true },
+        });
+        if (flow) {
+          consensusScore = deriveFlowConsensusScore({
+            independentEntities: flow.independentEntities,
+            netFlowSol: num(flow.netFlowSol),
+          });
+        }
+      }
       const requireSignals = opts?.requireSignals ?? true;
-      if (!token || !metric || (requireSignals && (!opportunity || !consensus))) throw new MissingInputError('Token metrics or signals are missing');
+      if (!token || !metric || (requireSignals && (!opportunity || consensusScore === null))) {
+        throw new MissingInputError('Token metrics or signals are missing');
+      }
 
       const controls = await loadSystemControls(db);
       const isBuy = job.decision.action === 'BUY';
@@ -144,7 +174,7 @@ export function makeExecutionStore(db: Db, ports: ChainPorts, now: () => Date = 
           systemPaused: controls.pause.paused,
           idempotencyKey: job.idempotencyKey,
           token: { mint: job.mint, blacklisted: token.blacklisted, liquidityUsd: num(metric.liquidityUsd) },
-          signals: { opportunityScore: opportunity?.score ?? 0, consensusScore: consensus?.score ?? 0 },
+          signals: { opportunityScore: opportunity?.score ?? 0, consensusScore: consensusScore ?? 0 },
           portfolio: {
             totalValueSol: totalValue, walletBalanceSol: balance, openPositions, hasPositionInToken: !!tokenPosition,
             tokenExposureSol: num(exposure._sum.sizeSol), allocatedTodaySol: num(allocated._sum.sizeSol),

@@ -150,6 +150,22 @@ describe('execution store', () => {
     const failingPort = execDb();
     await expect(makeExecutionStore(failingPort.db, ports({ getSolBalance: async () => { throw new Error('rpc down'); } }), () => NOW).loadPreTradeState(JOB())).rejects.toThrow('rpc down');
   });
+  it('rejects stale ConsensusSignal rows (>30m) while accepting fresh WalletResearchSignal BUY flows as fallback', async () => {
+    const staleAt = new Date(NOW.getTime() - 45 * 60_000);
+    const staleOnly = execDb({
+      token: { findUnique: vi.fn(async () => ({ id: 't1', blacklisted: false, metrics: [{ liquidityUsd: D(600000) }], opportunities: [{ score: 82 }], consensus: [{ score: 90, at: staleAt }] })) },
+      walletResearchSignal: { findFirst: vi.fn(async () => null) },
+    });
+    await expect(makeExecutionStore(staleOnly.db, ports(), () => NOW).loadPreTradeState(JOB())).rejects.toThrow(MissingInputError);
+
+    const withFreshFlow = execDb({
+      token: { findUnique: vi.fn(async () => ({ id: 't1', blacklisted: false, metrics: [{ liquidityUsd: D(600000) }], opportunities: [{ score: 82 }], consensus: [{ score: 90, at: staleAt }] })) },
+      walletResearchSignal: { findFirst: vi.fn(async () => ({ independentEntities: 3, netFlowSol: D(10) })) },
+    });
+    const state = await makeExecutionStore(withFreshFlow.db, ports(), () => NOW).loadPreTradeState(JOB());
+    // 45 + 3 * 12 + min(30, 10 * 2) = 100
+    expect(state.context.signals).toEqual({ opportunityScore: 82, consensusScore: 100 });
+  });
   it('records the risk decision and an audit entry together', async () => {
     const { db, upsert, audit } = execDb();
     const result = { approved: false, route: 'REJECT' as const, sizeSol: 0, exitFraction: 0, maxSlippageBps: 100, maxPriceImpactPct: 1, violations: [{ code: 'AGENT_PAUSED', message: 'x' }], adjustments: [] };

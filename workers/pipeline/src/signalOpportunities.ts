@@ -6,6 +6,8 @@ import { readCachedTokenEvidence } from './tokenEvidenceCache';
 export const SIGNAL_OPPORTUNITY_LIMITS = {
   /** Lookback window for recent Smart Money Flow and Early Radar catalysts. */
   lookbackMs: 2 * 3_600_000,
+  /** Maximum age for a ConsensusSignal row to count as live consensus (~2 recompute cycles). */
+  consensusMaxAgeMs: 30 * 60_000,
   /** Require a live (<15m) price observation so AI analysis and outcome tracking have a valid entry price. */
   marketMaxAgeMs: 15 * 60_000,
   /** Exclude mega-cap tokens and stablecoins from synthesized alpha opportunities. */
@@ -18,6 +20,11 @@ export const SIGNAL_OPPORTUNITY_LIMITS = {
   scoreJumpDelta: 5,
   maxCandidatesPerRun: 30,
 } as const;
+
+/** Maps a qualified Smart Money Flow (`WalletResearchSignal`) into a 0..100 consensus-equivalent score. */
+export function deriveFlowConsensusScore(flow: { independentEntities: number; netFlowSol: number }): number {
+  return Math.min(100, Math.round(45 + flow.independentEntities * 12 + Math.min(30, flow.netFlowSol * 2)));
+}
 
 const EXCLUDED_MINTS = new Set([
   'So11111111111111111111111111111111111111112',  // WSOL
@@ -95,12 +102,13 @@ export async function synthesizeSignalOpportunities(
   const candidateIds = [...new Set([...flowByToken.keys(), ...radarByToken.keys()])].slice(0, SIGNAL_OPPORTUNITY_LIMITS.maxCandidatesPerRun);
   if (!candidateIds.length) return out;
 
+  const consensusCutoff = new Date(now.getTime() - SIGNAL_OPPORTUNITY_LIMITS.consensusMaxAgeMs);
   const tokens = await db.token.findMany({
     where: { id: { in: candidateIds }, blacklisted: false },
     include: {
       metrics: { orderBy: { at: 'desc' }, take: 1 },
       holders: { orderBy: { at: 'desc' }, take: 1 },
-      consensus: { orderBy: { at: 'desc' }, take: 1 },
+      consensus: { where: { at: { gte: consensusCutoff, lte: now } }, orderBy: { at: 'desc' }, take: 1 },
       narratives: {
         where: { narrative: { stage: { not: 'DEAD' } }, relation: { notIn: ['UNRELATED', 'SUSPICIOUS'] } },
         orderBy: [{ ogScore: 'desc' }, { confidence: 'desc' }],
@@ -143,11 +151,14 @@ export async function synthesizeSignalOpportunities(
 
     const flow = flowByToken.get(t.id);
     const radarScore = radarByToken.get(t.id) ?? null;
-    const derivedFlowScore = flow
-      ? Math.min(100, Math.round(45 + flow.independentEntities * 12 + Math.min(30, flow.netFlowSol * 2)))
-      : 0;
-    const smartMoneyScore = Math.max(t.consensus[0]?.score ?? 0, derivedFlowScore);
-    const hasSmartMoneyConsensus = Boolean(t.consensus[0] || flow);
+    const derivedFlowScore = flow ? deriveFlowConsensusScore(flow) : 0;
+    const rawConsensus = t.consensus[0];
+    const freshConsensus =
+      rawConsensus && (!(rawConsensus.at instanceof Date) || (+rawConsensus.at >= +consensusCutoff && +rawConsensus.at <= +now))
+        ? rawConsensus
+        : undefined;
+    const smartMoneyScore = Math.max(freshConsensus?.score ?? 0, derivedFlowScore);
+    const hasSmartMoneyConsensus = Boolean(freshConsensus || flow);
     const narrativeScore = rel?.narrative.score ?? (radarScore != null ? Math.min(85, Math.max(55, radarScore)) : 55);
     const ogScore = rel?.ogScore ?? 55;
 

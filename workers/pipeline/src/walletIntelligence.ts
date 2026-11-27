@@ -88,16 +88,19 @@ export async function recomputeWalletIntelligence(db: PrismaClient, now: Date = 
   const { wallets, pages } = await streamIntelligenceInputs(db, new Date(Math.min(sinceMs, perfSince)), now, (page, activeIds) => {
     for (const row of page) {
       const rowAt = +row.at;
-      if (rowAt >= perfSince && !performanceCapped.has(row.walletId)) {
+      if (rowAt >= perfSince) {
         let mine = performanceRows.get(row.walletId);
         if (!mine) {
           mine = [];
           performanceRows.set(row.walletId, mine);
         }
-        if (mine.length >= PERFORMANCE_TRADE_CAP) {
+        mine.push(slimPerformanceTrade(row));
+        if (mine.length > PERFORMANCE_TRADE_CAP) {
           performanceCapped.add(row.walletId);
-        } else {
-          mine.push(slimPerformanceTrade(row));
+          // Compact periodically so streaming stays O(1) amortized while retaining the NEWEST 10k swaps.
+          if (mine.length >= PERFORMANCE_TRADE_CAP * 2) {
+            mine.splice(0, mine.length - PERFORMANCE_TRADE_CAP);
+          }
         }
       }
       if (activeIds.has(row.walletId) && row.tokenAmount !== null && rowAt >= sinceMs) {
@@ -219,7 +222,9 @@ async function loadMarkToMarket(db: PrismaClient, performanceRows: Map<string, P
     // Prisma operations below are lazy: yield while preparing them so Redis
     // leases and other queues stay responsive, then publish atomically as before.
     await yieldToEventLoop();
-    const performanceKey = `wallet.performance.${w.id}`, observed = performanceRows.get(w.id) ?? [];
+    const rawObserved = performanceRows.get(w.id) ?? [];
+    const observed = rawObserved.length > PERFORMANCE_TRADE_CAP ? rawObserved.slice(-PERFORMANCE_TRADE_CAP) : rawObserved;
+    const performanceKey = `wallet.performance.${w.id}`;
     const performance = computeWalletPerformance(observed, now, performanceCapped.has(w.id), markToMarket);
     performanceRows.delete(w.id);
     settings.push({key:performanceKey,value:performance});
@@ -241,8 +246,8 @@ async function loadMarkToMarket(db: PrismaClient, performanceRows: Map<string, P
     byWallet.delete(w.id);
     const pat = holdingPatterns(stats.legs);
     const leaderScore = leader?.leaderScore ?? 0;
-    // Exclude automated/bot wallets from consensus so bot swarms don't manufacture fake independent agreement.
-    if (!automation.automated) {
+    // Exclude automated/bot and operator-rejected wallets from consensus so bot swarms or rejected addresses don't manufacture agreement.
+    if (!automation.automated && w.researchReview !== 'REJECTED') {
       // A wallet in a non-timing cluster (for example a funding cluster) keeps it, so linked wallets count once in consensus.
       info.set(w.id, { score, leaderScore, clusterId: clusterOf.get(w.id) ?? (reassignable.has(w.id) ? null : w.clusterId) });
     }
@@ -278,9 +283,16 @@ async function loadMarkToMarket(db: PrismaClient, performanceRows: Map<string, P
   // Prisma's array form only accepts isolationLevel and otherwise uses its 5s
   // default, which is too short for 200+ wallet/profile/setting writes.
   const consensusToWrite = await filterConsensusWrites(db, consensusSignals, now);
+  const utcDayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const publicationOperations=await db.$transaction(async tx=>{
     const ops:Prisma.PrismaPromise<unknown>[]=[];
     ops.push(...bulkSettings(tx,settings),...bulkProfiles(tx,profiles));
+    // Keep at most one 30D WalletMetric snapshot per wallet per UTC day instead of 96/day.
+    if (metrics.length && typeof tx.walletMetric.deleteMany === 'function') {
+      ops.push(tx.walletMetric.deleteMany({
+        where: { window: WINDOW, computedAt: { gte: utcDayStart, lte: now }, walletId: { in: metrics.map((m) => m.walletId) } },
+      }));
+    }
     for(let i=0;i<metrics.length;i+=PUBLICATION_BATCH_SIZE)ops.push(tx.walletMetric.createMany({data:metrics.slice(i,i+PUBLICATION_BATCH_SIZE)}));
     // A wallet that no longer has enough closed trades loses its profile instead of keeping a stale score.
     if (unscored.length) ops.push(tx.walletProfile.deleteMany({ where: { walletId: { in: unscored } } }));
@@ -298,6 +310,7 @@ async function loadMarkToMarket(db: PrismaClient, performanceRows: Map<string, P
     return ops.length;
   },{timeout:30_000,maxWait:10_000});
   await pruneExpiredConsensusSignals(db, now);
+  await pruneExpiredWalletMetrics(db, now);
   return { walletsScored: scored, walletsUnscored: unscored.length, clusters: clusterCount, consensusSignals: signals, tradesUsed,
     readPages:pages,loadMs:Math.round(loaded-started),computeMs:Math.round(prepared-loaded),publishMs:Math.round(performance.now()-prepared),publicationOperations };
 }
@@ -305,7 +318,9 @@ async function loadMarkToMarket(db: PrismaClient, performanceRows: Map<string, P
 /** Skip duplicate unchanged ConsensusSignal writes inside this window while preserving hourly heartbeats. */
 export const CONSENSUS_HEARTBEAT_MS = 60 * 60_000;
 export const CONSENSUS_RETENTION_MS = 14 * 86_400_000;
-export const CONSENSUS_PRUNE_BATCH = 5_000;
+export const CONSENSUS_PRUNE_BATCH = 10_000;
+export const WALLET_METRIC_RETENTION_MS = 90 * 86_400_000;
+export const WALLET_METRIC_PRUNE_BATCH = 5_000;
 
 type ConsensusSnapshotRow = {
   tokenId: string;
@@ -362,5 +377,20 @@ export async function pruneExpiredConsensusSignals(db: PrismaClient, now: Date):
   });
   if (!stale.length) return 0;
   await db.consensusSignal.deleteMany({ where: { id: { in: stale.map((r) => r.id) } } });
+  return stale.length;
+}
+
+/** Deletes WalletMetric snapshots older than 90 days in bounded batches. */
+export async function pruneExpiredWalletMetrics(db: PrismaClient, now: Date): Promise<number> {
+  if (typeof db.walletMetric?.findMany !== 'function' || typeof db.walletMetric?.deleteMany !== 'function') return 0;
+  const cutoff = new Date(now.getTime() - WALLET_METRIC_RETENTION_MS);
+  const stale = await db.walletMetric.findMany({
+    where: { computedAt: { lt: cutoff } },
+    orderBy: { computedAt: 'asc' },
+    take: WALLET_METRIC_PRUNE_BATCH,
+    select: { id: true },
+  });
+  if (!stale.length) return 0;
+  await db.walletMetric.deleteMany({ where: { id: { in: stale.map((r) => r.id) } } });
   return stale.length;
 }

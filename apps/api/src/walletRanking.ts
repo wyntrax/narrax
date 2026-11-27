@@ -36,7 +36,8 @@ export function rankingReasons(performance: WalletPerformance, band: WalletPerfo
   const smallCapProven = !!smallCap && smallCap.closedPositions >= 5 && smallCap.closedTokens >= 5 && smallCap.observedDays >= 7 &&
     hasPerformanceConfidence(smallCap) && smallCap.realisedPnlSol !== null &&
     new Prisma.Decimal(smallCap.realisedPnlSol).gt(0) && (smallCap.medianRoi ?? 0) > 0 && (smallCap.fastCloseRate ?? 0) <= 0.5;
-  if (band.band==='UNKNOWN' || band.band==='OVER_1M' || (band.band==='ALL' && !smallCapProven)) reasons.push('SMALL_CAP_UNPROVEN');
+  const knownCapSample = (scope.entryCapKnownPositions ?? 0) >= 5;
+  if (band.band==='UNKNOWN' || band.band==='OVER_1M' || (band.band==='ALL' && knownCapSample && !smallCapProven)) reasons.push('SMALL_CAP_UNPROVEN');
   if ((band.fastCloseRate??0)>0.5) reasons.push('FAST_EXITS');
   if (automated) reasons.push('AUTOMATED_BEHAVIOR');
   if (linked) reasons.push('LINKED_WALLETS');

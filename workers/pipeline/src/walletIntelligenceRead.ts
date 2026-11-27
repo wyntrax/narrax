@@ -4,7 +4,7 @@ import {setImmediate as yieldToEventLoop} from 'node:timers/promises';
 export const INTELLIGENCE_READ_PAGE_SIZE=5000;
 const select={id:true,walletId:true,tokenId:true,side:true,amountSol:true,tokenAmount:true,at:true,marketCapUsd:true,evidence:true} satisfies Prisma.WalletTradeSelect;
 export type IntelligenceTradeRow=Prisma.WalletTradeGetPayload<{select:typeof select}>;
-export type IntelligenceWalletRow={id:string;clusterId:string|null;cluster:{label:string|null}|null};
+export type IntelligenceWalletRow={id:string;researchReview?:string;clusterId:string|null;cluster:{label:string|null}|null};
 
 /** Bound driver/compiler decoding work without truncating history or changing
  * same-time ordering. One repeatable snapshot prevents concurrent backfills from
@@ -16,7 +16,7 @@ export async function streamIntelligenceInputs(
   onPage:(page:IntelligenceTradeRow[],activeIds:ReadonlySet<string>)=>void|Promise<void>,
 ):Promise<{wallets:IntelligenceWalletRow[];pages:number}>{
  return db.$transaction(async tx=>{
-  const wallets=await tx.trackedWallet.findMany({where:{active:true},select:{id:true,clusterId:true,cluster:{select:{label:true}}}});
+  const wallets=await tx.trackedWallet.findMany({where:{active:true},select:{id:true,researchReview:true,clusterId:true,cluster:{select:{label:true}}}});
   const activeIds=new Set(wallets.map(w=>w.id));
   let cursor:Pick<IntelligenceTradeRow,'id'|'at'>|undefined,pages=0;
   for(;;){
