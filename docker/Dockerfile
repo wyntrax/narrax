@@ -3,7 +3,7 @@
 # The image is therefore larger than a compiled one. A compiled build is a possible later change.
 #
 # NOT BUILT OR RUN when this was written (no Docker in the build environment). Build it once and check /health before relying on it.
-FROM node:22-bookworm-slim
+FROM node:26-bookworm-slim
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssl ca-certificates tini \
