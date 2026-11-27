@@ -7,6 +7,7 @@ import { registerFeatureGates } from './gating';
 const now = new Date('2026-10-28T12:00:00Z');
 const routes = [
   ['GET', '/v1/smart-money/rankings'],
+  ['GET', '/v1/smart-money/investigations'],
   ['GET', '/v1/smart-money/investigations/:mint'],
   ['POST', '/v1/smart-money/investigations/:mint/discover'],
 ] as const;
@@ -46,7 +47,7 @@ describe('Smart Money PRO HTTP gates', () => {
     const { app, handler } = await fixture(tier, admin);
     try {
       for (const [method, path] of routes) expect((await app.inject({ method, url: path.replace(':mint', 'mint') })).statusCode).toBe(200);
-      expect(handler).toHaveBeenCalledTimes(3);
+      expect(handler).toHaveBeenCalledTimes(routes.length);
     } finally { await app.close(); }
   });
 });

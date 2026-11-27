@@ -38,6 +38,76 @@ export const InvestigationHistory = z.object({
   capped: z.boolean().nullable(), skipped: z.number().int().nonnegative().nullable(),
 });
 export const InvestigationQualification = z.object({ status: z.enum(['QUALIFIED', 'PROVISIONAL', 'REJECTED']), eligible: z.boolean(), reasons: z.array(z.string()), rulesVersion: z.number() });
+export const InvestigationFlowBucket = z.object({
+  startAt: At,
+  endAt: At,
+  buySol: Amount,
+  sellSol: Amount,
+  netSol: Amount,
+  tradeCount: z.number().int().nonnegative(),
+  activeGroups: z.number().int().nonnegative(),
+});
+export const InvestigationCoEntryBurst = z.object({
+  startAt: At,
+  endAt: At,
+  spanSeconds: z.number().int().nonnegative(),
+  participantCount: z.number().int().min(2),
+  independentGroupCount: z.number().int().min(1),
+  totalBuySol: Amount,
+  participantIds: z.array(z.string()),
+  sampleSignatures: z.array(z.string()),
+});
+export const InvestigationRapidFlip = z.object({
+  walletId: z.string(),
+  buySol: Amount,
+  sellSol: Amount,
+  netExtractedSol: Amount,
+  buyCount: z.number().int().positive(),
+  sellCount: z.number().int().positive(),
+  spanSeconds: z.number().int().nonnegative(),
+});
+export const InvestigationForensics = z.object({
+  postures: z.object({
+    accumulatingGroups: z.number().int().nonnegative(),
+    distributingGroups: z.number().int().nonnegative(),
+    rotatingGroups: z.number().int().nonnegative(),
+    unpricedGroups: z.number().int().nonnegative(),
+    accumulatingNetSol: Amount.nullable(),
+    distributingNetSol: Amount.nullable(),
+  }),
+  concentration: z.object({
+    top1GroupSharePct: z.number().finite().min(0).max(100).nullable(),
+    top3GroupSharePct: z.number().finite().min(0).max(100).nullable(),
+    groupHhi: z.number().int().min(0).max(10000).nullable(),
+    qualifiedBuySharePct: z.number().finite().min(0).max(100).nullable(),
+    automatedParticipantCount: z.number().int().nonnegative(),
+  }),
+  flowSeries: z.array(InvestigationFlowBucket),
+  coEntryBursts: z.array(InvestigationCoEntryBurst),
+  rapidFlips: z.array(InvestigationRapidFlip),
+});
+export type InvestigationForensicsData = z.infer<typeof InvestigationForensics>;
+
+export const InvestigationLeadItem = z.object({
+  mint: z.string(),
+  symbol: z.string(),
+  name: z.string(),
+  imageUrl: z.string().nullable().optional(),
+  tradeCount24h: z.number().int().positive(),
+  buySol24h: Amount,
+  sellSol24h: Amount,
+  netSol24h: Amount,
+  participantCount24h: z.number().int().positive(),
+  qualifiedCount24h: z.number().int().nonnegative(),
+  lastTradeAt: At,
+});
+export const InvestigationLeadsResponse = z.object({
+  asOf: At,
+  windowHours: z.literal(24),
+  items: z.array(InvestigationLeadItem),
+});
+export type InvestigationLeads = z.infer<typeof InvestigationLeadsResponse>;
+
 export const InvestigationResponse = z.object({
   methodologyVersion: z.literal(1),
   token: z.object({ mint: z.string(), symbol: z.string(), name: z.string() }),
@@ -57,11 +127,13 @@ export const InvestigationResponse = z.object({
   availability: z.object({ activeTrackedWallets: z.number().int().nonnegative(), lastRecordedTradeAt: At.nullable(), hasTradesIn7d: z.boolean() }).optional(),
   participants: z.array(z.object({
     id: z.string(), address: z.string(), groupId: z.string(),
+    automated: z.boolean().optional(),
     currentQualification: InvestigationQualification, history: InvestigationHistory, totals: InvestigationTotals,
   })),
   groups: z.array(z.object({
     id: z.string(), basis: z.enum(['FUNDING', 'TIMING', 'UNKNOWN', 'UNGROUPED']),
     confidence: z.enum(['LOW', 'MEDIUM', 'HIGH']).nullable(), clusterCreatedAt: At.nullable(),
+    posture: z.enum(['ACCUMULATING', 'DISTRIBUTING', 'ROTATING', 'UNPRICED']).optional(),
     participantIds: z.array(z.string()), totals: InvestigationTotals,
   })),
   relationships: z.array(z.object({ id: z.string(), fromId: z.string(), toId: z.string(), kind: z.string(), confidence: z.enum(['LOW', 'MEDIUM', 'HIGH']), evidence: z.unknown().nullable() })),
@@ -73,6 +145,7 @@ export const InvestigationResponse = z.object({
   strategies: InvestigationStrategies.optional(),
   publications: PublishedInvestigationContext.optional(),
   discovery: InvestigationDiscovery.optional(),
+  forensics: InvestigationForensics.optional(),
 });
 export type SmartMoneyInvestigation = z.infer<typeof InvestigationResponse>;
 export type SmartMoneyInvestigationTotals = z.infer<typeof InvestigationTotals>;

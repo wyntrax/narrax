@@ -1,13 +1,26 @@
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { Prisma } from '@narra/database';
-import { INVESTIGATION_LIMITS as L, InvestigationDiscovery, InvestigationParams, InvestigationQuery, InvestigationQualification, TOKEN_DISCOVERY_KEY_PREFIX, type SmartMoneyInvestigation } from '@narra/shared';
+import { INVESTIGATION_LIMITS as L, InvestigationDiscovery, InvestigationLeadsResponse, InvestigationParams, InvestigationQuery, InvestigationQualification, TOKEN_DISCOVERY_KEY_PREFIX, type SmartMoneyInvestigation } from '@narra/shared';
 import { qualifyWallet } from '@narra/smart-money';
 import { makeAuthenticate, type AccountDeps } from './account';
 import { decimalAmount, investigationHistory, investigationTotals } from './smartMoneyInvestigationSummary';
 import { INVESTIGATION_STRATEGY_RULES } from '@narra/shared';
 import { investigationStrategies } from './investigationStrategies';
 import { investigationPublications } from './investigationPublications';
+import { classifyGroupPosture, computeInvestigationForensics } from './investigationForensics';
+
+const STABLE_OR_BASE_MINTS = [
+  'So11111111111111111111111111111111111111112',
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+];
+
+function isAutomatedIntel(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const auto = (value as { automation?: { automated?: unknown } }).automation;
+  return auto?.automated === true;
+}
 
 const Cursor = z.object({ version: z.literal(1), mint: z.string(), window: z.enum(['24h', '7d']), asOf: z.string().datetime(), id: z.string().min(1).max(128) }).strict();
 function decodeCursor(raw: string) {
@@ -23,6 +36,70 @@ function discoveryStatus(value: unknown, now: Date) {
 
 export function registerSmartMoneyInvestigationRoutes(app: FastifyInstance, deps: Pick<AccountDeps, 'db' | 'verifier' | 'now' | 'requestTokenDiscovery'>) {
   const clock = deps.now ?? (() => new Date());
+  app.get('/v1/smart-money/investigations', {
+    preHandler: makeAuthenticate(deps), config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+  }, async () => {
+    const now = clock(), since = new Date(+now - 86_400_000);
+    const grouped = await deps.db.walletTrade.groupBy({
+      by: ['tokenId'],
+      where: {
+        at: { gte: since, lte: now },
+        wallet: { active: true },
+        token: { blacklisted: false, mint: { notIn: STABLE_OR_BASE_MINTS } },
+      },
+      _count: { _all: true },
+      _max: { at: true },
+      orderBy: [{ _count: { tokenId: 'desc' } }, { _max: { at: 'desc' } }],
+      take: 12,
+    });
+    if (!grouped.length) return InvestigationLeadsResponse.parse({ asOf: now.toISOString(), windowHours: 24, items: [] });
+    const tokenIds = grouped.map(g => g.tokenId);
+    const [tokens, trades] = await Promise.all([
+      deps.db.token.findMany({ where: { id: { in: tokenIds }, blacklisted: false }, select: { id: true, mint: true, symbol: true, name: true } }),
+      deps.db.walletTrade.findMany({
+        where: { tokenId: { in: tokenIds }, at: { gte: since, lte: now }, wallet: { active: true } },
+        orderBy: [{ at: 'desc' }, { id: 'desc' }],
+        take: 3000,
+        select: { tokenId: true, walletId: true, side: true, amountSol: true, tokenAmount: true, at: true, wallet: { select: { id: true, active: true, researchReview: true } } },
+      }),
+    ]);
+    const walletMap = new Map(trades.map(t => [t.walletId, t.wallet]));
+    const settings = walletMap.size
+      ? await deps.db.systemSetting.findMany({
+          where: { key: { in: [...walletMap.keys()].flatMap(id => [`wallet.research.${id}`, `wallet.history.${id}`]) } },
+          select: { key: true, value: true },
+        })
+      : [];
+    const byKey = new Map(settings.map(s => [s.key, s.value]));
+    const qualifiedIds = new Set(
+      [...walletMap.values()]
+        .filter(w => qualifyWallet(w.researchReview, w.active, byKey.get(`wallet.research.${w.id}`), byKey.get(`wallet.history.${w.id}`), now).eligible)
+        .map(w => w.id),
+    );
+    const tokenById = new Map(tokens.map(t => [t.id, t]));
+    const items = grouped.flatMap(g => {
+      const tok = tokenById.get(g.tokenId);
+      if (!tok) return [];
+      const tokTrades = trades.filter(t => t.tokenId === g.tokenId);
+      if (!tokTrades.length) return [];
+      const totals = investigationTotals(tokTrades);
+      const participants = [...new Set(tokTrades.map(t => t.walletId))];
+      return [{
+        mint: tok.mint,
+        symbol: tok.symbol,
+        name: tok.name,
+        imageUrl: null,
+        tradeCount24h: g._count._all,
+        buySol24h: totals.buySol ?? '0',
+        sellSol24h: totals.sellSol ?? '0',
+        netSol24h: totals.netSolSpent ?? '0',
+        participantCount24h: participants.length,
+        qualifiedCount24h: participants.filter(id => qualifiedIds.has(id)).length,
+        lastTradeAt: (g._max.at ?? tokTrades[0]!.at).toISOString(),
+      }];
+    });
+    return InvestigationLeadsResponse.parse({ asOf: now.toISOString(), windowHours: 24, items });
+  });
   app.post('/v1/smart-money/investigations/:mint/discover', {
     preHandler: makeAuthenticate(deps), config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
   }, async (req, reply) => {
@@ -66,7 +143,7 @@ export function registerSmartMoneyInvestigationRoutes(app: FastifyInstance, deps
       const wallets = [...new Map(trades.map(t => [t.walletId, t.wallet])).values()];
       const ids = wallets.map(w => w.id);
       const [settings, edges, publications, discoveryRow] = await Promise.all([
-        tx.systemSetting.findMany({ where: { key: { in: ids.flatMap(id => [`wallet.research.${id}`, `wallet.history.${id}`]) } }, select: { key: true, value: true } }),
+        tx.systemSetting.findMany({ where: { key: { in: ids.flatMap(id => [`wallet.research.${id}`, `wallet.history.${id}`, `wallet.intelligence.${id}`]) } }, select: { key: true, value: true } }),
         tx.walletRelationship.findMany({ where: { fromId: { in: ids }, toId: { in: ids } }, orderBy: { id: 'asc' }, take: L.relationships + 1,
           select: { id: true, fromId: true, toId: true, kind: true, confidence: true, evidence: true } }),
         tx.walletResearchSignal.findMany({ where: { tokenId: token.id, createdAt: { gte: from, lte: asOf } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: INVESTIGATION_STRATEGY_RULES.maxPublications + 1, include: { measurements: { orderBy: { horizonHours: 'asc' } } } }),
@@ -75,6 +152,7 @@ export function registerSmartMoneyInvestigationRoutes(app: FastifyInstance, deps
       const byKey = new Map(settings.map(s => [s.key, s.value])), discovery = discoveryStatus(discoveryRow?.value, now);
       const participants = wallets.map(w => ({
         id: w.id, address: w.address, groupId: w.cluster ? `cluster:${w.cluster.id}` : `wallet:${w.id}`,
+        automated: isAutomatedIntel(byKey.get(`wallet.intelligence.${w.id}`)),
         currentQualification: InvestigationQualification.parse(qualifyWallet(w.researchReview, w.active, byKey.get(`wallet.research.${w.id}`), byKey.get(`wallet.history.${w.id}`), now)),
         history: investigationHistory(byKey.get(`wallet.history.${w.id}`), from, asOf, now),
         totals: investigationTotals(trades.filter(t => t.walletId === w.id)),
@@ -83,8 +161,9 @@ export function registerSmartMoneyInvestigationRoutes(app: FastifyInstance, deps
         const members = participants.filter(p => p.groupId === id), memberIds = new Set(members.map(p => p.id));
         const cluster = wallets.find(w => memberIds.has(w.id))!.cluster;
         const basis = !cluster ? 'UNGROUPED' as const : cluster.label === 'funding' ? 'FUNDING' as const : cluster.label === 'timing' ? 'TIMING' as const : 'UNKNOWN' as const;
+        const groupTotals = investigationTotals(trades.filter(t => memberIds.has(t.walletId)));
         return { id, basis, confidence: cluster?.confidence ?? null, clusterCreatedAt: cluster?.createdAt.toISOString() ?? null,
-          participantIds: [...memberIds], totals: investigationTotals(trades.filter(t => memberIds.has(t.walletId))) };
+          posture: classifyGroupPosture(groupTotals), participantIds: [...memberIds], totals: groupTotals };
       });
       const page = trades.slice(index + 1, index + 1 + q.limit), totals = investigationTotals(trades);
       const limitations = ['SUPPORTED_SWAPS_ONLY', 'ACTIVE_TRACKED_POPULATION_ONLY', 'TRANSFERS_AND_BALANCES_NOT_RECONCILED', 'CURRENT_CONTEXT_NOT_HISTORICAL', 'GROUPS_ARE_INFERRED_NOT_OWNERS', 'RELATIONSHIPS_BETWEEN_RETURNED_PARTICIPANTS_ONLY', 'AS_OF_IS_EVENT_BOUND_NOT_SNAPSHOT'];
@@ -105,6 +184,7 @@ export function registerSmartMoneyInvestigationRoutes(app: FastifyInstance, deps
         availability: { activeTrackedWallets, lastRecordedTradeAt: latestTrade?.at.toISOString() ?? null, hasTradesIn7d: !!latestTrade && +latestTrade.at >= +asOf - 7 * 86_400_000 },
         strategies: investigationStrategies(trades, participants, truncated),
         publications: investigationPublications(publications, now),
+        forensics: computeInvestigationForensics(trades, participants, groups, from, asOf),
         ...(discovery ? { discovery } : {}),
         trades: page.map(t => ({ id: t.id, walletId: t.walletId, signature: t.signature, side: t.side, at: t.at.toISOString(),
           amountSol: decimalAmount(t.amountSol), tokenAmount: t.tokenAmount?.isZero() ? null : decimalAmount(t.tokenAmount), evidence: t.evidence })),

@@ -52,3 +52,42 @@ it('renders unknown evidence and dated briefings without inventing zeros', () =>
   expect(document.querySelector('.pro-evidence')).toHaveTextContent('Unknown');
   expect(document.querySelector('.pro-evidence')).not.toHaveTextContent('$0');
 });
+it('applies 1-click PRO strategy blueprints and submits multi-factor advanced rules', async () => {
+  const c = proCopy.en; view('RADAR', 'en');
+  fireEvent.click(screen.getByRole('button', { name: c.newRadar }));
+  fireEvent.click(screen.getByRole('button', { name: c.radarBlueprints.smAccum.label }));
+  expect(screen.getByLabelText(c.name)).toHaveValue(c.radarBlueprints.smAccum.name);
+  expect(screen.getByLabelText(c.netFlowSol)).toHaveValue(3);
+  expect(screen.getByLabelText(c.marketCapMax)).toHaveValue(1000000);
+  fireEvent.click(screen.getByRole('button', { name: c.save }));
+  await waitFor(() => expect(state.send).toHaveBeenCalledWith('personal-research/radars', expect.anything(), 'POST', expect.objectContaining({
+    name: c.radarBlueprints.smAccum.name,
+    rules: expect.objectContaining({
+      minLiquidityUsd: 35000,
+      minIndependentBuyers: 2,
+      minNetFlowSol: 3,
+      minMarketCapUsd: 50000,
+      maxMarketCapUsd: 1000000,
+      maxTop10Pct: 60,
+      maxRiskScore: 45,
+    }),
+  })));
+});
+it('renders thesis regime drift strip, baseline price delta, and briefing triage filters', () => {
+  const mint = 'So11111111111111111111111111111111111111112';
+  state.items = [{
+    id: 'th-1', kind: 'THESIS', name: 'Conviction hold', thesis: 'Hold while liquidity and buyers hold.', mint, narrativeSlug: null, active: true, updatedAt: '2026-10-25T12:00:00Z',
+    rules: { minLiquidityUsd: 100000, minIndependentBuyers: null, windowMinutes: 30, minNarrativeVelocity: null, maxRiskScore: null },
+    lastRun: { at: '2026-10-25T12:00:00Z', considered: 1, matched: 1, unknown: 0, capped: false },
+    observations: [
+      { id: 'o2', mint, at: '2026-10-25T12:00:00Z', evaluation: { status: 'MATCH', previousStatus: 'NO_MATCH', snapshot: { symbol: 'ALPHA', priceUsd: 0.0175 }, checks: [{ key: 'liquidity', status: 'PASS', value: 150000, threshold: 100000, at: '2026-10-25T12:00:00Z', source: 'dexscreener', refs: [], reason: 'CONDITION_MET' }] } },
+      { id: 'o1', mint, at: '2026-10-25T11:00:00Z', evaluation: { status: 'NO_MATCH', snapshot: { symbol: 'ALPHA', priceUsd: 0.01 }, checks: [{ key: 'liquidity', status: 'FAIL', value: 80000, threshold: 100000, at: '2026-10-25T11:00:00Z', source: 'dexscreener', refs: [], reason: 'CONDITION_NOT_MET' }] } },
+    ],
+  }];
+  view('THESIS');
+  expect(screen.getByText(/\(1\/2\)/)).toBeVisible();
+  expect(screen.getByText('+75%')).toBeVisible();
+  fireEvent.click(screen.getByText(proCopy.en.history));
+  expect(screen.getByText(/\+50% margin/)).toBeVisible();
+  expect(screen.getByText(/-20% shortfall/)).toBeVisible();
+});

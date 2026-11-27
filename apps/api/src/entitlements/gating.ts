@@ -12,6 +12,7 @@ export const GATED_ROUTES: Record<string, FeatureKey> = {
   })),
   'GET /v1/smart-money/flows': 'research.smart_money', 'GET /v1/smart-money/emerging': 'research.smart_money',
   'GET /v1/smart-money/rankings': 'research.smart_money_rankings',
+  'GET /v1/smart-money/investigations': 'research.smart_money_investigation',
   'GET /v1/smart-money/investigations/:mint': 'research.smart_money_investigation',
   'POST /v1/smart-money/investigations/:mint/discover': 'research.smart_money_investigation',
   'GET /v1/narratives': 'research.narratives', 'GET /v1/narratives/:slug': 'research.narratives',

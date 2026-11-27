@@ -35,5 +35,37 @@ export function investigationStrategyFixture() {
       { horizonHours: 24, dueAt: data.asOf, status: 'PENDING', returnPct: null, priceUsd: null, priceAt: null, metricId: null, measuredAt: null, reason: null },
     ],
   }] };
+  data.forensics = {
+    postures: { accumulatingGroups: 3, distributingGroups: 1, rotatingGroups: 0, unpricedGroups: 0, accumulatingNetSol: '0.000000003', distributingNetSol: '-2' },
+    concentration: { top1GroupSharePct: 99.99, top3GroupSharePct: 100, groupHhi: 9999, qualifiedBuySharePct: 0, automatedParticipantCount: 1 },
+    flowSeries: Array.from({ length: 12 }, (_, i) => ({
+      startAt: new Date(Date.parse(data.from) + i * 2 * 3_600_000).toISOString(),
+      endAt: new Date(Date.parse(data.from) + (i + 1) * 2 * 3_600_000).toISOString(),
+      buySol: i === 11 ? '1.5' : i === 5 ? '0.6' : '0',
+      sellSol: i === 11 ? '2' : '0',
+      netSol: i === 11 ? '-0.5' : i === 5 ? '0.6' : '0',
+      tradeCount: i === 11 ? 3 : i === 5 ? 1 : 0,
+      activeGroups: i === 11 ? 2 : i === 5 ? 1 : 0,
+    })),
+    coEntryBursts: [{
+      startAt: examples[0]!.at,
+      endAt: examples[2]!.at,
+      spanSeconds: 180,
+      participantCount: 3,
+      independentGroupCount: 2,
+      totalBuySol: '3.25',
+      participantIds: ['wallet-0', 'wallet-2', 'wallet-3'],
+      sampleSignatures: ['4'.repeat(88)],
+    }],
+    rapidFlips: [{
+      walletId: 'wallet-0',
+      buySol: '1.2',
+      sellSol: '2.5',
+      netExtractedSol: '1.3',
+      buyCount: 3,
+      sellCount: 1,
+      spanSeconds: 420,
+    }],
+  };
   return InvestigationResponse.parse(data);
 }
