@@ -1,0 +1,100 @@
+/* Shared executive polish for Radar, Opportunities, and Tokens workspace pages. */
+.rp-page{--rp-pos:#4ade80;--rp-neg:#f87171;--rp-warn:#fbbf24;--rp-accent:#93c5fd;min-width:0;max-width:100%;display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.rp-page>*{min-width:0;max-width:100%}
+:root[data-theme=light] .rp-page{--rp-pos:#166534;--rp-neg:#991b1b;--rp-warn:#854d0e;--rp-accent:#1d4ed8}
+.rp-page .research-heading{margin-bottom:4px}
+.rp-page .research-section{margin:0}
+
+.rp-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px 16px;padding:12px 16px;border:1px solid var(--bd);border-radius:14px;background:var(--s1)}
+.rp-toolbar-left{display:flex;align-items:center;flex-wrap:wrap;gap:12px;min-width:0}
+.rp-toolbar .research-note{margin:0;font-size:12px}
+.rp-refresh{display:inline-flex;align-items:center;gap:8px}
+.rp-spin{animation:rp-spin 1s linear infinite}
+@keyframes rp-spin{to{transform:rotate(360deg)}}
+
+.rp-banner{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border:1px solid var(--bd);border-radius:14px;background:var(--s1);color:var(--tx2);font-size:12px;line-height:1.6}
+.rp-banner svg{flex:none;margin-top:2px;color:var(--tx2)}
+.rp-banner p{margin:0}
+
+.rp-num{font-family:var(--font-workspace-mono),monospace;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rp-num-pos{color:var(--rp-pos);font-weight:500}
+.rp-num-neg{color:var(--rp-neg);font-weight:500}
+.rp-num-flat{color:var(--tx)}
+.rp-num-muted{color:var(--tx2)}
+
+.rp-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border:1px solid var(--bd);border-radius:99px;font:500 10px/1.4 var(--font-workspace-mono),monospace;letter-spacing:.03em;white-space:nowrap}
+.rp-pill-pos{color:var(--rp-pos);border-color:color-mix(in srgb,var(--rp-pos) 38%,var(--bd));background:color-mix(in srgb,var(--rp-pos) 8%,var(--bg))}
+.rp-pill-neg{color:var(--rp-neg);border-color:color-mix(in srgb,var(--rp-neg) 38%,var(--bd));background:color-mix(in srgb,var(--rp-neg) 8%,var(--bg))}
+.rp-pill-warn{color:var(--rp-warn);border-color:color-mix(in srgb,var(--rp-warn) 38%,var(--bd));background:color-mix(in srgb,var(--rp-warn) 8%,var(--bg))}
+.rp-pill-accent{color:var(--rp-accent);border-color:color-mix(in srgb,var(--rp-accent) 38%,var(--bd));background:color-mix(in srgb,var(--rp-accent) 8%,var(--bg))}
+.rp-pill-neutral{color:var(--tx);background:var(--s2)}
+.rp-pill-muted{color:var(--tx2);background:transparent}
+
+.rp-score-cell{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.rp-mini-bar{display:inline-block;width:44px;height:4px;border-radius:99px;background:color-mix(in srgb,var(--tx) 12%,transparent);overflow:hidden;vertical-align:middle}
+.rp-mini-bar>span{display:block;height:100%;border-radius:99px;background:var(--tx)}
+
+/* Radar page */
+.radar-page .radar-composition{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(260px,1fr);gap:18px;align-items:stretch}
+.radar-page .radar-figure{margin:0;padding:18px;border:1px solid var(--bd);border-radius:18px;background:var(--s1);min-width:0}
+.radar-page .radar-figure figcaption{margin-top:10px;font-size:11px;line-height:1.6;color:var(--tx2)}
+.radar-page .radar-detail{display:flex;flex-direction:column;gap:12px;padding:20px;border:1px solid var(--bd);border-radius:18px;background:linear-gradient(150deg,var(--s2),var(--s1));min-width:0}
+.radar-detail-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.radar-detail-head .research-note{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-family:var(--font-workspace-mono),monospace}
+.radar-page .radar-detail h2{margin:0;font-size:22px;line-height:1.2}
+.radar-page .radar-detail .research-control{margin-top:auto;align-self:flex-start;display:inline-flex;align-items:center;gap:8px}
+
+.rp-rotation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0}
+.rp-rotation-col{padding:14px 16px;border:1px solid var(--bd);border-radius:14px;background:var(--bg);min-width:0}
+.rp-rotation-heading{display:flex;align-items:center;gap:7px;margin:0 0 12px;font-size:13px!important;font-weight:600!important}
+.rp-rotation-rising .rp-rotation-heading{color:var(--rp-pos)}
+.rp-rotation-falling .rp-rotation-heading{color:var(--rp-neg)}
+.rp-rotation-list{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+.rp-rotation-list li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--bd);font-size:13px}
+.rp-rotation-list li:last-child{border-bottom:0;padding-bottom:0}
+.rp-rotation-list a{color:var(--tx);text-decoration:none;font-weight:500;min-width:0;overflow-wrap:anywhere}
+.rp-rotation-list a:hover{text-decoration:underline;text-underline-offset:4px}
+.rp-delta{font:500 11px/1.3 var(--font-workspace-mono),monospace;font-variant-numeric:tabular-nums;padding:3px 7px;border-radius:6px;white-space:nowrap;flex:none}
+.rp-delta-rising{color:var(--rp-pos);background:color-mix(in srgb,var(--rp-pos) 8%,var(--bg));border:1px solid color-mix(in srgb,var(--rp-pos) 32%,var(--bd))}
+.rp-delta-falling{color:var(--rp-neg);background:color-mix(in srgb,var(--rp-neg) 8%,var(--bg));border:1px solid color-mix(in srgb,var(--rp-neg) 32%,var(--bd))}
+.rp-rotation-empty{margin:0;font-size:12px;color:var(--tx2)}
+
+/* Opportunities page */
+.opportunities-page .idea-board{margin:0}
+.opportunities-page .idea-card{gap:14px;transition:border-color .2s}
+.opportunities-page .idea-card:hover{border-color:color-mix(in srgb,var(--tx) 30%,var(--bd))}
+.opportunities-page .idea-card-badges{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.opportunities-page .idea-narrative-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--tx2)}
+.opportunities-page .idea-narrative-line a{color:var(--tx);text-decoration:none;font-weight:500}
+.opportunities-page .idea-narrative-line a:hover{text-decoration:underline;text-underline-offset:4px}
+.opportunities-page .idea-actions-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+
+.rp-analysis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:16px 0}
+.rp-analysis-card{padding:16px;border:1px solid var(--bd);border-radius:14px;background:var(--bg);min-width:0}
+.rp-analysis-card h3{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:14px}
+.rp-analysis-bull h3{color:var(--rp-pos)}
+.rp-analysis-bear h3{color:var(--rp-neg)}
+.rp-analysis-card ul{margin:0;padding-left:18px;display:grid;gap:6px;font-size:13px;line-height:1.6;color:var(--tx2)}
+.rp-risk-list{list-style:none;padding:0;margin:10px 0 14px;display:grid;gap:8px}
+.rp-risk-list li{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);font-size:13px;line-height:1.55;color:var(--tx2)}
+.rp-chip-list{list-style:none;padding:0;margin:8px 0 14px;display:flex;flex-wrap:wrap;gap:6px}
+.rp-chip-list li{padding:4px 10px;border:1px solid var(--bd);border-radius:99px;background:var(--bg);font-size:11px;color:var(--tx2)}
+
+/* Tokens screener page */
+.tokens-controls-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:stretch}
+.tokens-controls-grid>*{min-width:0;margin:0!important}
+.tokens-screener-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 16px;border:1px solid var(--bd);border-radius:16px;background:var(--s1)}
+.tokens-screener-bar .market-tabs{margin:0}
+.tokens-screener-bar .token-screen-controls{padding:0;border:0;background:transparent;margin:0}
+.tokens-source-cell{display:grid;gap:3px}
+.tokens-source-cell a{font-weight:500;white-space:nowrap}
+.tokens-source-cell small{display:inline-flex;align-items:center;gap:5px;margin:0!important}
+.tokens-history-toggle{justify-self:start}
+
+@media(max-width:1024px){
+ .radar-page .radar-composition{grid-template-columns:1fr}
+ .tokens-controls-grid{grid-template-columns:1fr}
+}
+@media(max-width:720px){
+ .rp-rotation-grid,.rp-analysis-grid{grid-template-columns:1fr}
+}

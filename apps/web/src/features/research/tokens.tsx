@@ -20,8 +20,21 @@ import {TokenIdentity,TokenAvatar} from './token-identity';
 import {SafetyEvidence} from './safety-evidence';
 import {LatestObservedEvidence} from './latest-evidence';
 import './token-brief.css';
+import './research-pages.css';
 const TokenPricePanel=dynamic(()=>import('./token-chart'),{loading:Loading});
-export function TokensPage(){const t=useTranslations('workspace'),[input,setInput]=useState(''),[search,setSearch]=useState(''),[history,setHistory]=useState(false);return <><PageHeading title={t('tokens')} body={t('trench.tokensBody')}/><MintLookup/><form className="research-search" onSubmit={e=>{e.preventDefault();setSearch(input.trim());}}><label htmlFor="token-search">{t('search')}</label><div><input id="token-search" type="search" maxLength={64} value={input} onChange={e=>setInput(e.target.value)}/><button className="research-control" type="submit">{t('searchButton')}</button>{search&&<button className="research-control" type="button" onClick={()=>{setInput('');setSearch('');}}>{t('clear')}</button>}</div></form><MarketWatch search={search}/><button className="research-control" aria-expanded={history} onClick={()=>setHistory(!history)}>{t('trench.history')}</button>{history&&<><p className="research-notice">{t('trench.historyNote')}</p><TokenResults key={search} search={search}/></>}</>;}
+export function TokensPage(){
+ const t=useTranslations('workspace'),[input,setInput]=useState(''),[search,setSearch]=useState(''),[history,setHistory]=useState(false);
+ return <div className="rp-page tokens-page">
+  <PageHeading title={t('tokens')} body={t('trench.tokensBody')}/>
+  <div className="tokens-controls-grid">
+   <MintLookup/>
+   <form className="research-search" onSubmit={e=>{e.preventDefault();setSearch(input.trim());}}><label htmlFor="token-search">{t('search')}</label><div><input id="token-search" type="search" maxLength={64} value={input} onChange={e=>setInput(e.target.value)}/><button className="research-control" type="submit">{t('searchButton')}</button>{search&&<button className="research-control" type="button" onClick={()=>{setInput('');setSearch('');}}>{t('clear')}</button>}</div></form>
+  </div>
+  <MarketWatch search={search}/>
+  <button className="research-control tokens-history-toggle" aria-expanded={history} onClick={()=>setHistory(!history)}>{t('trench.history')}</button>
+  {history&&<><p className="research-notice">{t('trench.historyNote')}</p><TokenResults key={search} search={search}/></>}
+ </div>;
+}
 function TokenResults({search}:{search:string}){
  const t=useTranslations('workspace'),f=useFormat(),{access}=useResearch(),allowed=hasFeature(access,'research.tokens'),paging=usePagination();
  const query=useResearchQuery(pagePath('tokens',search?{q:search}:{},paging.cursor),TokensSchema,allowed);
