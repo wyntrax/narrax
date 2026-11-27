@@ -192,4 +192,71 @@ describe('runAiAnalysis candidate filtering & freshness sorting', () => {
       data: { marketPriorityUntil: new Date(now.getTime() + 30 * 60_000) },
     });
   });
+
+  it('skips stablecoins, >$100M mega-caps, and unchanged repeat WATCH within 6h unless score jumps >= 10', async () => {
+    const analyzedIds: string[] = [];
+    const db = {
+      systemSetting: { findUnique: async () => null, findMany: async () => [] },
+      agentAnalysis: {
+        aggregate: async () => ({ _sum: { inputTokens: 0, outputTokens: 0 } }),
+        count: async () => 0,
+        findFirst: vi.fn(async ({ where }: { where: { opportunity: { tokenId: string } } }) => {
+          if (where.opportunity.tokenId === 'tok-repeat') return { opportunity: { score: 58 }, decisions: [{ action: 'WATCH' }] };
+          if (where.opportunity.tokenId === 'tok-jump') return { opportunity: { score: 55 }, decisions: [{ action: 'WATCH' }] };
+          return null;
+        }),
+        create: async () => ({}),
+      },
+      positionEvaluation: { aggregate: async () => ({ _sum: { aiTokens: 0 } }) },
+      opportunity: {
+        findMany: vi.fn(async () => [
+          { id: 'opp-usdc', tokenId: 'tok-usdc', score: 70, token: { mint: TRADEABILITY_USDC_MINT, metrics: [{ at: now, marketCapUsd: '50000000' }] } },
+          { id: 'opp-mega', tokenId: 'tok-mega', score: 68, token: { mint: 'MegaMint11111111111111111111111111111111111', metrics: [{ at: now, marketCapUsd: '500000000' }] } },
+          { id: 'opp-repeat', tokenId: 'tok-repeat', score: 62, token: { mint: 'RepMint111111111111111111111111111111111111', metrics: [{ at: now, marketCapUsd: '500000' }] } },
+          { id: 'opp-jump', tokenId: 'tok-jump', score: 66, token: { mint: 'JumpMint11111111111111111111111111111111111', metrics: [{ at: now, marketCapUsd: '500000' }] } },
+        ]),
+        findUnique: async ({ where }: { where: { id: string } }) => {
+          analyzedIds.push(where.id);
+          return {
+            id: where.id,
+            tokenId: `tok-${where.id}`,
+            narrativeId: null,
+            score: 66,
+            narrativeScore: 60,
+            smartMoneyScore: 65,
+            liquidityScore: 60,
+            momentumScore: 60,
+            ogScore: 55,
+            riskScore: 25,
+            attentionGrowth: null,
+            priceGrowth: 15,
+            token: {
+              id: `tok-${where.id}`,
+              mint: 'JumpMint11111111111111111111111111111111111',
+              symbol: 'JUMP',
+              name: 'Jump Token',
+              createdOnChainAt: new Date(now.getTime() - 120 * 60_000),
+              metrics: [{ priceUsd: '1.0', liquidityUsd: '100000', at: now }],
+              holders: [{ holders: 300, top10Pct: 25, devHoldingPct: 2 }],
+              consensus: [],
+            },
+            narrative: null,
+          };
+        },
+      },
+      tokenMetric: { findFirst: async () => ({ priceUsd: '1.0' }), aggregate: async () => ({ _max: { priceUsd: '1.0' } }) },
+    } as unknown as PrismaClient;
+
+    const llm: LlmProvider = {
+      complete: async () => ({
+        text: JSON.stringify({ classification: 'WATCH', score: 66, reasonCodes: ['OK'], summary: 'watch' }),
+        inputTokens: 10,
+        outputTokens: 5,
+      }),
+    };
+
+    const res = await runAiAnalysis(db, { llm }, now, { limit: 5 });
+    expect(res.analyzed).toBe(1);
+    expect(analyzedIds).toEqual(['opp-jump']);
+  });
 });

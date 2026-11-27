@@ -15,7 +15,7 @@ import { runTregJob } from './tregJob';
 import { trackEarlyRadarOutcomes } from './earlyRadarTracking';
 import { DexScreenerSource, GeckoTerminalSource } from '@narra/market-data';
 import { aiProviderFromEnv } from '@narra/ai';
-import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, refreshTradeEvidence, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhooks, webhookKeyHash, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, discoverTokenWallets, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, createHeliusRuntime, type ChainPorts, type WalletEventDeps } from './index';
+import { makeWalletEventStore, processWalletEvent, ingestNarratives, makeChainPorts, refreshMarketData, refreshTradeEvidence, processScreeningJob, runAiAnalysis, recomputeWalletIntelligence, resolveTokens, synthesizeSignalOpportunities, attributeNarrativeMentions, scanSocialTokens, monitorPositions, syncWalletWebhooks, webhookKeyHash, ingestWalletFunding, rebuildFundingGraph, scanEarlyBuyers, discoverCandidates, discoverTokenWallets, expirePendingConfirmations, fanOutEntries, fanOutExits, writePortfolioSnapshots, trackOutcomes, dispatchAlerts, publishNewEvents, createHeliusRuntime, type ChainPorts, type WalletEventDeps } from './index';
 import { assertEnv } from '@narra/shared';
 import { makeDeveloperHoldingSource } from './developerHoldings';
 import { makeRadarSafetySource } from './radarSafetyEvidence';
@@ -168,7 +168,12 @@ async function main(): Promise<void> {
     new Worker(QUEUE_NAMES.aiScreening, async (j) => JSON.stringify(await processScreeningJob(db, { llm }, AiScreeningJobSchema.parse(j.data))), { connection, concurrency: 2 }),
     new Worker(QUEUE_NAMES.tokenResolution, async () => {
       const deps = await marketDepsFor();
-      return JSON.stringify({ mentionLinks: await attributeNarrativeMentions(db), ...(await resolveTokens(db, undefined, { safety: radarSafety, tradeability, launchEvidence: deps?.launchEvidence ?? null })), social: await scanSocialTokens(db, { quotes: deps?.quotes ?? null, safety: radarSafety, tradeability, launchEvidence: deps?.launchEvidence ?? null }).catch(() => 'social scan failed') });
+      return JSON.stringify({
+        mentionLinks: await attributeNarrativeMentions(db),
+        ...(await resolveTokens(db, undefined, { safety: radarSafety, tradeability, launchEvidence: deps?.launchEvidence ?? null })),
+        social: await scanSocialTokens(db, { quotes: deps?.quotes ?? null, safety: radarSafety, tradeability, launchEvidence: deps?.launchEvidence ?? null }).catch(() => 'social scan failed'),
+        signals: await synthesizeSignalOpportunities(db).catch(() => 'signal opportunities failed'),
+      });
     }, { connection, concurrency: 1 }),
     // One refresh at a time: the sources are rate limited per process.
     new Worker(QUEUE_NAMES.marketData, async () => {
