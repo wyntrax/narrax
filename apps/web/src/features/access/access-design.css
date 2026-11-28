@@ -323,7 +323,7 @@
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 16px;
-  max-height: 230px;
+  max-height: 168px;
   overflow: auto;
   text-align: left;
   white-space: pre-wrap;
