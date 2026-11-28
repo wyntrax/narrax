@@ -1,7 +1,7 @@
 'use client';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {useLocale,useTranslations} from 'next-intl';
-import {AlertCircle,ArrowUpRight,LockKeyhole,SearchX} from 'lucide-react';
+import {AlertCircle,ArrowUpRight,FileText,LockKeyhole,Radar,Search,SearchX,Target} from 'lucide-react';
 import {ApiError} from '@/lib/api';
 import {Link,useRouter} from '@/i18n/navigation';
 import {useAuth} from '@/components/auth/context';
@@ -16,11 +16,15 @@ export function useFormat(){const locale=useLocale(),t=useTranslations('workspac
 export function Loading(){const t=useTranslations('workspace');return <NarraxLoader label={t('loading')}/>;}
 export function Empty({body}:{body?:string}){const t=useTranslations('workspace');return <div className="research-state" role="status"><SearchX aria-hidden="true" size={24}/><h2>{t('empty')}</h2><p>{body??t('emptyBody')}</p></div>;}
 export function Locked({tier}:{tier?:string}){
- const t=useTranslations('workspace');
+ const t=useTranslations('workspace'),locale=useLocale();
  const label=tier&&(['EARLY_ACCESS','MEMBER','PRO'].includes(tier)?t(`featureAccess.tiers.${tier}`):tier.replaceAll('_',' '));
+ const proHighlights=tier==='PRO'?(locale==='id'
+  ?[[Search,'Forensik arus & HHI entitas'],[Radar,'Radar Pribadi 10-faktor'],[Target,'Riwayat rezim Tesis 20 siklus'],[FileText,'Ringkasan Eksekutif 7 hari']] as const
+  :[[Search,'Entity flow & HHI forensics'],[Radar,'10-factor Personal Radar'],[Target,'20-cycle Thesis drift'],[FileText,'7-day Executive Briefing']] as const):null;
  return <section className="research-access-card" role="status">
   <div className="access-card-top"><div className="access-card-icon"><LockKeyhole aria-hidden="true" size={24}/></div><span className="access-card-eyebrow">{t('accessCard.eyebrow')}</span></div>
   <h2>{t('locked')}</h2><p className="access-card-description">{t('accessCard.description')}</p>
+  {proHighlights&&<ul className="access-card-highlights">{proHighlights.map(([Icon,item])=><li key={item}><Icon size={15} aria-hidden="true"/><span>{item}</span></li>)}</ul>}
   {label&&<div className="access-card-tier"><span>{t('accessCard.minimum')}</span><strong>{label}</strong></div>}
   <div className="access-card-actions"><Link href="/early-access" className="button button-primary">{t('access')}<ArrowUpRight size={16} aria-hidden="true"/></Link><Link href="/app/portfolio" className="access-card-secondary">{t('accessCard.portfolio')}</Link></div>
   <p className="access-card-footnote">{t('accessCard.preview')}</p>

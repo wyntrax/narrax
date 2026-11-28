@@ -91,3 +91,13 @@ it('renders thesis regime drift strip, baseline price delta, and briefing triage
   expect(screen.getByText(/\+50% margin/)).toBeVisible();
   expect(screen.getByText(/-20% shortfall/)).toBeVisible();
 });
+it('renders upfront strategy blueprint cards and KPI strip on empty states and launches directly', () => {
+  const c = proCopy.en;
+  view('RADAR', 'en');
+  expect(screen.getByText(c.kpiActive)).toBeVisible();
+  expect(screen.getByRole('heading', { name: c.blueprintsTitle })).toBeVisible();
+  // Clicking a blueprint card directly on the empty landing state opens the pre-filled 10-factor builder
+  fireEvent.click(screen.getByRole('button', { name: c.radarBlueprints.whaleFlow.label }));
+  expect(screen.getByLabelText(c.name)).toHaveValue(c.radarBlueprints.whaleFlow.name);
+  expect(screen.getByLabelText(c.netFlowSol)).toHaveValue(8);
+});
