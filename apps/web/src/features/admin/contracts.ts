@@ -36,6 +36,7 @@ const SecretStatus=z.object({configured:z.boolean(),source:SettingSource});
 export const IntegrationsSchema=z.object({
   telegram:z.object({enabled:SourcedFlag,chatId:SourcedText,botToken:SecretStatus,maxAgeMin:SourcedCount,maxPerRun:SourcedCount,sendDelayMs:SourcedCount}),
   treg:z.object({enabled:SourcedFlag,token:SecretStatus,org:SourcedText}),
+  wyntrax:z.object({enabled:SourcedFlag,apiUrl:SourcedText,apiKey:SecretStatus,creatorId:SourcedText}).optional(),
   invalid:z.array(z.string()),
 });
 export type Integrations=z.infer<typeof IntegrationsSchema>;

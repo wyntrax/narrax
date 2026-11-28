@@ -13,6 +13,7 @@ import {
 } from '@narra/shared';
 import { TelegramBotApiTransport, type TelegramSendResult } from '@narra/worker-pipeline';
 import { makeRequireAdmin, type AccountDeps } from './account';
+import { invalidateWyntraxCheckConfig } from './entitlements/wyntraxCheck';
 
 const Reason = z.string().min(1).max(1_000);
 const TestBody = z.object({
@@ -75,6 +76,12 @@ export function registerIntegrationRoutes(app: FastifyInstance, deps: Integratio
         token: { configured: !!effective.treg.token.value, source: effective.treg.token.source },
         org: { value: effective.treg.org.value || null, source: effective.treg.org.source },
       },
+      wyntrax: {
+        enabled: effective.wyntrax.enabled,
+        apiUrl: { value: effective.wyntrax.apiUrl.value || null, source: effective.wyntrax.apiUrl.source },
+        apiKey: { configured: !!effective.wyntrax.apiKey.value, source: effective.wyntrax.apiKey.source },
+        creatorId: { value: effective.wyntrax.creatorId.value || null, source: effective.wyntrax.creatorId.source },
+      },
       invalid: effective.invalid,
     };
   }
@@ -101,6 +108,10 @@ export function registerIntegrationRoutes(app: FastifyInstance, deps: Integratio
       const token = settings['integrations.treg.token'] ?? effective.treg.token.value;
       if (!token) return bad(reply, 'TREG_TOKEN_REQUIRED');
     }
+    if (settings['integrations.wyntrax.enabled'] === true) {
+      const apiKey = settings['integrations.wyntrax.api_key'] ?? effective.wyntrax.apiKey.value;
+      if (!apiKey) return bad(reply, 'WYNTRAX_KEY_REQUIRED');
+    }
 
     const writes: Prisma.PrismaPromise<unknown>[] = [];
     for (const [key, value] of Object.entries(settings) as [IntegrationSettingKey, unknown][]) {
@@ -118,6 +129,9 @@ export function registerIntegrationRoutes(app: FastifyInstance, deps: Integratio
       }));
     }
     await db.$transaction(writes);
+    if (Object.keys(settings).some((k) => k.startsWith('integrations.wyntrax.'))) {
+      invalidateWyntraxCheckConfig();
+    }
     return view();
   });
 

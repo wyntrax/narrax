@@ -5,10 +5,19 @@ import { parseCorsOrigins } from './http';
 export const RUNTIME_CACHE_MS = 20_000;
 export const AUTH_SETTING_KEYS = ['auth.privy_app_id', 'auth.privy_verification_key'];
 type Db = Pick<PrismaClient, 'systemSetting'>;
-type Env = Partial<Pick<NodeJS.ProcessEnv, 'PRIVY_APP_ID' | 'PRIVY_VERIFICATION_KEY' | 'CORS_ORIGINS'>>;
+type Env = Partial<Pick<NodeJS.ProcessEnv, 'PRIVY_APP_ID' | 'PRIVY_VERIFICATION_KEY' | 'CORS_ORIGINS' | 'WYNTRAX_ENABLED' | 'WYNTRAX_API_URL' | 'WYNTRAX_API_KEY' | 'WYNTRAX_CREATOR_ID'>>;
 const versions = new WeakMap<object, number>();
 export function invalidateRuntimeSettings(db: Db) { versions.set(db, (versions.get(db) ?? 0) + 1); }
 const sourced = <T>(value: T, database: boolean) => ({ value, source: database ? 'database' as const : 'environment' as const });
+
+export function readWyntraxEnv(env: Env = process.env): Record<string, string | undefined> {
+  return {
+    WYNTRAX_ENABLED: env.WYNTRAX_ENABLED,
+    WYNTRAX_API_URL: env.WYNTRAX_API_URL,
+    WYNTRAX_API_KEY: env.WYNTRAX_API_KEY,
+    WYNTRAX_CREATOR_ID: env.WYNTRAX_CREATOR_ID,
+  };
+}
 
 export async function readRuntimeSettings(db: Db, env: Env = process.env) {
   const rows = await db.systemSetting.findMany({ where: { key: { in: Object.keys(RUNTIME_SETTING_SCHEMAS) } } });
