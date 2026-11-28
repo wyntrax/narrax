@@ -9,21 +9,29 @@ import type {AdminApi} from './api';
 import type {Integrations} from './contracts';
 import './integrations-card.css';
 
-type Form={telegramEnabled:boolean;chatId:string;botToken:string;maxAgeMin:string;maxPerRun:string;sendDelayMs:string;tregEnabled:boolean;tregToken:string;tregOrg:string};
+type Form={telegramEnabled:boolean;chatId:string;botToken:string;maxAgeMin:string;maxPerRun:string;sendDelayMs:string;tregEnabled:boolean;tregToken:string;tregOrg:string;wyntraxEnabled:boolean;wyntraxApiUrl:string;wyntraxApiKey:string;wyntraxCreatorId:string};
 
+const DEFAULT_WYNTRAX={enabled:{value:false,source:'default' as const},apiUrl:{value:'https://wyntrax.xyz',source:'default' as const},apiKey:{configured:false,source:'default' as const},creatorId:{value:null,source:'default' as const}};
 const text=(value:string|null)=>value??'';
 const number=(value:number)=>String(value);
-const fromView=(view:Integrations):Form=>({
-  telegramEnabled:view.telegram.enabled.value,
-  chatId:text(view.telegram.chatId.value),
-  botToken:'',
-  maxAgeMin:number(view.telegram.maxAgeMin.value),
-  maxPerRun:number(view.telegram.maxPerRun.value),
-  sendDelayMs:number(view.telegram.sendDelayMs.value),
-  tregEnabled:view.treg.enabled.value,
-  tregToken:'',
-  tregOrg:text(view.treg.org.value),
-});
+const fromView=(view:Integrations):Form=>{
+  const wx=view.wyntrax??DEFAULT_WYNTRAX;
+  return {
+    telegramEnabled:view.telegram.enabled.value,
+    chatId:text(view.telegram.chatId.value),
+    botToken:'',
+    maxAgeMin:number(view.telegram.maxAgeMin.value),
+    maxPerRun:number(view.telegram.maxPerRun.value),
+    sendDelayMs:number(view.telegram.sendDelayMs.value),
+    tregEnabled:view.treg.enabled.value,
+    tregToken:'',
+    tregOrg:text(view.treg.org.value),
+    wyntraxEnabled:wx.enabled.value,
+    wyntraxApiUrl:text(wx.apiUrl.value),
+    wyntraxApiKey:'',
+    wyntraxCreatorId:text(wx.creatorId.value),
+  };
+};
 const digits=(value:string)=>value.trim()&&/^\d+$/.test(value.trim())?Number(value.trim()):NaN;
 
 export function IntegrationsCard({api,queryKey}:{api:AdminApi;queryKey:readonly unknown[]}) {
@@ -50,6 +58,11 @@ export function IntegrationsForm({api,initial}:{api:AdminApi;initial:Integration
     if(form.tregEnabled!==baseline.treg.enabled.value)payload['integrations.treg.enabled']=form.tregEnabled;
     if(form.tregToken.trim())payload['integrations.treg.token']=form.tregToken.trim();
     if(form.tregOrg.trim()!==text(baseline.treg.org.value))payload['integrations.treg.org']=form.tregOrg.trim();
+    const wx=baseline.wyntrax??DEFAULT_WYNTRAX;
+    if(form.wyntraxEnabled!==wx.enabled.value)payload['integrations.wyntrax.enabled']=form.wyntraxEnabled;
+    if(form.wyntraxApiUrl.trim()!==text(wx.apiUrl.value))payload['integrations.wyntrax.api_url']=form.wyntraxApiUrl.trim();
+    if(form.wyntraxApiKey.trim())payload['integrations.wyntrax.api_key']=form.wyntraxApiKey.trim();
+    if(form.wyntraxCreatorId.trim()!==text(wx.creatorId.value))payload['integrations.wyntrax.creator_id']=form.wyntraxCreatorId.trim();
     return payload;
   };
   const payload=changedPayload();
@@ -65,6 +78,7 @@ export function IntegrationsForm({api,initial}:{api:AdminApi;initial:Integration
     if(code==='TELEGRAM_NOT_CONFIGURED')return t('notConfiguredError');
     if(code==='TELEGRAM_TEST_FAILED')return t('testFailed');
     if(code==='TREG_TOKEN_REQUIRED')return t('tregTokenRequired');
+    if(code==='WYNTRAX_KEY_REQUIRED')return t('wyntraxKeyRequired');
     if(code==='INVALID_INPUT')return t('invalid');
     if(code==='UNAUTHORIZED'||code==='FORBIDDEN')return t('unauthorized');
     if(code==='RATE_LIMITED')return t('rateLimited');
@@ -86,6 +100,12 @@ export function IntegrationsForm({api,initial}:{api:AdminApi;initial:Integration
       <label className="admin-check"><input type="checkbox" checked={form.tregEnabled} onChange={event=>set('tregEnabled',event.target.checked)}/><span><b>{t('enabled')}</b><small>{t('tregEnabledHelp')}</small></span></label>
       <div className="admin-field"><label htmlFor="integration-treg-token">{t('tregToken')}</label><input id="integration-treg-token" type="password" autoComplete="off" spellCheck={false} maxLength={500} value={form.tregToken} placeholder={baseline.treg.token.configured?t('tokenSaved'):t('tokenMissing')} onChange={event=>set('tregToken',event.target.value)}/><small>{t('tregTokenHelp')} · {t('current')}: {baseline.treg.token.configured?t('configured'):t('notConfigured')} ({source(baseline.treg.token.source)})</small></div>
       <div className="admin-field"><label htmlFor="integration-treg-org">{t('tregOrg')}</label><input id="integration-treg-org" maxLength={200} value={form.tregOrg} onChange={event=>set('tregOrg',event.target.value.trim())}/><small>{t('tregOrgHelp')} · {t('source')}: {source(baseline.treg.org.source)}</small></div>
+    </fieldset>
+    <fieldset className="integrations-group"><legend><b>{t('wyntrax')}</b></legend><small>{t('wyntraxHelp')}</small>
+      <label className="admin-check"><input type="checkbox" checked={form.wyntraxEnabled} onChange={event=>set('wyntraxEnabled',event.target.checked)}/><span><b>{t('enabled')}</b><small>{t('wyntraxEnabledHelp')}</small></span></label>
+      <div className="admin-field"><label htmlFor="integration-wyntrax-url">{t('wyntraxApiUrl')}</label><input id="integration-wyntrax-url" maxLength={500} placeholder="https://wyntrax.xyz" value={form.wyntraxApiUrl} onChange={event=>set('wyntraxApiUrl',event.target.value.trim())}/><small>{t('wyntraxApiUrlHelp')} · {t('source')}: {source((baseline.wyntrax??DEFAULT_WYNTRAX).apiUrl.source)}</small></div>
+      <div className="admin-field"><label htmlFor="integration-wyntrax-key">{t('wyntraxApiKey')}</label><input id="integration-wyntrax-key" type="password" autoComplete="off" spellCheck={false} maxLength={300} value={form.wyntraxApiKey} placeholder={(baseline.wyntrax??DEFAULT_WYNTRAX).apiKey.configured?t('wyntraxKeySaved'):t('wyntraxKeyMissing')} onChange={event=>set('wyntraxApiKey',event.target.value)}/><small>{t('wyntraxApiKeyHelp')} · {t('current')}: {(baseline.wyntrax??DEFAULT_WYNTRAX).apiKey.configured?t('configured'):t('notConfigured')} ({source((baseline.wyntrax??DEFAULT_WYNTRAX).apiKey.source)})</small></div>
+      <div className="admin-field"><label htmlFor="integration-wyntrax-creator">{t('wyntraxCreatorId')}</label><input id="integration-wyntrax-creator" maxLength={128} placeholder="ck..." value={form.wyntraxCreatorId} onChange={event=>set('wyntraxCreatorId',event.target.value.trim())}/><small>{t('wyntraxCreatorIdHelp')} · {t('source')}: {source((baseline.wyntrax??DEFAULT_WYNTRAX).creatorId.source)}</small></div>
     </fieldset>
     <div className="admin-field"><label htmlFor="integration-reason">{t('reason')}</label><input id="integration-reason" maxLength={300} required value={reason} onChange={event=>{save.reset();setReason(event.target.value);}}/></div>
     <div className="admin-actions"><button type="submit" className="research-control admin-primary" disabled={!valid||save.isPending}>{t('save')}</button></div>

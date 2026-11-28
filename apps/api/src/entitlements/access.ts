@@ -3,7 +3,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ACCESS_TIERS, FEATURE_TIERS, INVESTIGATION_LIMITS, activeTier, entitlementId, resolveEntitlements, type AccessTier, type FeatureKey } from '@narra/shared';
 import { SETTING_SCHEMAS } from './settings';
 import { AccessError } from './common';
-import { syncUserWalletsFromCheckApi, wyntraxCheckConfigFromEnv } from './wyntraxCheck';
+import { resolveWyntraxCheckConfig, syncUserWalletsFromCheckApi } from './wyntraxCheck';
 // The one admin decision (environment allowlist, else the database flag). Entitlements only read it; they never grant it.
 import { decideIsAdmin } from '../adminAccess';
 
@@ -19,7 +19,7 @@ export async function accessSettings(db: PrismaClient) {
     overrides: values['entitlements.features'] as Record<string, { requiredTier?: AccessTier; min_entitlement_age_hours?: number }> };
 }
 export async function entitlementTrace(db: PrismaClient, userId: string, now: Date) {
-  const checkConfig = wyntraxCheckConfigFromEnv();
+  const checkConfig = await resolveWyntraxCheckConfig(db);
   if (checkConfig) {
     const preLinks = await db.linkedWallet.findMany({ where: { userId }, select: { chain: true, address: true } });
     if (preLinks.length) {

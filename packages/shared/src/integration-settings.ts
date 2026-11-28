@@ -13,6 +13,11 @@ export const TelegramChatId = z.string().trim().min(1).max(100).regex(/^(?:-?\d{
 export const TregToken = z.string().trim().min(1).max(500);
 // Empty clears the optional organisation header without falling back to an environment value.
 export const TregOrg = z.string().trim().max(200);
+export const WyntraxApiUrl = z.string().trim().max(500).refine(
+  v => v === '' || /^https:\/\/[^\s#]+$/i.test(v) || /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/[^\s#]*)?$/i.test(v)
+);
+export const WyntraxApiKey = z.string().trim().min(1).max(300);
+export const WyntraxCreatorId = z.string().trim().max(128);
 
 export const INTEGRATION_SETTING_SCHEMAS = {
   'integrations.telegram.enabled': z.boolean(),
@@ -25,13 +30,17 @@ export const INTEGRATION_SETTING_SCHEMAS = {
   'integrations.treg.enabled': z.boolean(),
   'integrations.treg.token': TregToken,
   'integrations.treg.org': TregOrg,
+  'integrations.wyntrax.enabled': z.boolean(),
+  'integrations.wyntrax.api_url': WyntraxApiUrl,
+  'integrations.wyntrax.api_key': WyntraxApiKey,
+  'integrations.wyntrax.creator_id': WyntraxCreatorId,
 } as const;
 
 export type IntegrationSettingKey = keyof typeof INTEGRATION_SETTING_SCHEMAS;
 export const INTEGRATION_SETTING_KEYS = Object.keys(INTEGRATION_SETTING_SCHEMAS) as IntegrationSettingKey[];
 
 /** Values that must never be returned to a browser or written to the audit log. */
-export const SECRET_INTEGRATION_KEYS = ['integrations.telegram.bot_token', 'integrations.treg.token'] as const satisfies readonly IntegrationSettingKey[];
+export const SECRET_INTEGRATION_KEYS = ['integrations.telegram.bot_token', 'integrations.treg.token', 'integrations.wyntrax.api_key'] as const satisfies readonly IntegrationSettingKey[];
 
 export const isSecretIntegrationKey = (key: string): key is (typeof SECRET_INTEGRATION_KEYS)[number] =>
   (SECRET_INTEGRATION_KEYS as readonly string[]).includes(key);
@@ -58,9 +67,17 @@ export interface TregIntegrationSettings {
   org: Sourced<string>;
 }
 
+export interface WyntraxIntegrationSettings {
+  enabled: Sourced<boolean>;
+  apiUrl: Sourced<string>;
+  apiKey: Sourced<string>;
+  creatorId: Sourced<string>;
+}
+
 export interface EffectiveIntegrations {
   telegram: TelegramIntegrationSettings;
   treg: TregIntegrationSettings;
+  wyntrax: WyntraxIntegrationSettings;
   /** Keys that are stored but no longer validate. They are ignored, never applied. */
   invalid: string[];
 }
@@ -129,6 +146,20 @@ export function effectiveIntegrations(rows: readonly IntegrationRow[], env: Reco
       ? sourced(envText(env.TREG_NARRATIVE_ENABLED) === 'true', 'environment')
       : sourced(false, 'default');
 
+  const storedWyntraxEnabled = get('integrations.wyntrax.enabled');
+  const wyntraxEnabled = storedWyntraxEnabled !== undefined
+    ? sourced(storedWyntraxEnabled as boolean, 'database')
+    : envText(env.WYNTRAX_API_KEY) !== ''
+      ? sourced(true, 'environment')
+      : sourced(false, 'default');
+
+  const storedWyntraxUrl = get('integrations.wyntrax.api_url') as string | undefined;
+  const wyntraxApiUrl = storedWyntraxUrl !== undefined && storedWyntraxUrl !== ''
+    ? sourced(storedWyntraxUrl, 'database')
+    : envText(env.WYNTRAX_API_URL) !== ''
+      ? sourced(envText(env.WYNTRAX_API_URL), 'environment')
+      : sourced('https://wyntrax.xyz', 'default');
+
   return {
     telegram: {
       enabled: telegramEnabled,
@@ -142,6 +173,12 @@ export function effectiveIntegrations(rows: readonly IntegrationRow[], env: Reco
       enabled: tregEnabled,
       token: pickText('integrations.treg.token', env.TREG_TOKEN ?? ''),
       org: pickText('integrations.treg.org', env.TREG_ORG ?? ''),
+    },
+    wyntrax: {
+      enabled: wyntraxEnabled,
+      apiUrl: wyntraxApiUrl,
+      apiKey: pickText('integrations.wyntrax.api_key', env.WYNTRAX_API_KEY ?? ''),
+      creatorId: pickText('integrations.wyntrax.creator_id', env.WYNTRAX_CREATOR_ID ?? ''),
     },
     invalid: [...invalid],
   };

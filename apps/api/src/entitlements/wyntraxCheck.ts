@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@narra/database';
+import { effectiveIntegrations } from '@narra/shared';
 import { z } from 'zod';
 import { AccessError, lock, TX_OPTIONS } from './common';
 
@@ -49,6 +50,50 @@ export function wyntraxCheckConfigFromEnv(
   const apiUrl = (env.WYNTRAX_API_URL?.trim() || 'https://wyntrax.xyz').replace(/\/+$/, '');
   const creatorId = env.WYNTRAX_CREATOR_ID?.trim() || undefined;
   return { apiUrl, apiKey, creatorId };
+}
+
+const WYNTRAX_SETTING_KEYS = [
+  'integrations.wyntrax.enabled',
+  'integrations.wyntrax.api_url',
+  'integrations.wyntrax.api_key',
+  'integrations.wyntrax.creator_id',
+] as const;
+
+const CONFIG_CACHE_MS = 15_000;
+let configCache: { value: WyntraxCheckConfig | null; until: number } | undefined;
+
+export function invalidateWyntraxCheckConfig() {
+  configCache = undefined;
+  cache.clear();
+}
+
+/**
+ * Resolves Wyntrax Check API credentials from DB SystemSetting (Admin -> Integrations)
+ * with environment fallback, cached for 15s and invalidated immediately on admin save.
+ */
+export async function resolveWyntraxCheckConfig(
+  db: Pick<PrismaClient, 'systemSetting'>,
+  env: Record<string, string | undefined> = process.env,
+  nowMs = Date.now()
+): Promise<WyntraxCheckConfig | null> {
+  if (configCache && nowMs < configCache.until) {
+    return configCache.value;
+  }
+  const rows = await db.systemSetting.findMany({
+    where: { key: { in: [...WYNTRAX_SETTING_KEYS] } },
+    select: { key: true, value: true },
+  });
+  const effective = effectiveIntegrations(rows, env).wyntrax;
+  const value: WyntraxCheckConfig | null =
+    effective.enabled.value && effective.apiKey.value
+      ? {
+          apiUrl: (effective.apiUrl.value || 'https://wyntrax.xyz').replace(/\/+$/, ''),
+          apiKey: effective.apiKey.value,
+          creatorId: effective.creatorId.value || undefined,
+        }
+      : null;
+  configCache = { value, until: nowMs + CONFIG_CACHE_MS };
+  return value;
 }
 
 interface CacheEntry {
