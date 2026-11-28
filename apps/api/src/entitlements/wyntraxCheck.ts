@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@narra/database';
 import { effectiveIntegrations } from '@narra/shared';
 import { z } from 'zod';
+import { readWyntraxEnv } from '../runtime-settings';
 import { AccessError, lock, TX_OPTIONS } from './common';
 
 export const CHECK_CACHE_MAX_TTL_MS = 30_000;
@@ -43,7 +44,7 @@ export interface WyntraxCheckConfig {
 }
 
 export function wyntraxCheckConfigFromEnv(
-  env: Record<string, string | undefined> = process.env
+  env: Record<string, string | undefined> = readWyntraxEnv()
 ): WyntraxCheckConfig | null {
   const apiKey = env.WYNTRAX_API_KEY?.trim();
   if (!apiKey) return null;
@@ -60,10 +61,10 @@ const WYNTRAX_SETTING_KEYS = [
 ] as const;
 
 const CONFIG_CACHE_MS = 15_000;
-let configCache: { value: WyntraxCheckConfig | null; until: number } | undefined;
+let configCache = new WeakMap<object, { value: WyntraxCheckConfig | null; until: number }>();
 
 export function invalidateWyntraxCheckConfig() {
-  configCache = undefined;
+  configCache = new WeakMap();
   cache.clear();
 }
 
@@ -73,11 +74,12 @@ export function invalidateWyntraxCheckConfig() {
  */
 export async function resolveWyntraxCheckConfig(
   db: Pick<PrismaClient, 'systemSetting'>,
-  env: Record<string, string | undefined> = process.env,
+  env: Record<string, string | undefined> = readWyntraxEnv(),
   nowMs = Date.now()
 ): Promise<WyntraxCheckConfig | null> {
-  if (configCache && nowMs < configCache.until) {
-    return configCache.value;
+  const cached = configCache.get(db);
+  if (cached && nowMs < cached.until) {
+    return cached.value;
   }
   const rows = await db.systemSetting.findMany({
     where: { key: { in: [...WYNTRAX_SETTING_KEYS] } },
@@ -92,7 +94,7 @@ export async function resolveWyntraxCheckConfig(
           creatorId: effective.creatorId.value || undefined,
         }
       : null;
-  configCache = { value, until: nowMs + CONFIG_CACHE_MS };
+  configCache.set(db, { value, until: nowMs + CONFIG_CACHE_MS });
   return value;
 }
 

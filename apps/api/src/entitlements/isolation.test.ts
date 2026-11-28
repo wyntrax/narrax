@@ -22,9 +22,15 @@ describe('entitlement non-escalation structural boundary', () => {
       // The route module may read stored, mint-bound token artwork; that helper issues no provider request and writes nothing.
       const relative = file.replace(/\\/g, '/');
       const allowed = relative.endsWith('/settings.ts') ? ['../privy-key', '../runtime-settings']
+        : relative.endsWith('/wyntraxCheck.ts') ? ['../runtime-settings']
         : relative.endsWith('/entitlements/routes.ts') ? ['../account', '../adminAccess', '../marketEvidence']
         : ['../account', '../adminAccess'];
       for (const match of text.matchAll(/from ['"](\.\.[^'"]+)['"]/g)) expect(allowed, file).toContain(match[1]);
+      if (relative.endsWith('/wyntraxCheck.ts')) {
+        for (const match of text.matchAll(/import\s*\{([^}]+)\}\s*from\s*['"]\.\.\/runtime-settings['"]/g)) {
+          expect(match[1]!.split(',').map(name => name.trim()).sort(), file).toEqual(['readWyntraxEnv']);
+        }
+      }
       for (const match of text.matchAll(/import\s*\{([^}]+)\}\s*from\s*['"]\.\.\/marketEvidence['"]/g)) {
         expect(match[1]!.split(',').map(name => name.trim()).sort(), file).toEqual(['marketTokenImages']);
       }

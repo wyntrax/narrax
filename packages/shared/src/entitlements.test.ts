@@ -48,7 +48,8 @@ describe('pure entitlement resolution', () => {
     for (const g of [{ ...grant, status: 'REVOKED' }, { ...grant, validUntil: now }, { ...grant, tier: 'ELITE', source: 'ADMIN' }]) expect(resolveEntitlements({ ...snapshot(), grants: [g] }, now).effectiveTier).toBe('NONE');
     expect(resolveEntitlements({ ...snapshot(), earlyAccessEnabled: false }, now).effectiveTier).toBe('EARLY_ACCESS');
     expect(resolveEntitlements({ ...snapshot(), linkedWallets: [] }, now).effectiveTier).toBe('NONE');
-    for (const validUntil of [null, now, new Date('invalid')]) expect(resolveEntitlements({ ...snapshot(), grants: [], memberships: [{ ...membership(), validUntil }] }, now).effectiveTier).toBe('NONE');
+    for (const validUntil of [now, new Date('invalid')]) expect(resolveEntitlements({ ...snapshot(), grants: [], memberships: [{ ...membership(), validUntil }] }, now).effectiveTier).toBe('NONE');
+    expect(resolveEntitlements({ ...snapshot(), grants: [], memberships: [{ ...membership(), validUntil: null }] }, now)).toMatchObject({ effectiveTier: 'PRO', nextExpiry: null });
   });
   it('local disable does not revoke a paid source', () => {
     expect(resolveEntitlements({ ...snapshot(), earlyAccessEnabled: false, memberships: [membership()] }, now).effectiveTier).toBe('PRO');
@@ -60,7 +61,8 @@ describe('pure entitlement resolution', () => {
     expect(resolveEntitlements({...s,grants:[],memberships:[membership('EARLY_ACCESS','wrong')]},now).effectiveTier).toBe('NONE');
     expect(resolveEntitlements({...s,memberships:[{...membership('EARLY_ACCESS'),status:'REVOKED'}]},now).sources.map(x=>x.source)).toEqual(['EARLY_ACCESS']);
     expect(resolveEntitlements({...s,grants:[],memberships:[membership('EARLY_ACCESS'),{...membership('PRO'),membershipId:'pro'}]},now).effectiveTier).toBe('PRO');
-    for(const validUntil of [null,now,new Date('invalid')])expect(resolveEntitlements({...s,grants:[],memberships:[{...membership('EARLY_ACCESS'),validUntil}]},now).effectiveTier).toBe('NONE');
+    for(const validUntil of [now,new Date('invalid')])expect(resolveEntitlements({...s,grants:[],memberships:[{...membership('EARLY_ACCESS'),validUntil}]},now).effectiveTier).toBe('NONE');
+    expect(resolveEntitlements({...s,grants:[],memberships:[{...membership('EARLY_ACCESS'),validUntil:null}]},now)).toMatchObject({effectiveTier:'EARLY_ACCESS',nextExpiry:null});
   });
   it('independent memberships fall back ELITE to PRO to MEMBER without revoking a peer', () => {
     const s = snapshot(); s.memberships = ['MEMBER', 'PRO', 'ELITE'].map(key => ({ ...membership(key), membershipId: key }));
