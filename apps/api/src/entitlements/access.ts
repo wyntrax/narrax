@@ -3,6 +3,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { ACCESS_TIERS, FEATURE_TIERS, INVESTIGATION_LIMITS, activeTier, entitlementId, resolveEntitlements, type AccessTier, type FeatureKey } from '@narra/shared';
 import { SETTING_SCHEMAS } from './settings';
 import { AccessError } from './common';
+import { syncUserWalletsFromCheckApi, wyntraxCheckConfigFromEnv } from './wyntraxCheck';
 // The one admin decision (environment allowlist, else the database flag). Entitlements only read it; they never grant it.
 import { decideIsAdmin } from '../adminAccess';
 
@@ -18,6 +19,13 @@ export async function accessSettings(db: PrismaClient) {
     overrides: values['entitlements.features'] as Record<string, { requiredTier?: AccessTier; min_entitlement_age_hours?: number }> };
 }
 export async function entitlementTrace(db: PrismaClient, userId: string, now: Date) {
+  const checkConfig = wyntraxCheckConfigFromEnv();
+  if (checkConfig) {
+    const preLinks = await db.linkedWallet.findMany({ where: { userId }, select: { chain: true, address: true } });
+    if (preLinks.length) {
+      await syncUserWalletsFromCheckApi(db, preLinks, checkConfig, now);
+    }
+  }
   // Repeatable read prevents combining a link from before unlink with state from after reassignment.
   return db.$transaction(async tx => {
     const settings = await accessSettings(tx as PrismaClient);
@@ -33,7 +41,7 @@ export async function entitlementTrace(db: PrismaClient, userId: string, now: Da
       const hours = override?.min_entitlement_age_hours ?? 0;
       const rank = ACCESS_TIERS.indexOf(requiredTier);
       const aged = hours === 0 || memberships.some(m => {
-        if (m.status !== 'ACTIVE' || !['PRO', 'ELITE'].includes(m.key) || ACCESS_TIERS.indexOf(m.key as AccessTier) < rank || !m.validUntil || m.validUntil <= now) return false;
+        if (m.status !== 'ACTIVE' || !['PRO', 'ELITE'].includes(m.key) || ACCESS_TIERS.indexOf(m.key as AccessTier) < rank || (m.validUntil !== null && m.validUntil <= now)) return false;
         const since = m.proSince;
         return since && links.some(l => m.chain === l.chain && m.address === l.address && Math.max(+since, +l.verifiedAt) + hours * 3600000 <= +now);
       });
@@ -42,7 +50,7 @@ export async function entitlementTrace(db: PrismaClient, userId: string, now: Da
     })) as Record<FeatureKey, { requiredTier: AccessTier; min_entitlement_age_hours: number; allowed: boolean }>;
     return { ...resolved, features, rollout: { enforced: settings.enforced, shadow_log: settings.shadow }, links: links.map(({ id, chain, address, verifiedAt }) => ({ id, chain, address, verifiedAt })),
       grants: grants.map(g => ({ ...g, eligible: resolved.sources.some(s => s.id === g.id && s.source === g.source), reasonCode: g.status !== 'ACTIVE' ? g.status : g.validUntil && g.validUntil <= now ? 'EXPIRED' : !links.length ? 'WALLET_REQUIRED' : 'ACTIVE' })),
-      memberships: memberships.map(({ seq, ...m }) => ({ ...m, seq: seq.toString(), eligible: resolved.sources.some(s => s.source === 'WYNTRAX' && s.id === entitlementId(m)), reasonCode: m.status !== 'ACTIVE' ? m.status : !m.validUntil || m.validUntil <= now ? 'EXPIRED' : 'ACTIVE' })) };
+      memberships: memberships.map(({ seq, ...m }) => ({ ...m, seq: seq.toString(), eligible: resolved.sources.some(s => s.source === 'WYNTRAX' && s.id === entitlementId(m)), reasonCode: m.status !== 'ACTIVE' ? m.status : m.validUntil !== null && m.validUntil <= now ? 'EXPIRED' : 'ACTIVE' })) };
   }, { isolationLevel: 'RepeatableRead' });
 }
 export async function featureDecision(db: PrismaClient, userId: string, key: FeatureKey, now: Date, log?: (entry: object) => void) {

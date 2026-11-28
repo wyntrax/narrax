@@ -4,6 +4,7 @@ import { sanitizeUntrusted } from '@narra/shared';
 import { makeAuthenticate, makeRequireAdmin, type AccountDeps } from '../account';
 import { AccessError } from './common';
 import { accessSettings, entitlementTrace } from './access';
+import { syncUserWalletsFromCheckApi, wyntraxCheckConfigFromEnv } from './wyntraxCheck';
 import { localSettings, SETTING_SCHEMAS, tierRequirements, updateLocalSettings } from './settings';
 import { DEFAULT_TIER_REQUIREMENTS, DEFAULT_TOKEN_SYMBOL, FEATURE_TIERS, activeTier, earlyAccessClosed, type AccessTier } from '@narra/shared';
 import { grantEarlyAccess, revokeLocalGrant } from './grants';
@@ -75,7 +76,15 @@ export function registerEntitlementRoutes(app: FastifyInstance, deps: AccountDep
   });
   app.get('/v1/me/entitlements', opts(false, 60), handle(r => entitlementTrace(db, r.userId!, now())));
   // Best-effort request from the verified-wallet screen. It never blocks early access; the worker owns the check.
-  app.post('/v1/me/membership/refresh', opts(false, 5), handle(async r => { if (deps.requestMembershipSync) await deps.requestMembershipSync(r.userId!); return { ok: true }; }));
+  app.post('/v1/me/membership/refresh', opts(false, 5), handle(async r => {
+    const checkConfig = wyntraxCheckConfigFromEnv();
+    if (checkConfig) {
+      const links = await db.linkedWallet.findMany({ where: { userId: r.userId! }, select: { chain: true, address: true } });
+      if (links.length) await syncUserWalletsFromCheckApi(db, links, checkConfig, now(), { fresh: true });
+    }
+    if (deps.requestMembershipSync) await deps.requestMembershipSync(r.userId!);
+    return { ok: true };
+  }));
   app.post('/v1/me/early-access/join', opts(false, 5), handle(async r => { const result = await grantEarlyAccess(db, r.userId!, { tier: 'EARLY_ACCESS', validUntil: null, reason: 'Self join' }, null, now()); invalidatePublic(); return result; }));
   app.delete('/v1/me/early-access', opts(false, 5), handle(async r => {
     const grant = await db.accessGrant.findUnique({ where: { userId_source: { userId: r.userId!, source: 'EARLY_ACCESS' } } });
